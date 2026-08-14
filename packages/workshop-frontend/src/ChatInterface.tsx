@@ -6722,7 +6722,8 @@ function ChatInterface({
           </DropdownMenu.Content>
         </DropdownMenu>
       </div>
-      <div className="chat-panel relative min-h-0 flex-1 overflow-y-auto bg-kumo-base">
+      <div className="flex min-h-0 flex-1 flex-col bg-kumo-base">
+        <div className="chat-panel min-h-0 flex-1 overflow-y-auto">
         <div className="p-3">
         {!chatListReady ? (
           <div className="flex items-center justify-center py-10">
@@ -6882,7 +6883,8 @@ function ChatInterface({
           </div>
         )}
         </div>
-        <div className="sticky bottom-0 z-10 -mt-24">
+        </div>
+        <div className="relative z-10 -mt-24 shrink-0">
           <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
           <ChatInput
             key={workspaceId}
@@ -7050,10 +7052,11 @@ function ChatInterface({
               )}
 
               {/* Messages */}
+              <div className="flex min-h-0 flex-1 flex-col">
               <div
                 ref={messagesContainerRef}
                 onScroll={handleMessagesScroll}
-                className="relative min-h-0 flex-1 overflow-y-auto chat-panel"
+                className="chat-panel min-h-0 flex-1 overflow-y-auto"
               >
                 {isLoading ? (
                   <div className="flex items-center justify-center py-10">
@@ -7839,7 +7842,8 @@ function ChatInterface({
                     })()}
                   </div>
                 )}
-                <div className="sticky bottom-0 z-10 -mt-24">
+              </div>
+                <div className="relative z-10 -mt-24 shrink-0">
                   <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
                   <ChatInput
                     key={`${workspaceId}:${selectedChatId}`}
