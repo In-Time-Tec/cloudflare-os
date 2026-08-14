@@ -10,7 +10,6 @@ import {
   type ReactNode,
 } from 'react'
 import { Link } from '@tanstack/react-router'
-import { ArrowRight } from '@phosphor-icons/react'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import type { RpcStub } from 'capnweb'
 import {
@@ -255,7 +254,6 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
 
 export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: boolean }) {
   const {
-    search,
     favorites,
     recent,
     gadgetsLoading,
@@ -288,22 +286,16 @@ export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: bool
   }
 
   const recentShown = recent.slice(0, RECENT_INITIAL_LIMIT)
-  const recentHidden = Math.max(0, recent.length - RECENT_INITIAL_LIMIT)
 
   return (
     <div className="flex flex-col pb-3">
-      {/* Favorites */}
       <SidebarSection
         label="Favorites"
         count={favorites.length}
         open={favOpen}
         onToggle={() => setFavOpen((o) => !o)}
       >
-        {favorites.length === 0 ? (
-          <p className="px-2.5 py-1.5 text-[12px] leading-4 tracking-[-0.2px] text-kumo-inactive">
-            Favorite a workspace to keep it here.
-          </p>
-        ) : (
+        {favorites.length > 0 && (
           <div className="flex flex-col">
             {favorites.map((g) => (
               <SidebarGadgetRow
@@ -331,11 +323,7 @@ export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: bool
               <div key={i} className="h-7 rounded-md bg-kumo-elevated animate-pulse" />
             ))}
           </div>
-        ) : recent.length === 0 ? (
-          <p className="px-2.5 py-1.5 text-[12px] leading-4 tracking-[-0.2px] text-kumo-inactive">
-            {search ? 'No matches.' : 'No workspaces yet.'}
-          </p>
-        ) : (
+        ) : recent.length > 0 ? (
           <>
             <div className="flex flex-col">
               {recentShown.map((g) => (
@@ -351,13 +339,12 @@ export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: bool
             </div>
             <Link
               to="/workspaces"
-              className="mt-0.5 flex h-7 items-center gap-1 rounded-md px-2.5 text-[12px] font-medium tracking-[-0.2px] text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-default"
+              className="mt-0.5 flex h-7 items-center px-2.5 text-[12px] tracking-[-0.2px] text-kumo-inactive transition-colors hover:text-kumo-default"
             >
-              {recentHidden > 0 ? `Show all (${recent.length})` : 'Show all'}
-              <ArrowRight size={11} weight="bold" />
+              Show all
             </Link>
           </>
-        )}
+        ) : null}
       </SidebarSection>
     </div>
   )
@@ -389,7 +376,7 @@ function SidebarSection({
         <span className="h-px min-w-2 flex-1 bg-kumo-line" aria-hidden="true" />
         {count !== undefined && <span className="shrink-0 tabular-nums">{count}</span>}
       </button>
-      {open && <div className="mt-0.5">{children}</div>}
+      {open && children ? <div className="mt-0.5">{children}</div> : null}
     </div>
   )
 }

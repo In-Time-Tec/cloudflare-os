@@ -49,7 +49,7 @@ export default function SidebarItem({
       title={collapsed ? label : undefined}
       className={[
         'group relative flex h-8 items-center rounded-lg text-[13px] leading-[18px] tracking-[-0.25px] transition-colors',
-        collapsed ? 'justify-center' : 'gap-1 px-2.5',
+        collapsed ? 'justify-center' : 'gap-1.5 px-2.5',
         isActive
           ? 'bg-kumo-fill font-medium text-kumo-strong'
           : 'font-normal text-kumo-default hover:bg-kumo-tint',

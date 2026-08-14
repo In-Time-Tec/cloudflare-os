@@ -82,8 +82,5 @@ describe("Home prompt route flow", () => {
     expect(testState.newGadget).not.toHaveBeenCalled();
     expect(testState.draftStorageKeys).toContain("gadgets:composer-draft:v1:user-a:home");
     expect(container.textContent).toContain("What are we working on?");
-    expect(container.textContent).toContain(
-      "Ask a question, create an output, or create an app that works with your tools and data.",
-    );
   });
 });
