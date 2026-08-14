@@ -15,6 +15,10 @@ import {
   MagnifyingGlass,
   DotsThreeVertical,
 } from '@phosphor-icons/react'
+import anthropicLogo from '@lobehub/icons-static-svg/icons/anthropic.svg'
+import geminiLogo from '@lobehub/icons-static-svg/icons/gemini-color.svg'
+import kimiLogo from '@lobehub/icons-static-svg/icons/kimi.svg'
+import openAiLogo from '@lobehub/icons-static-svg/icons/openai.svg'
 import AddModelModal from '../AddModelModal'
 import { useDocumentTitle } from '../useDocumentTitle'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from '../components/menuStyles'
@@ -28,20 +32,45 @@ const PROVIDER_ORDER = Object.keys(SUGGESTED_MODELS) as AiModelProvider[]
 const PRIMARY_BTN =
   'press inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-kumo-brand px-3.5 text-[13px] font-medium tracking-[-0.25px] text-white transition-colors hover:bg-kumo-brand-hover'
 
+const MODEL_PROVIDER_LOGOS = [
+  { prefix: 'openai/', src: openAiLogo, monochrome: true },
+  { prefix: 'anthropic/', src: anthropicLogo, monochrome: true },
+  { prefix: 'google/', src: geminiLogo, monochrome: false },
+  { prefix: 'moonshotai/', src: kimiLogo, monochrome: true },
+] as const
+
 // ─── model row ─────────────────────────────────────────────────────────────────
+
+function ModelLogo({ model }: { model: AiChatAuthorInfo }) {
+  const logo = MODEL_PROVIDER_LOGOS.find(({ prefix }) => model.id.startsWith(prefix))
+
+  return (
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-kumo-fill text-[12px] font-medium text-kumo-subtle">
+      {logo ? (
+        <img
+          src={logo.src}
+          alt=""
+          className={`h-5 w-5 object-contain ${logo.monochrome ? 'dark:invert' : ''}`}
+        />
+      ) : (
+        model.name[0]?.toUpperCase()
+      )}
+    </div>
+  )
+}
 
 // Rows mirror the Blueprints list. User-managed modes make the row a quick-model control and add a
 // kebab menu; locked deployment-managed models are informational only.
 function ModelRow({
   model,
   isQuick,
-  isBuiltIn,
+  isManaged,
   onDelete,
   onSetQuick,
 }: {
   model: AiChatAuthorInfo
   isQuick: boolean
-  isBuiltIn: boolean
+  isManaged: boolean
   onDelete: () => void
   onSetQuick?: () => void
 }) {
@@ -63,10 +92,7 @@ function ModelRow({
         onSetQuick ? 'cursor-pointer' : ''
       }`}
     >
-      {/* Neutral monogram — matches the sidebar/workspaces treatment */}
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-kumo-fill text-[12px] font-medium text-kumo-subtle">
-        {model.name[0]?.toUpperCase()}
-      </div>
+      <ModelLogo model={model} />
 
       {/* Info */}
       <div className="min-w-0 flex-1">
@@ -74,11 +100,6 @@ function ModelRow({
           <span className="truncate text-sm font-medium tracking-[-0.25px] text-kumo-default">
             {model.name}
           </span>
-          {isBuiltIn && (
-            <span className="shrink-0 rounded-full bg-kumo-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.4px] text-kumo-subtle">
-              built-in
-            </span>
-          )}
           {isQuick && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[rgba(255,72,1,0.10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.4px] text-kumo-brand">
               <Lightning size={9} weight="fill" />
@@ -92,7 +113,7 @@ function ModelRow({
       </div>
 
       {/* Actions */}
-      {(onSetQuick || !isBuiltIn) && <div onClick={(e) => { e.stopPropagation() }}>
+      {(onSetQuick || !isManaged) && <div onClick={(e) => { e.stopPropagation() }}>
         <DropdownMenu>
           <DropdownMenu.Trigger
             render={
@@ -111,7 +132,7 @@ function ModelRow({
                 {isQuick ? 'Clear quick model' : 'Set as quick model'}
               </DropdownMenu.Item>
             )}
-            {!isBuiltIn && (
+            {!isManaged && (
               <DropdownMenu.Item variant="danger" onClick={onDelete} className={MENU_ITEM_DANGER}>
                 <Trash size={13} className="mr-2" />
                 Delete provider
@@ -175,7 +196,7 @@ function ProvidersPage() {
   const canAddModels = aiConfig?.enabled !== true || aiConfig.allowsUserModels
   const lockedManagedAi = gatewayMode && !aiConfig.allowsUserModels
 
-  const isBuiltIn = (modelId: string): boolean => {
+  const isManaged = (modelId: string): boolean => {
     if (!aiConfig?.enabled) return false
     const enabled = new Set((aiConfig as Extract<AiGatewayInfo, { enabled: true }>).enabledProviders)
     return PROVIDER_ORDER.some((p) => enabled.has(p) && modelId in SUGGESTED_MODELS[p])
@@ -257,18 +278,9 @@ function ProvidersPage() {
 
       <div className="chat-panel flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pt-1 pb-16">
         {/* Notices */}
-        {(gatewayMode || (!gatewayMode && models.length > 0)) && !loading && !loadError && (
+        {((gatewayMode && !lockedManagedAi) || (!gatewayMode && models.length > 0)) &&
+          !loading && !loadError && (
           <div className="flex flex-col gap-2.5 px-3 pb-2">
-            {lockedManagedAi && (
-              <Notice>
-                <Lightning size={15} className="mt-px shrink-0 text-kumo-brand" />
-                <span>
-                  <strong className="font-medium text-kumo-default">Managed AI:</strong> built-in
-                  OpenRouter models are funded by your deployment and available to everyone.
-                </span>
-              </Notice>
-            )}
-
             {gatewayMode && !lockedManagedAi && (
               <Notice>
                 <Lightning size={15} className="mt-px shrink-0 text-kumo-brand" />
@@ -338,7 +350,7 @@ function ProvidersPage() {
               <ModelRow
                 model={model}
                 isQuick={quickModel === model.id}
-                isBuiltIn={isBuiltIn(model.id)}
+                isManaged={isManaged(model.id)}
                 onDelete={() => handleDelete(model)}
                 onSetQuick={canAddModels ? () => handleSetQuick(model.id) : undefined}
               />
