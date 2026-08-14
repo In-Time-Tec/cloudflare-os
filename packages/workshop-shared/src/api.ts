@@ -1130,12 +1130,18 @@ export type CloudflareAccountOption = {
 };
 
 /** Supported AI providers. */
-export type AiModelProvider = "openai" | "anthropic" | "google" | "cloudflare" | "ollama";
+export type AiModelProvider =
+  "openrouter" | "openai" | "anthropic" | "google" | "cloudflare" | "ollama";
 
-/** Information about the AI gateway configuration. Returned by `AuthenticatedApi.getAiConfig()`. */
+/**
+ * Information about deployment-managed AI configuration. Returned by
+ * `AuthenticatedApi.getAiConfig()`. The historical name is retained for RPC compatibility.
+ */
 export type AiGatewayInfo = {
   enabled: true;
   enabledProviders: AiModelProvider[];
+  /** Whether users may persist models in addition to the deployment-managed catalog. */
+  allowsUserModels: boolean;
 } | {
   enabled: false;
 };
@@ -1180,6 +1186,33 @@ export const SUGGESTED_MODELS: Record<
   AiModelProvider,
   Record<string, {name: string, contextWindow: number, outputLimit?: number}>
 > = {
+  "openrouter": {
+    // Keep Luna first: deployment-managed model lists preserve this order, making it the default
+    // when a user has not chosen another model. These models all advertise image input and tool
+    // calling in OpenRouter's catalog; specialized, batch, and tool-less entries stay out of
+    // managed deployments.
+    "openai/gpt-5.6-luna": {
+      name: "GPT 5.6 Luna", contextWindow: 1050000, outputLimit: 128000,
+    },
+    "openai/gpt-5.6-sol": {
+      name: "GPT 5.6 Sol", contextWindow: 1050000, outputLimit: 128000,
+    },
+    "openai/gpt-5.6-terra": {
+      name: "GPT 5.6 Terra", contextWindow: 1050000, outputLimit: 128000,
+    },
+    "anthropic/claude-sonnet-5": {
+      name: "Claude Sonnet 5", contextWindow: 1000000, outputLimit: 128000,
+    },
+    "anthropic/claude-opus-5": {
+      name: "Claude Opus 5", contextWindow: 1000000, outputLimit: 128000,
+    },
+    "google/gemini-3.6-flash": {
+      name: "Gemini 3.6 Flash", contextWindow: 1048576, outputLimit: 65536,
+    },
+    "moonshotai/kimi-k2.7-code": {
+      name: "Kimi K2.7 Code", contextWindow: 262144, outputLimit: 32768,
+    },
+  },
   "cloudflare": {
     "@cf/moonshotai/kimi-k2.7-code": {
       name: "Kimi K2.7 Code (Workers AI)", contextWindow: 262144,

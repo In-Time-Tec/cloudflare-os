@@ -18,7 +18,12 @@ describe("assertChatAttachmentSupportedByProvider", () => {
 
   it("applies provider raw-file policy", () => {
     // Text + images are universal; PDFs are additionally bridged to providers whose APIs take
-    // documents (see chat-attachment-pdf.ts), which Workers AI and Ollama do not.
+    // documents (see chat-attachment-pdf.ts), which OpenRouter chat completions, Workers AI, and
+    // Ollama do not.
+    expect(() => assertChatAttachmentSupportedByProvider("openrouter", "image/png", 1))
+      .not.toThrow();
+    expect(() => assertChatAttachmentSupportedByProvider("openrouter", "application/pdf", 1))
+      .toThrow("Unsupported file type");
     expect(() => assertChatAttachmentSupportedByProvider("anthropic", "text/plain", 1)).not.toThrow();
     expect(() => assertChatAttachmentSupportedByProvider("anthropic", "application/pdf", 1))
       .not.toThrow();

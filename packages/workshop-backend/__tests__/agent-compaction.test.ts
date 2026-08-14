@@ -101,6 +101,10 @@ describe("compaction trigger", () => {
       provider: "cloudflare", model: "@cf/moonshotai/kimi-k2.7-code", apiToken: "",
     })).toEqual({inputBudget: 229_376, maxOutputTokens: 32_768});
 
+    expect(getModelTokenLimits({
+      provider: "openrouter", model: "openai/gpt-5.6-luna", apiToken: "",
+    })).toEqual({inputBudget: 922_000, maxOutputTokens: 128_000});
+
     // Anthropic publishes an input-only window, so withholding anything would waste it.
     expect(getModelTokenLimits({
       provider: "anthropic", model: "claude-opus-5", apiToken: "",

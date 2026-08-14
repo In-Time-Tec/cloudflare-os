@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import type { Context } from "@earendil-works/pi-ai";
 import type { AiChatAuthorInfo, AiModelConfig } from "@gadgets/workshop-shared/api";
 import { getModel, type ModelHandle } from "../src/ai-models.js";
 
@@ -32,6 +33,12 @@ const WORKERS_AI_CONFIG: AiModelConfig = {
   apiToken: "ignored-in-gateway-mode",
 };
 
+const OPENROUTER_CONFIG: AiModelConfig = {
+  provider: "openrouter",
+  model: "openai/gpt-5.6-luna",
+  apiToken: "",
+};
+
 function env(overrides: Partial<Cloudflare.Env> = {}): Cloudflare.Env {
   return {
     CF_AI_GATEWAY: "platform-gateway",
@@ -55,15 +62,81 @@ const fetchStub = (async (input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch;
 
 // Runs one request through the handle with the fetch stub and returns what was sent.
-async function captureRequest(handle: ModelHandle): Promise<CapturedRequest> {
+async function captureRequest(
+    handle: ModelHandle, tools?: Context["tools"]): Promise<CapturedRequest> {
   const stream = await handle.stream(handle.model, {
     messages: [{ role: "user", content: "hello", timestamp: 0 }],
+    tools,
   }, { fetch: fetchStub, maxRetries: 0 });
   const message = await stream.result();
   expect(message.stopReason).toBe("error");
   expect(capturedRequests.length).toBeGreaterThan(0);
   return capturedRequests[0];
 }
+
+describe("getModel deployment-managed OpenRouter routing", () => {
+  beforeEach(() => {
+    capturedRequests.length = 0;
+  });
+
+  it("uses the backend-only credential and OpenRouter chat-completions API", async () => {
+    const handle = getModel(env({
+      CF_AI_GATEWAY: undefined,
+      DEPLOYMENT_AI_PROVIDERS: "openrouter",
+      DEPLOYMENT_AI_DEFAULT_MODEL: "openai/gpt-5.6-luna",
+      OPENROUTER_API_TOKEN: "managed-openrouter-token",
+    }), OPENROUTER_CONFIG, INITIATOR, {
+      userGateway: { accountId: "user-account-id", apiKey: "user-token" },
+    });
+
+    expect(handle.model.api).toBe("openai-completions");
+    expect(handle.model.provider).toBe("openrouter");
+    expect(handle.model.baseUrl).toBe("https://openrouter.ai/api/v1");
+    expect(handle.model.contextWindow).toBe(1_050_000);
+    expect(handle.model.maxTokens).toBe(128_000);
+    expect(handle.aiGatewayLogRoute).toBeUndefined();
+
+    const request = await captureRequest(handle, [{
+      name: "readFile",
+      description: "Read a file",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    }]);
+    expect(request.url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(request.headers.get("authorization")).toBe("Bearer managed-openrouter-token");
+    expect(request.headers.get("cf-aig-authorization")).toBeNull();
+    expect(JSON.parse(request.body)).toEqual(expect.objectContaining({
+      model: "openai/gpt-5.6-luna",
+      reasoning: { effort: "medium" },
+      tools: [expect.objectContaining({
+        type: "function",
+        function: expect.objectContaining({ name: "readFile" }),
+      })],
+    }));
+  }, 15000);
+
+  it("rejects stale personal providers and models outside the managed catalog", () => {
+    const managedEnv = env({
+      CF_AI_GATEWAY: undefined,
+      DEPLOYMENT_AI_PROVIDERS: "openrouter",
+      OPENROUTER_API_TOKEN: "managed-openrouter-token",
+    });
+
+    expect(() => getModel(managedEnv, ANTHROPIC_CONFIG, INITIATOR))
+      .toThrow("Model \"claude-sonnet-4-5\" is not managed by this deployment.");
+    expect(() => getModel(managedEnv, {
+      provider: "openrouter",
+      model: "unlisted/custom-model",
+      apiToken: "personal-token",
+      apiUrl: "https://example.com/v1",
+    }, INITIATOR)).toThrow(
+        "Model \"unlisted/custom-model\" is not managed by this deployment.");
+  });
+});
 
 describe("getModel AI Gateway routing", () => {
   beforeEach(() => {

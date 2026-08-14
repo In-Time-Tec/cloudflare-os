@@ -30,8 +30,8 @@ const PRIMARY_BTN =
 
 // ─── model row ─────────────────────────────────────────────────────────────────
 
-// Rows mirror the Blueprints list: a clickable row (here, clicking sets/clears the quick model)
-// plus a kebab for the rest. The whole row is the primary affordance, so it shows a pointer.
+// Rows mirror the Blueprints list. User-managed modes make the row a quick-model control and add a
+// kebab menu; locked deployment-managed models are informational only.
 function ModelRow({
   model,
   isQuick,
@@ -43,21 +43,25 @@ function ModelRow({
   isQuick: boolean
   isBuiltIn: boolean
   onDelete: () => void
-  onSetQuick: () => void
+  onSetQuick?: () => void
 }) {
   return (
     <div
-      role="button"
-      tabIndex={0}
+      role={onSetQuick ? 'button' : undefined}
+      tabIndex={onSetQuick ? 0 : undefined}
       onClick={onSetQuick}
-      onKeyDown={(e) => {
+      onKeyDown={onSetQuick ? (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           onSetQuick()
         }
-      }}
-      title={isQuick ? 'Quick model. Click to clear' : 'Click to set as quick model'}
-      className="group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint"
+      } : undefined}
+      title={onSetQuick
+        ? (isQuick ? 'Quick model. Click to clear' : 'Click to set as quick model')
+        : undefined}
+      className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint ${
+        onSetQuick ? 'cursor-pointer' : ''
+      }`}
     >
       {/* Neutral monogram — matches the sidebar/workspaces treatment */}
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-kumo-fill text-[12px] font-medium text-kumo-subtle">
@@ -88,7 +92,7 @@ function ModelRow({
       </div>
 
       {/* Actions */}
-      <div onClick={(e) => { e.stopPropagation() }}>
+      {(onSetQuick || !isBuiltIn) && <div onClick={(e) => { e.stopPropagation() }}>
         <DropdownMenu>
           <DropdownMenu.Trigger
             render={
@@ -101,10 +105,12 @@ function ModelRow({
             }
           />
           <DropdownMenu.Content className={MENU_CONTENT}>
-            <DropdownMenu.Item onClick={onSetQuick} className={MENU_ITEM}>
-              <Lightning size={13} className="mr-2" weight={isQuick ? 'fill' : 'regular'} />
-              {isQuick ? 'Clear quick model' : 'Set as quick model'}
-            </DropdownMenu.Item>
+            {onSetQuick && (
+              <DropdownMenu.Item onClick={onSetQuick} className={MENU_ITEM}>
+                <Lightning size={13} className="mr-2" weight={isQuick ? 'fill' : 'regular'} />
+                {isQuick ? 'Clear quick model' : 'Set as quick model'}
+              </DropdownMenu.Item>
+            )}
             {!isBuiltIn && (
               <DropdownMenu.Item variant="danger" onClick={onDelete} className={MENU_ITEM_DANGER}>
                 <Trash size={13} className="mr-2" />
@@ -113,7 +119,7 @@ function ModelRow({
             )}
           </DropdownMenu.Content>
         </DropdownMenu>
-      </div>
+      </div>}
     </div>
   )
 }
@@ -166,6 +172,8 @@ function ProvidersPage() {
   useEffect(() => { fetchAll() }, [authenticatedApi])
 
   const gatewayMode = aiConfig?.enabled === true
+  const canAddModels = aiConfig?.enabled !== true || aiConfig.allowsUserModels
+  const lockedManagedAi = gatewayMode && !aiConfig.allowsUserModels
 
   const isBuiltIn = (modelId: string): boolean => {
     if (!aiConfig?.enabled) return false
@@ -218,13 +226,17 @@ function ProvidersPage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight text-kumo-default">AI providers</h1>
           <p className="mt-1 text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-subtle">
-            Configure the AI models available to your workspaces.
+            {canAddModels
+              ? 'Configure the AI models available to your workspaces.'
+              : 'Choose from the AI models available to your workspaces.'}
           </p>
         </div>
-        <button type="button" onClick={() => setSheetOpen(true)} className={PRIMARY_BTN}>
-          <Plus size={14} weight="bold" />
-          Add provider
-        </button>
+        {!loading && canAddModels && (
+          <button type="button" onClick={() => setSheetOpen(true)} className={PRIMARY_BTN}>
+            <Plus size={14} weight="bold" />
+            Add provider
+          </button>
+        )}
       </header>
 
       {/* Search — hidden when the user has no models */}
@@ -247,13 +259,23 @@ function ProvidersPage() {
         {/* Notices */}
         {(gatewayMode || (!gatewayMode && models.length > 0)) && !loading && !loadError && (
           <div className="flex flex-col gap-2.5 px-3 pb-2">
-            {gatewayMode && (
+            {lockedManagedAi && (
               <Notice>
                 <Lightning size={15} className="mt-px shrink-0 text-kumo-brand" />
                 <span>
-                  <strong className="font-medium text-kumo-default">AI Gateway mode:</strong> built-in
-                  models are managed by your deployment. You can still add custom models with your own
-                  API tokens.
+                  <strong className="font-medium text-kumo-default">Managed AI:</strong> built-in
+                  OpenRouter models are funded by your deployment and available to everyone.
+                </span>
+              </Notice>
+            )}
+
+            {gatewayMode && !lockedManagedAi && (
+              <Notice>
+                <Lightning size={15} className="mt-px shrink-0 text-kumo-brand" />
+                <span>
+                  <strong className="font-medium text-kumo-default">AI Gateway mode:</strong>{' '}
+                  built-in models are managed by your deployment. You can still add custom models
+                  with your own API tokens.
                 </span>
               </Notice>
             )}
@@ -298,10 +320,12 @@ function ProvidersPage() {
                 Add a provider to start building workspaces with AI.
               </p>
             </div>
-            <button type="button" onClick={() => setSheetOpen(true)} className={PRIMARY_BTN}>
-              <Plus size={14} weight="bold" />
-              Add your first provider
-            </button>
+            {canAddModels && (
+              <button type="button" onClick={() => setSheetOpen(true)} className={PRIMARY_BTN}>
+                <Plus size={14} weight="bold" />
+                Add your first provider
+              </button>
+            )}
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-sm text-kumo-inactive">No providers found</div>
@@ -316,7 +340,7 @@ function ProvidersPage() {
                 isQuick={quickModel === model.id}
                 isBuiltIn={isBuiltIn(model.id)}
                 onDelete={() => handleDelete(model)}
-                onSetQuick={() => handleSetQuick(model.id)}
+                onSetQuick={canAddModels ? () => handleSetQuick(model.id) : undefined}
               />
             </div>
           ))
@@ -324,16 +348,18 @@ function ProvidersPage() {
       </div>
 
       {/* Add model dialog */}
-      <AddModelModal
-        visible={sheetOpen}
-        onCancel={() => setSheetOpen(false)}
-        onSuccess={() => {
-          setSheetOpen(false)
-          fetchAll()
-        }}
-        authenticatedApi={authenticatedApi}
-        aiConfig={aiConfig}
-      />
+      {canAddModels && (
+        <AddModelModal
+          visible={sheetOpen}
+          onCancel={() => setSheetOpen(false)}
+          onSuccess={() => {
+            setSheetOpen(false)
+            fetchAll()
+          }}
+          authenticatedApi={authenticatedApi}
+          aiConfig={aiConfig}
+        />
+      )}
     </div>
   )
 }

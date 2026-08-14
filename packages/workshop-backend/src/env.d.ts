@@ -26,6 +26,13 @@ declare global {
       // Note: outside gateway mode, Workers AI (provider "cloudflare") is BYOK like every other
       // provider -- the account ID and API token live in the user's model config, not in env.
 
+      // Deployment-managed providers are available to every user without exposing the backing
+      // credential through RPC or per-user model storage. OpenRouter currently owns this direct
+      // provider path; Cloudflare AI Gateway providers remain configured through CF_AI_GATEWAY_*.
+      DEPLOYMENT_AI_PROVIDERS?: string;     // Comma-separated list; currently supports "openrouter"
+      DEPLOYMENT_AI_DEFAULT_MODEL?: string; // Suggested model ID placed first in model lists
+      OPENROUTER_API_TOKEN?: string;        // Backend-only Worker secret
+
       // Blueprint storage bindings.
       BLUEPRINTS: KVNamespace;             // Workers KV for blueprint metadata lookup
       BLUEPRINT_CONTENT: R2Bucket;         // R2 bucket for blueprint code snapshots

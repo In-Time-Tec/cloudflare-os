@@ -544,13 +544,15 @@ export default function OnboardingWizard({
                       )}
                     </div>
 
-                    <button
-                      onClick={() => setAddModelOpen(true)}
-                      className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-kumo-subtle border border-dashed border-kumo-line rounded-xl hover:border-kumo-fill hover:text-kumo-default hover:bg-kumo-tint transition-colors"
-                    >
-                      <Plus size={14} weight="bold" />
-                      Add new model...
-                    </button>
+                    {(aiConfig?.enabled !== true || aiConfig.allowsUserModels) && (
+                      <button
+                        onClick={() => setAddModelOpen(true)}
+                        className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-kumo-subtle border border-dashed border-kumo-line rounded-xl hover:border-kumo-fill hover:text-kumo-default hover:bg-kumo-tint transition-colors"
+                      >
+                        <Plus size={14} weight="bold" />
+                        Add new model...
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -705,16 +707,18 @@ export default function OnboardingWizard({
 
     {/* Add Model Modal — outside the wizard's inner content so it's not
         clipped by overflow-hidden on the sliding panel */}
-    <AddModelModal
-      visible={addModelOpen}
-      onCancel={() => setAddModelOpen(false)}
-      onSuccess={() => {
-        setAddModelOpen(false)
-        fetchModels()
-      }}
-      authenticatedApi={authenticatedApi}
-      aiConfig={aiConfig}
-    />
+    {(aiConfig?.enabled !== true || aiConfig.allowsUserModels) && (
+      <AddModelModal
+        visible={addModelOpen}
+        onCancel={() => setAddModelOpen(false)}
+        onSuccess={() => {
+          setAddModelOpen(false)
+          fetchModels()
+        }}
+        authenticatedApi={authenticatedApi}
+        aiConfig={aiConfig}
+      />
+    )}
     </>
   )
 }

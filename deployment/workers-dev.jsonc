@@ -16,6 +16,12 @@
     "sharingDomain": "intimetec-workers-dev"
   },
 
+  // One backend-only OpenRouter credential funds these curated models for every user.
+  "ai": {
+    "providers": ["openrouter"],
+    "defaultModel": "openai/gpt-5.6-luna"
+  },
+
   // Stable names let stateless CI reconnect storage after retries and partial deployments.
   "resources": {
     "blueprintsKvNamespace": "intimetec-cloudflare-os-backend-blueprints",

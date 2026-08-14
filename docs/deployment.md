@@ -44,6 +44,8 @@ configuration:
 | Context Gatekeeper | `intimetec-cloudflare-os-context` |
 | Scheduler Gatekeeper | `intimetec-cloudflare-os-scheduler` |
 | Context sharing domain | `intimetec-workers-dev` |
+| Managed AI provider | OpenRouter |
+| Default model | GPT 5.6 Luna (`openai/gpt-5.6-luna`) |
 | Blueprint metadata KV | `intimetec-cloudflare-os-backend-blueprints` |
 | Avatar KV | `intimetec-cloudflare-os-backend-avatars` |
 | Blueprint content R2 | `intimetec-cloudflare-os-backend-blueprint-content` |
@@ -61,9 +63,18 @@ account using exactly that username to receive `/admin` access. Account signup i
 the first account can be created. Close signups in `/admin` after creating the intended evaluation
 accounts.
 
-No deployment-funded model catalog is configured. Each evaluator connects a supported model
-provider through the application. Microsoft Graph and Entra ID capabilities are separate Phase 1
-work and are not implied by this deployment.
+AI is deployment-funded for every account. The backend exposes a curated OpenRouter catalog in the
+model picker, with GPT 5.6 Luna first and therefore selected by default when a user has no saved
+choice. The catalog currently contains GPT 5.6 Luna/Sol/Terra, Claude Sonnet 5, Claude Opus 5,
+Gemini 3.6 Flash, and Kimi K2.7 Code. These entries were selected from OpenRouter's live catalog
+because they advertise tool calling and image input; batch, specialized, and tool-less models are
+not exposed to agents.
+
+Users can select among those models but cannot add, delete, or route through personal model
+providers while managed AI is enabled. The backend enforces that boundary, so hiding the UI is not
+the security control. Model records returned over RPC contain an empty token; inference replaces it
+with the backend Worker secret only after the model has been resolved against the managed catalog.
+Microsoft Graph and Entra ID capabilities remain separate Phase 1 work.
 
 ## GitHub and Cloudflare configuration
 
@@ -72,6 +83,8 @@ The repository requires these GitHub Actions secrets:
 - `CLOUDFLARE_API_TOKEN`: Cloudflare API token with Workers, KV, R2, Browser Rendering, Workers AI,
   and Dynamic Worker Loader deployment permissions.
 - `CLOUDFLARE_ACCOUNT_ID`: account that owns all Workers and provisioned resources.
+- `OPENROUTER_API_TOKEN`: shared OpenRouter key used to fund inference for every application user.
+  Give this key an OpenRouter credit limit appropriate for the deployment.
 
 The account must be on the **Workers Paid** plan because Cloudflare OS uses Dynamic Workers to run
 agent- and user-authored code in isolated Workers. Dynamic Workers cannot be deployed on the Workers
@@ -79,9 +92,13 @@ Free plan. R2 must also be enabled for the account before the first deployment. 
 Cloudflare's service or billing terms, so they are account-owner prerequisites rather than automated
 CI actions.
 
-Secrets are passed only to Wrangler at workflow runtime. They must not appear in the deployment
-JSON, workflow commands, logs, or application configuration. The Blacksmith GitHub App must include
-this repository because both CI and deployment use `blacksmith-*-ubuntu-2404` runners.
+Secrets are passed only at workflow runtime. `pnpm deploy` gives the OpenRouter key to the backend
+Worker's `wrangler deploy --secrets-file` operation through a temporary owner-readable file, then
+removes that file. Code, configuration, and secrets therefore publish as one Worker version. The
+key must not appear in deployment JSON, generated Wrangler variables, command arguments, logs,
+frontend bundles, RPC results, or per-user Durable Object storage. Update the GitHub secret and
+rerun the deployment workflow to rotate it. The Blacksmith GitHub App must include this repository
+because both CI and deployment use `blacksmith-*-ubuntu-2404` runners.
 
 Use the workflow's manual **Run workflow** action only to retry the current `main` commit after an
 external failure. Normal releases always follow successful CI. Deployment concurrency is serialized
@@ -98,8 +115,10 @@ Every deployment:
 5. Records the URL and source commit in the GitHub Actions job summary.
 
 After an infrastructure or application change, also open the URL and verify account login,
-`/admin`, workspace creation, model connection, and a simple agent response. Inspect runtime events
-with Workers Logs or `pnpm exec wrangler tail intimetec-cloudflare-os`.
+`/admin`, workspace creation, GPT 5.6 Luna appearing first in the model picker, switching to another
+managed model, and a simple agent response that uses a tool. Confirm that onboarding and the AI
+providers page offer no action to add a personal provider. Inspect runtime events with Workers Logs
+or `pnpm exec wrangler tail intimetec-cloudflare-os`.
 
 For a failed release, read the failed workflow step first and retry only after correcting its cause.
 Wrangler deployments are versioned; roll the public Worker back with

@@ -12,12 +12,18 @@ import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.mode
 import { CLOUDFLARE_WORKERS_AI_MODELS } from "@earendil-works/pi-ai/providers/cloudflare-workers-ai.models";
 import { GOOGLE_MODELS } from "@earendil-works/pi-ai/providers/google.models";
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models";
+import { OPENROUTER_MODELS } from "@earendil-works/pi-ai/providers/openrouter.models";
 import { ApprovalQueue, Gatekeeper, ResourceDescription, stripTrailingSlashes } from '@gadgets/workshop-shared/gatekeeper';
 import { LanguageModelBinding } from "./ai-model-binding";
 import AI_MODEL_BINDING_TYPES from "./ai-model-binding.txt";
 import { AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS, WORKERS_AI_OUTPUT_LIMIT }
   from "@gadgets/workshop-shared/api";
-import { AiGatewayConfig, getAiGatewayConfig, type AiGatewayLogRoute } from "./ai-gateway.js";
+import {
+  AiGatewayConfig,
+  getAiGatewayConfig,
+  getManagedAiConfig,
+  type AiGatewayLogRoute,
+} from "./ai-gateway.js";
 import { completeText } from "./ai-invoke.js";
 import { bridgePdfAttachments } from "./chat-attachment-pdf.js";
 
@@ -133,6 +139,7 @@ function catalogModel(provider: AiModelConfig["provider"], modelId: string): Mod
     case "openai": return (OPENAI_MODELS as Record<string, Model<Api>>)[modelId];
     case "google": return (GOOGLE_MODELS as Record<string, Model<Api>>)[modelId];
     case "cloudflare": return (CLOUDFLARE_WORKERS_AI_MODELS as Record<string, Model<Api>>)[modelId];
+    case "openrouter": return (OPENROUTER_MODELS as Record<string, Model<Api>>)[modelId];
     case "ollama": return undefined;
     default: return undefined;
   }
@@ -286,12 +293,14 @@ function makeHandle(args: HandleArgs): ModelHandle {
   //   when no effort is passed; effort selection also makes pi request encrypted reasoning
   //   content, which -- with pi's unconditional `store: false` -- preserves the old stateless
   //   ZDR behavior with reasoning carried between tool steps.
+  // - OpenRouter: medium reasoning through its provider-neutral reasoning parameter.
   // - Everything else: provider defaults.
   const anthropicCompat = args.model.compat as AnthropicMessagesCompat | undefined;
   const apiExtras: Record<string, unknown> =
       args.model.api === "anthropic-messages"
           ? (anthropicCompat?.forceAdaptiveThinking === true ? { thinkingEnabled: true } : {}) :
-      args.model.api === "openai-responses" ? { reasoningEffort: "medium" } : {};
+      args.model.api === "openai-responses" || args.model.provider === "openrouter"
+          ? { reasoningEffort: "medium" } : {};
 
   const handle: ModelHandle = {
     model: args.model,
@@ -344,20 +353,36 @@ function makeHandle(args: HandleArgs): ModelHandle {
 }
 
 /**
- * Resolve an AiModelConfig to a ModelHandle, choosing among three routing modes: the user's own
- * AI Gateway (BYOK unified billing), the platform's AI Gateway (free tier), or direct provider
+ * Resolve an AiModelConfig to a ModelHandle, choosing among a deployment-managed direct provider,
+ * the user's own AI Gateway (BYOK unified billing), the platform's AI Gateway, or direct provider
  * access with the config's own credentials. The handle carries the matching AI Gateway log route
- * for cost accounting, when there is one.
+ * for cost accounting when there is one.
  */
 export function getModel(env: Cloudflare.Env, config: AiModelConfig,
                          initiator: AiChatAuthorInfo,
                          options: ModelRoutingOptions = {}): ModelHandle {
+  // Managed mode is a hard allowlist. Resolve a fresh configuration from the deployment catalog so
+  // stale personal-provider records cannot retain their token, custom URL, or model after policy is
+  // enabled. A managed direct provider intentionally takes precedence over user-funded billing.
+  const managedConfig = getManagedAiConfig(env);
+  const managedModel = managedConfig?.resolveModel(config.model);
+  if (managedConfig && !managedConfig.allowsUserModels &&
+      (!managedModel || managedModel.config.provider !== config.provider)) {
+    throw new Error(`Model "${config.model}" is not managed by this deployment.`);
+  }
+  const effectiveConfig = managedModel?.config ?? config;
+  const managedApiToken = managedConfig?.getDirectApiToken(effectiveConfig.provider);
+  if (managedApiToken) {
+    return getModelDirect(
+        { ...effectiveConfig, apiToken: managedApiToken }, options.sessionAffinity);
+  }
+
   // BYOK: a connected user's own Cloudflare account pays for everything (all providers, including
   // Workers AI), routed through the user's own AI Gateway with unified billing. Honored regardless
   // of whether a platform AI Gateway is configured, so connected users are always billed correctly.
   if (options.userGateway) {
     return getModelViaUserGateway(
-        config, buildMetadata(initiator, options.metadata), options.userGateway,
+        effectiveConfig, buildMetadata(initiator, options.metadata), options.userGateway,
         options.sessionAffinity);
   }
 
@@ -365,10 +390,10 @@ export function getModel(env: Cloudflare.Env, config: AiModelConfig,
   // tier). The config's apiToken/apiUrl are ignored in that mode.
   let gwConfig = getAiGatewayConfig(env);
   if (gwConfig) {
-    return getModelViaGateway(gwConfig, config, initiator, options);
+    return getModelViaGateway(gwConfig, effectiveConfig, initiator, options);
   }
 
-  return getModelDirect(config, options.sessionAffinity);
+  return getModelDirect(effectiveConfig, options.sessionAffinity);
 }
 
 // Route inference through the user's own account (unified billing) via their account's default AI
@@ -490,6 +515,24 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
   const catalog = catalogModel(config.provider, config.model);
   const window = modelTokenWindow(config, catalog);
   switch (config.provider) {
+    case "openrouter":
+      return makeHandle({
+        model: {
+          id: config.model,
+          name: SUGGESTED_MODELS.openrouter[config.model]?.name ?? catalog?.name ?? config.model,
+          api: "openai-completions",
+          provider: "openrouter",
+          baseUrl: config.apiUrl ?? "https://openrouter.ai/api/v1",
+          reasoning: catalog?.reasoning ?? true,
+          input: catalog?.input ?? ["text", "image"],
+          cost: catalog?.cost ?? ZERO_COST,
+          ...window,
+          thinkingLevelMap: catalog?.thinkingLevelMap,
+          compat: catalog?.compat,
+        },
+        apiKey: config.apiToken,
+        sessionAffinity,
+      });
     case "anthropic":
       return makeHandle({
         model: {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AiGatewayLogRetryableError,
+  getManagedAiConfig,
   getAiGatewayLogCost,
 } from "../src/ai-gateway.js";
 
@@ -12,6 +13,50 @@ function env(overrides: Partial<Cloudflare.Env> = {}): Cloudflare.Env {
     ...overrides,
   } as Cloudflare.Env;
 }
+
+describe("deployment-managed AI", () => {
+  it("exposes curated OpenRouter models with Luna first and no credential", () => {
+    const config = getManagedAiConfig({
+      DEPLOYMENT_AI_PROVIDERS: "openrouter",
+      DEPLOYMENT_AI_DEFAULT_MODEL: "openai/gpt-5.6-luna",
+      OPENROUTER_API_TOKEN: "backend-only-token",
+    } as Cloudflare.Env)!;
+
+    expect(config.getModelList()[0]).toEqual({
+      type: "agent",
+      id: "openai/gpt-5.6-luna",
+      name: "GPT 5.6 Luna",
+    });
+    expect(config.resolveModel("openai/gpt-5.6-luna")?.config).toEqual({
+      provider: "openrouter",
+      model: "openai/gpt-5.6-luna",
+      apiToken: "",
+    });
+    expect(config.allowsUserModels).toBe(false);
+    expect(config.getDirectApiToken("openrouter")).toBe("backend-only-token");
+  });
+
+  it("requires the backend secret and an available default model", () => {
+    expect(() => getManagedAiConfig({
+      DEPLOYMENT_AI_PROVIDERS: "openrouter",
+    } as Cloudflare.Env)).toThrow("OPENROUTER_API_TOKEN is required");
+
+    expect(() => getManagedAiConfig({
+      DEPLOYMENT_AI_PROVIDERS: "openrouter",
+      DEPLOYMENT_AI_DEFAULT_MODEL: "missing/model",
+      OPENROUTER_API_TOKEN: "backend-only-token",
+    } as Cloudflare.Env)).toThrow("DEPLOYMENT_AI_DEFAULT_MODEL");
+  });
+
+  it("rejects ambiguous direct-provider and AI Gateway routing", () => {
+    expect(() => getManagedAiConfig({
+      CF_AI_GATEWAY: "platform-gateway",
+      DEPLOYMENT_AI_PROVIDERS: "openrouter",
+      OPENROUTER_API_TOKEN: "backend-only-token",
+    } as Cloudflare.Env)).toThrow(
+        "CF_AI_GATEWAY and DEPLOYMENT_AI_PROVIDERS cannot be configured together");
+  });
+});
 
 describe("getAiGatewayLogCost", () => {
   afterEach(() => vi.unstubAllGlobals());

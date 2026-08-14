@@ -33,6 +33,7 @@ jobs:
       SOURCE_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OPENROUTER_API_TOKEN: ${{ secrets.OPENROUTER_API_TOKEN }}
       CI: "true"
       NO_COLOR: "1"
     steps:

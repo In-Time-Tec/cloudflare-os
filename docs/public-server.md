@@ -48,6 +48,21 @@ CF_AI_GATEWAY_API_TOKEN=...
 CF_AI_GATEWAY_WAI_DIRECT=true
 ```
 
+A self-hosted deployment can instead fund a managed OpenRouter catalog for every user:
+
+```
+DEPLOYMENT_AI_PROVIDERS=openrouter
+DEPLOYMENT_AI_DEFAULT_MODEL=openai/gpt-5.6-luna
+OPENROUTER_API_TOKEN=...
+```
+
+`OPENROUTER_API_TOKEN` must be a Worker secret in production, not a Wrangler variable. This mode
+routes directly through OpenRouter's OpenAI-compatible chat-completions API, keeps the credential in
+the backend, and disables user-managed providers. Users select only from the deployment's curated,
+tool-capable OpenRouter catalog. Do not combine this platform-funded mode with the per-user
+Cloudflare-credit top-up flow unless the intended billing policy explicitly keeps OpenRouter usage
+on the platform account.
+
 Gateway mode always requires `CF_AI_GATEWAY_ACCOUNT_ID` and `CF_AI_GATEWAY_API_TOKEN`; the token
 needs AI Gateway Run and Read permissions so Gadgets can execute models and report their costs
 (the Gateway may live in the Worker's own account or a different one). Workers AI defaults to the

@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "jsonc-parser";
-import { ensureRemoteResources, generateConfigs, validateConfig } from "./deploy.mjs";
+import {
+  ensureRemoteResources,
+  generateConfigs,
+  getDeploymentSecrets,
+  validateConfig,
+} from "./deploy.mjs";
 
 const accountId = "0123456789abcdef0123456789abcdef";
 const validConfig = {
@@ -14,6 +19,10 @@ const validConfig = {
   },
   auth: { admins: ["admin"] },
   context: { sharingDomain: "acme-workers-dev" },
+  ai: {
+    providers: ["openrouter"],
+    defaultModel: "openai/gpt-5.6-luna",
+  },
   resources: {
     blueprintsKvNamespace: "acme-os-backend-blueprints",
     avatarsKvNamespace: "acme-os-backend-avatars",
@@ -52,6 +61,10 @@ test("rejects invalid deployment identities", () => {
   const missingResource = structuredClone(validConfig);
   delete missingResource.resources.contextKvNamespace;
   assert.throws(() => validateConfig(missingResource), /contextKvNamespace/);
+
+  const unsupportedAiProvider = structuredClone(validConfig);
+  unsupportedAiProvider.ai.providers = ["unknown"];
+  assert.throws(() => validateConfig(unsupportedAiProvider), /AI providers/);
 });
 
 test("generates the workers.dev composition", async () => {
@@ -73,6 +86,8 @@ test("generates the workers.dev composition", async () => {
 
   assert.equal(generated.backend.workers_dev, false);
   assert.deepEqual(generated.backend.vars.ADMINS, ["admin"]);
+  assert.equal(generated.backend.vars.DEPLOYMENT_AI_PROVIDERS, "openrouter");
+  assert.equal(generated.backend.vars.DEPLOYMENT_AI_DEFAULT_MODEL, "openai/gpt-5.6-luna");
   assert.deepEqual(generated.backend.ai, { binding: "WORKERS_AI" });
   assert.deepEqual(generated.backend.kv_namespaces, [
     { binding: "BLUEPRINTS", id: resolvedResources.blueprintsKvNamespaceId },
@@ -94,6 +109,21 @@ test("generates the workers.dev composition", async () => {
     id: resolvedResources.contextKvNamespaceId,
   }]);
   assert.equal(generated.scheduler.workers_dev, false);
+});
+
+test("requires and resolves deployment-managed provider secrets", () => {
+  assert.deepEqual(
+      getDeploymentSecrets(validConfig, { OPENROUTER_API_TOKEN: "openrouter-token" }),
+      { OPENROUTER_API_TOKEN: "openrouter-token" },
+  );
+  assert.throws(
+      () => getDeploymentSecrets(validConfig, {}),
+      /OPENROUTER_API_TOKEN is required/,
+  );
+
+  const withoutAi = structuredClone(validConfig);
+  delete withoutAi.ai;
+  assert.deepEqual(getDeploymentSecrets(withoutAi, {}), {});
 });
 
 test("reuses storage created by a partial deployment and creates only missing resources", async () => {

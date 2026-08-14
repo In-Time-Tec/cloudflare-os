@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse, printParseErrorCode } from "jsonc-parser";
@@ -21,6 +22,7 @@ const resourceNames = [
   "blueprintContentBucket",
   "contextKvNamespace",
 ];
+const managedAiProviders = new Set(["openrouter"]);
 const checkResources = {
   blueprintsKvNamespaceId: "00000000000000000000000000000001",
   avatarsKvNamespaceId: "00000000000000000000000000000002",
@@ -51,6 +53,17 @@ export function validateConfig(config) {
   }
   if (typeof config.context?.sharingDomain !== "string" || !config.context.sharingDomain.trim()) {
     throw new Error("Context sharingDomain must be a non-empty string.");
+  }
+
+  if (config.ai !== undefined) {
+    if (!Array.isArray(config.ai.providers) || config.ai.providers.length === 0 ||
+        !config.ai.providers.every((provider) => managedAiProviders.has(provider)) ||
+        new Set(config.ai.providers).size !== config.ai.providers.length) {
+      throw new Error("AI providers must be a unique, non-empty list of supported providers.");
+    }
+    if (typeof config.ai.defaultModel !== "string" || !config.ai.defaultModel.trim()) {
+      throw new Error("AI defaultModel must be a non-empty model ID.");
+    }
   }
 
   for (const key of resourceNames) {
@@ -105,6 +118,10 @@ export function generateConfigs(config, accountId, bases, resources) {
   backend.vars = {
     ...backend.vars,
     ADMINS: config.auth.admins,
+    ...(config.ai ? {
+      DEPLOYMENT_AI_PROVIDERS: config.ai.providers.join(","),
+      DEPLOYMENT_AI_DEFAULT_MODEL: config.ai.defaultModel,
+    } : {}),
   };
   backend.ai = { binding: "WORKERS_AI" };
   backend.services = [
@@ -152,6 +169,19 @@ export function generateConfigs(config, accountId, bases, resources) {
   ];
 
   return { context, scheduler, backend, router };
+}
+
+/** Resolve the backend Worker secrets required by the deployment contract. */
+export function getDeploymentSecrets(config, environment = process.env) {
+  const secrets = {};
+  if (config.ai?.providers.includes("openrouter")) {
+    if (!environment.OPENROUTER_API_TOKEN) {
+      throw new Error(
+          "OPENROUTER_API_TOKEN is required when the deployment enables OpenRouter.");
+    }
+    secrets.OPENROUTER_API_TOKEN = environment.OPENROUTER_API_TOKEN;
+  }
+  return secrets;
 }
 
 class CloudflareApiError extends Error {
@@ -293,6 +323,8 @@ async function main() {
   const config = validateConfig(await readJsonc(join(root, "deployment/workers-dev.jsonc")));
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
   const check = process.argv.includes("--check");
+  // Fail before changing remote state if a required application secret is unavailable.
+  const deploymentSecrets = check ? {} : getDeploymentSecrets(config);
   const resources = check
     ? checkResources
     : await ensureRemoteResources(config, accountId, process.env.CLOUDFLARE_API_TOKEN ?? "");
@@ -303,18 +335,34 @@ async function main() {
     scheduler: await readJsonc(join(packageDirs.scheduler, "wrangler.jsonc")),
   }, resources);
 
+  let secretsDirectory;
   try {
     await Promise.all(Object.entries(generated).map(([name, value]) =>
       writeFile(generatedPaths[name], `${JSON.stringify(value, null, 2)}\n`)
     ));
+    let backendSecretsFile;
+    if (!check && Object.keys(deploymentSecrets).length > 0) {
+      secretsDirectory = await mkdtemp(join(tmpdir(), "cloudflare-os-deploy-"));
+      backendSecretsFile = join(secretsDirectory, "backend-secrets.json");
+      await writeFile(backendSecretsFile, JSON.stringify(deploymentSecrets), { mode: 0o600 });
+    }
     build();
 
-    const deployArgs = check ? ["--dry-run"] : [];
     for (const name of ["context", "scheduler", "backend", "router"]) {
-      run(["exec", "wrangler", "deploy", "--config", generatedName, ...deployArgs], packageDirs[name]);
+      const deployArgs = check ? ["--dry-run"] :
+          name === "backend" && backendSecretsFile
+            ? ["--secrets-file", backendSecretsFile]
+            : [];
+      run(
+          ["exec", "wrangler", "deploy", "--config", generatedName, ...deployArgs],
+          packageDirs[name],
+      );
     }
   } finally {
-    await Promise.all(Object.values(generatedPaths).map((path) => rm(path, { force: true })));
+    await Promise.all([
+      ...Object.values(generatedPaths).map((path) => rm(path, { force: true })),
+      ...(secretsDirectory ? [rm(secretsDirectory, { recursive: true, force: true })] : []),
+    ]);
   }
 }
 

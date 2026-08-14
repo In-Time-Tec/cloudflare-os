@@ -1,5 +1,10 @@
-import { AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS } from "@gadgets/workshop-shared/api";
-import { UserAiModelRecord } from "./user.js";
+import {
+  AiChatAuthorInfo,
+  AiModelConfig,
+  AiModelProvider,
+  SUGGESTED_MODELS,
+} from "@gadgets/workshop-shared/api";
+import type { UserAiModelRecord } from "./user.js";
 
 // The model used for quick tasks like title generation when AI Gateway mode is active.
 //
@@ -37,56 +42,6 @@ export class AiGatewayConfig {
       (env.CF_AI_GATEWAY_PROVIDERS || "").split(",").map(s => s.trim()).filter(s => s !== "")
     );
   }
-
-  /**
-   * Get the list of models available through AI Gateway, as AiChatAuthorInfo entries.
-   */
-  getModelList(): AiChatAuthorInfo[] {
-    let result: AiChatAuthorInfo[] = [];
-    for (let [provider, models] of Object.entries(SUGGESTED_MODELS)) {
-      if (this.providers.has(provider)) {
-        for (let [id, model] of Object.entries(models)) {
-          result.push({ type: "agent", id, name: model.name });
-        }
-      }
-    }
-    return result;
-  }
-
-  /**
-   * Look up an AI Gateway model by ID. Returns a UserAiModelRecord if the model is a
-   * SUGGESTED_MODEL for an enabled gateway provider, or undefined otherwise.
-   */
-  resolveModel(modelId: string): UserAiModelRecord | undefined {
-    for (let [provider, models] of Object.entries(SUGGESTED_MODELS)) {
-      if (this.providers.has(provider) && modelId in models) {
-        return {
-          profile: { type: "agent", id: modelId, name: models[modelId].name },
-          config: {
-            provider: provider as AiModelConfig["provider"],
-            model: modelId,
-            // apiToken and apiUrl are ignored when AI Gateway mode is active -- getModel()
-            // reads the real values from env. We set them to empty strings here to satisfy
-            // the type.
-            apiToken: "",
-          },
-        };
-      }
-    }
-    return undefined;
-  }
-
-  /**
-   * Get the AiModelConfig for the quick model (used for title generation).
-   */
-  getQuickModelConfig(): AiModelConfig | undefined {
-    // Always use Workers AI here.
-    return {
-      provider: "cloudflare",
-      model: QUICK_MODEL_ID,
-      apiToken: "",
-    };
-  }
 }
 
 /**
@@ -96,6 +51,118 @@ export class AiGatewayConfig {
 export function getAiGatewayConfig(env: Cloudflare.Env): AiGatewayConfig | null {
   if (!env.CF_AI_GATEWAY) return null;
   return new AiGatewayConfig(env);
+}
+
+const DIRECT_MANAGED_PROVIDERS = new Set<AiModelProvider>(["openrouter"]);
+
+function splitProviders(value: string | undefined): string[] {
+  return (value || "").split(",").map(provider => provider.trim()).filter(Boolean);
+}
+
+/**
+ * Owns the models funded by a deployment, whether they route through Cloudflare AI Gateway or a
+ * backend-only provider credential. User-facing model records never contain those credentials.
+ */
+export class ManagedAiConfig {
+  readonly gateway: AiGatewayConfig | null;
+  readonly providers: Set<AiModelProvider>;
+  readonly defaultModel: string;
+  readonly allowsUserModels: boolean;
+  readonly #directProviders: Set<AiModelProvider>;
+  readonly #openRouterApiToken?: string;
+
+  constructor(env: Cloudflare.Env) {
+    const directProviders = splitProviders(env.DEPLOYMENT_AI_PROVIDERS);
+    if (env.CF_AI_GATEWAY && directProviders.length > 0) {
+      throw new Error(
+          "CF_AI_GATEWAY and DEPLOYMENT_AI_PROVIDERS cannot be configured together.");
+    }
+    this.gateway = getAiGatewayConfig(env);
+    this.providers = new Set<AiModelProvider>();
+    for (const provider of this.gateway?.providers ?? []) {
+      if (provider in SUGGESTED_MODELS) this.providers.add(provider as AiModelProvider);
+    }
+
+    this.#directProviders = new Set<AiModelProvider>();
+    for (const provider of directProviders) {
+      if (!DIRECT_MANAGED_PROVIDERS.has(provider as AiModelProvider)) {
+        throw new Error(`Unsupported deployment-managed AI provider "${provider}".`);
+      }
+      this.providers.add(provider as AiModelProvider);
+      this.#directProviders.add(provider as AiModelProvider);
+    }
+    this.allowsUserModels = this.#directProviders.size === 0;
+
+    if (this.#directProviders.has("openrouter") && !env.OPENROUTER_API_TOKEN) {
+      throw new Error(
+          "OPENROUTER_API_TOKEN is required when DEPLOYMENT_AI_PROVIDERS includes openrouter.");
+    }
+    this.#openRouterApiToken = env.OPENROUTER_API_TOKEN;
+
+    const models = this.#unorderedModelList();
+    if (models.length === 0) {
+      throw new Error("Deployment-managed AI has no models configured.");
+    }
+    this.defaultModel = env.DEPLOYMENT_AI_DEFAULT_MODEL || models[0].id;
+    if (!this.resolveModel(this.defaultModel)) {
+      throw new Error(
+          `DEPLOYMENT_AI_DEFAULT_MODEL "${this.defaultModel}" is not available from an enabled ` +
+          "deployment-managed provider.");
+    }
+  }
+
+  #unorderedModelList(): AiChatAuthorInfo[] {
+    const result: AiChatAuthorInfo[] = [];
+    for (const [provider, models] of Object.entries(SUGGESTED_MODELS)) {
+      if (!this.providers.has(provider as AiModelProvider)) continue;
+      for (const [id, model] of Object.entries(models)) {
+        result.push({ type: "agent", id, name: model.name });
+      }
+    }
+    return result;
+  }
+
+  /** Return deployment-managed models with the configured default first. */
+  getModelList(): AiChatAuthorInfo[] {
+    const models = this.#unorderedModelList();
+    const defaultIndex = models.findIndex(model => model.id === this.defaultModel);
+    if (defaultIndex > 0) models.unshift(...models.splice(defaultIndex, 1));
+    return models;
+  }
+
+  /** Resolve a deployment-managed model without exposing its backend credential. */
+  resolveModel(modelId: string): UserAiModelRecord | undefined {
+    for (const [provider, models] of Object.entries(SUGGESTED_MODELS)) {
+      if (this.providers.has(provider as AiModelProvider) && modelId in models) {
+        return {
+          profile: { type: "agent", id: modelId, name: models[modelId].name },
+          config: { provider: provider as AiModelProvider, model: modelId, apiToken: "" },
+        };
+      }
+    }
+    return undefined;
+  }
+
+  /** Return the deployment's lightweight model configuration. */
+  getQuickModelConfig(): AiModelConfig | undefined {
+    if (this.gateway) {
+      return { provider: "cloudflare", model: QUICK_MODEL_ID, apiToken: "" };
+    }
+    return this.resolveModel(this.defaultModel)?.config;
+  }
+
+  /** Return a direct provider credential for backend inference only. Never expose over RPC. */
+  getDirectApiToken(provider: AiModelProvider): string | undefined {
+    if (!this.#directProviders.has(provider)) return undefined;
+    if (provider === "openrouter") return this.#openRouterApiToken;
+    return undefined;
+  }
+}
+
+/** Parse deployment-managed AI configuration, or return null when no provider is managed. */
+export function getManagedAiConfig(env: Cloudflare.Env): ManagedAiConfig | null {
+  if (!env.CF_AI_GATEWAY && splitProviders(env.DEPLOYMENT_AI_PROVIDERS).length === 0) return null;
+  return new ManagedAiConfig(env);
 }
 
 /** Identifies the Gateway and credentials needed to retrieve an inference log. */
