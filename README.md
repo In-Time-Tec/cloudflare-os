@@ -181,6 +181,9 @@ Or, for more sophisticated deployment, with your gatekeepers and potentially cod
 
 https://github.com/cloudflare/cloudflare-os-starter
 
+This fork's automated Blacksmith and `workers.dev` release process is documented in
+[`docs/deployment.md`](docs/deployment.md).
+
 ### Run locally
 
 To quickly run Cloudflare OS locally, [install pnpm](https://pnpm.io/), then do:

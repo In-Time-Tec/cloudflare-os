@@ -1,0 +1,26 @@
+{
+  // Stable Worker names preserve service identity and Durable Object state across releases.
+  "workers": {
+    "router": "intimetec-cloudflare-os",
+    "backend": "intimetec-cloudflare-os-backend",
+    "context": "intimetec-cloudflare-os-context",
+    "scheduler": "intimetec-cloudflare-os-scheduler"
+  },
+
+  // Temporary built-in password authentication. Entra ID will replace this in Phase 1.
+  "auth": {
+    "admins": ["dallenpyrah"]
+  },
+
+  "context": {
+    "sharingDomain": "intimetec-workers-dev"
+  },
+
+  // null lets Wrangler provision storage once and reconnect it on later deployments.
+  "resources": {
+    "blueprintsKvNamespaceId": null,
+    "avatarsKvNamespaceId": null,
+    "blueprintContentBucket": null,
+    "contextKvNamespaceId": null
+  }
+}
