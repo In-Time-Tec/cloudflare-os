@@ -225,59 +225,56 @@ body {
   color: var(--text-color-kumo-default);
 }
 
-@keyframes openwork-logo-depth {
-  0%, 100% { transform: translate(calc(var(--openwork-depth) * -0.35px), calc(var(--openwork-depth) * 0.9px)); }
-  20% { transform: translate(calc(var(--openwork-depth) * -0.65px), calc(var(--openwork-depth) * 1.15px)) skewX(-1.2deg); }
-  42% { transform: translate(calc(var(--openwork-depth) * -0.2px), calc(var(--openwork-depth) * 0.75px)) skewX(0.8deg); }
-  64% { transform: translate(calc(var(--openwork-depth) * -0.75px), calc(var(--openwork-depth) * 1.25px)) skewX(-1.5deg); }
-  82% { transform: translate(calc(var(--openwork-depth) * -0.3px), calc(var(--openwork-depth) * 0.85px)) skewX(0.5deg); }
+@keyframes openwork-logo-light {
+  0%, 100% { background-position: 100% 50%; }
+  50% { background-position: 0% 50%; }
 }
 
 .openwork-logo {
-  width: min(100%, 39rem);
-  height: auto;
-  overflow: visible;
+  color: transparent;
+  background: linear-gradient(
+    105deg,
+    #dce2d9 8%,
+    #f8fbf5 32%,
+    #d8dfd5 48%,
+    #f7faf4 67%,
+    #dce2d9 92%
+  );
+  background-clip: text;
+  background-size: 240% 100%;
+  font-size: clamp(3rem, 7vw, 5.75rem);
+  font-weight: 700;
+  letter-spacing: -0.075em;
+  line-height: 1;
+  filter: drop-shadow(0 1px 0 #ffffff) drop-shadow(0 10px 14px #5e6a5a1f);
+  text-shadow:
+    0 1px 0 #e9eee6,
+    0 2px 0 #d4dcd1,
+    0 3px 0 #cbd4c8,
+    0 7px 13px #5560521c;
+  animation: openwork-logo-light 7s ease-in-out infinite;
   user-select: none;
 }
 
-.openwork-logo text {
-  font-family: var(--font-sans);
-  font-size: 102px;
-  font-weight: 700;
-  letter-spacing: -7px;
-  paint-order: stroke fill;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.openwork-logo-contour {
-  fill: #cbd4c8;
-  stroke: #cbd4c8;
-  stroke-width: 6px;
-  animation: openwork-logo-depth 9.6s cubic-bezier(.45, 0, .55, 1) infinite;
-}
-
-.openwork-logo-face {
-  fill: #e7ece4;
-  stroke: #e7ece4;
-  stroke-width: 7px;
-  filter: drop-shadow(0 8px 14px #55605220);
-}
-
-[data-mode="dark"] .openwork-logo-contour {
-  fill: #172021;
-  stroke: #172021;
-}
-
-[data-mode="dark"] .openwork-logo-face {
-  fill: #283233;
-  stroke: #283233;
-  filter: drop-shadow(0 10px 16px #00000073);
+[data-mode="dark"] .openwork-logo {
+  background-image: linear-gradient(
+    105deg,
+    #182122 8%,
+    #2b3535 32%,
+    #172020 48%,
+    #303a3a 67%,
+    #182122 92%
+  );
+  filter: drop-shadow(0 1px 0 #313b3b) drop-shadow(0 13px 16px #00000066);
+  text-shadow:
+    0 1px 0 #303a3a,
+    0 2px 0 #252f2f,
+    0 3px 0 #1c2526,
+    0 8px 15px #00000073;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .openwork-logo-contour { animation: none; }
-  .openwork-logo-art { filter: none; }
+  .openwork-logo { animation: none; }
 }
 
 ::selection {
