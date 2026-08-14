@@ -103,6 +103,15 @@
   container-type: inline-size;
 }
 
+.composerFade {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in srgb, var(--color-kumo-base) 55%, transparent) 45%,
+    var(--color-kumo-base) 100%
+  );
+}
+
 .attachLabelText {
   display: inline;
 }

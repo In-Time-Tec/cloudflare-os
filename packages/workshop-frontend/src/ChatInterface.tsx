@@ -1818,6 +1818,7 @@ export const ChatInput = ({
   showThinkingTraces = true,
   onToggleThinkingTraces,
   usage,
+  docked = false,
 }: {
   createCapsuleGatekeeper: (
     accountId: number,
@@ -1872,6 +1873,7 @@ export const ChatInput = ({
   showThinkingTraces?: boolean;
   onToggleThinkingTraces?: () => void;
   usage?: { tokens?: number; cost?: number };
+  docked?: boolean;
   /** Show the "Pre-approve actions" menu item (only when there are uncovered candidates). */
   /** Open the pre-approval dialog (owned by the parent). */
   /** Called after a gatekeeper is connected via the attach flow, so the parent can refresh the
@@ -3195,7 +3197,7 @@ export const ChatInput = ({
     // captured-log floating chip with z-10, the textarea/mirror with z-[1])
     // so they can't paint on top of body-level portaled popovers like the
     // model picker dropdown opening above the composer.
-    <div className={`px-4 relative isolate ${hasUsage ? "pb-4 pt-8" : "py-4"} ${styles.chatInputRoot}`}>
+    <div className={`relative isolate ${docked ? "" : hasUsage ? "px-4 pb-4 pt-8" : "px-4 py-4"} ${styles.chatInputRoot}`}>
       <input
         ref={attachmentInputRef}
         type="file"
@@ -3247,10 +3249,20 @@ export const ChatInput = ({
         </div>
       )}
 
+      {docked && (
+        <div
+          aria-hidden
+          className={`pointer-events-none h-24 ${styles.composerFade}`}
+        />
+      )}
       <div className="relative">
       <div
         ref={promptCardRef}
-        className="themed-prompt-card-shadow relative overflow-visible rounded-2xl border border-kumo-line bg-kumo-control transition-shadow duration-150 ease-out"
+        className={
+          docked
+            ? "relative overflow-visible rounded-t-2xl border-x border-t border-b-0 border-kumo-line bg-kumo-base"
+            : "themed-prompt-card-shadow relative overflow-visible rounded-2xl border border-kumo-line bg-kumo-control transition-shadow duration-150 ease-out"
+        }
         onDragEnter={handleAttachmentDragEnter}
         onDragOver={handleAttachmentDragOver}
         onDragLeave={handleAttachmentDragLeave}
@@ -3259,7 +3271,7 @@ export const ChatInput = ({
         {hasUsage && (
           <div
             className={`absolute right-4 top-0 z-10 flex -translate-y-[calc(100%-1px)] items-center gap-3 rounded-t-lg border border-b-0 border-kumo-line px-2.5 py-1 font-mono text-[11px] leading-4 text-kumo-inactive ${
-              draftUpdateBanner ? "bg-kumo-elevated" : "bg-kumo-control"
+              draftUpdateBanner ? "bg-kumo-elevated" : docked ? "bg-kumo-base" : "bg-kumo-control"
             }`}
           >
             {usage?.tokens != null && (
@@ -3271,13 +3283,13 @@ export const ChatInput = ({
             <span
               aria-hidden
               className={`pointer-events-none absolute inset-x-px -bottom-px h-[2px] ${
-                draftUpdateBanner ? "bg-kumo-elevated" : "bg-kumo-control"
+                draftUpdateBanner ? "bg-kumo-elevated" : docked ? "bg-kumo-base" : "bg-kumo-control"
               }`}
             />
           </div>
         )}
         {isAttachmentDragActive && (
-          <div className={`themed-inset-outline pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-2xl border-2 border-dashed p-4 backdrop-blur-[1px] transition-[opacity,transform] duration-150 ease-out ${canAttachMore ? "border-kumo-brand/55 bg-kumo-brand/10" : "border-kumo-warning/60 bg-kumo-warning/10"}`}>
+          <div className={`themed-inset-outline pointer-events-none absolute inset-0 z-20 grid place-items-center border-2 border-dashed p-4 backdrop-blur-[1px] transition-[opacity,transform] duration-150 ease-out ${docked ? "rounded-t-2xl" : "rounded-2xl"} ${canAttachMore ? "border-kumo-brand/55 bg-kumo-brand/10" : "border-kumo-warning/60 bg-kumo-warning/10"}`}>
             <div className={`themed-floating-shadow flex items-center gap-2 rounded-full border bg-kumo-base/90 px-3 py-2 text-[13px] font-medium leading-4 tracking-[-0.2px] text-kumo-default ${canAttachMore ? "border-kumo-brand/25" : "border-kumo-warning/30"}`}>
               <span className={`grid h-7 w-7 place-items-center rounded-full ${canAttachMore ? "bg-kumo-brand/12 text-kumo-brand" : "bg-kumo-warning/15 text-kumo-warning"}`}>
                 <FileIcon size={16} weight="duotone" />
@@ -6710,8 +6722,8 @@ function ChatInterface({
           </DropdownMenu.Content>
         </DropdownMenu>
       </div>
-      {/* Chat list */}
-      <div className="chat-panel flex-1 overflow-y-auto bg-kumo-base p-3">
+      <div className="chat-panel relative min-h-0 flex-1 overflow-y-auto bg-kumo-base">
+        <div className="p-3">
         {!chatListReady ? (
           <div className="flex items-center justify-center py-10">
             <div className="w-5 h-5 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
@@ -6869,13 +6881,8 @@ function ChatInterface({
             )}
           </div>
         )}
-      </div>
-
-      {/* New chat input — pinned to bottom. ChatInput supplies its own
-          horizontal padding, so the wrapper just adds the top divider; no
-          extra p-4 (which would shrink the input vs. the in-chat composer). */}
-      <div className="flex-shrink-0">
-        <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
+        </div>
+        <div className="sticky bottom-0 z-10 -mt-24">
           <ChatInput
             key={workspaceId}
             createCapsuleGatekeeper={(accountId, url) =>
@@ -6891,6 +6898,7 @@ function ChatInterface({
             onToggleThinkingTraces={toggleShowThinkingTraces}
             minRows={2}
             newChat
+            docked
             draftStorageKey={currentUser && workspaceId
               ? composerDraftStorageKey(currentUser.id, `workspace:${workspaceId}:new`)
               : undefined}
@@ -7043,7 +7051,7 @@ function ChatInterface({
               <div
                 ref={messagesContainerRef}
                 onScroll={handleMessagesScroll}
-                className="flex-1 overflow-y-auto chat-panel"
+                className="relative min-h-0 flex-1 overflow-y-auto chat-panel"
               >
                 {isLoading ? (
                   <div className="flex items-center justify-center py-10">
@@ -7051,7 +7059,7 @@ function ChatInterface({
                   </div>
                 ) : (
                   <div
-                    className={`flex flex-col px-6 pt-8 ${pendingConsoleLogCount > 0 ? "pb-16" : "pb-8"} ${useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}`}
+                    className={`flex flex-col px-6 pt-8 ${pendingConsoleLogCount > 0 ? "pb-8" : "pb-2"} ${useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}`}
                   >
                     {isLoadingEarlier && (
                       <div className="mx-auto mb-6 text-[12px] leading-4 font-medium text-kumo-inactive">
@@ -7829,11 +7837,7 @@ function ChatInterface({
                     })()}
                   </div>
                 )}
-              </div>
-
-              {/* ── Bottom: input, update state, and cost ──────────────── */}
-              <div className="flex-shrink-0 bg-kumo-base">
-                <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
+                <div className="sticky bottom-0 z-10 -mt-24">
                   <ChatInput
                     key={`${workspaceId}:${selectedChatId}`}
                     chatKey={selectedChatId}
@@ -7846,6 +7850,7 @@ function ChatInterface({
                     models={availableModels}
                     selectedModel={selectedModel}
                     onModelChange={handleModelChange}
+                    docked
                     usage={currentChatMetadata ? {
                       tokens: currentChatMetadata.totalTokens,
                       cost: currentChatMetadata.totalCost,
