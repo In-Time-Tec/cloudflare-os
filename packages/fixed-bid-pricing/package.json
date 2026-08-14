@@ -1,0 +1,22 @@
+{
+  "name": "@intimetec/fixed-bid-pricing",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/pricing.ts"
+  },
+  "scripts": {
+    "build": "tsc && tsc -p tsconfig.gadget.json && node scripts/build-blueprint.mjs --check",
+    "build:blueprint": "node scripts/build-blueprint.mjs --write",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.0",
+    "esbuild": "^0.28.1",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "yjs": "^13.6.31"
+  }
+}

@@ -105,6 +105,14 @@ export default defineConfig({
         },
       },
       {
+        files: ['packages/fixed-bid-pricing/gadget/client.ts'],
+        plugins: ['typescript', 'unicorn', 'oxc', 'import'],
+        env: {
+          browser: true,
+          es2024: true,
+        },
+      },
+      {
         // Gatekeeper configurator UIs use a classic JSX runtime with the `h`
         // pragma rather than the automatic react-jsx runtime.
         files: ['packages/gatekeeper-*/**/*.tsx'],
@@ -120,6 +128,7 @@ export default defineConfig({
           'packages/workshop-backend/**/*.ts',
           'packages/router/**/*.ts',
           'packages/gatekeeper-*/src/**/*.ts',
+          'packages/fixed-bid-pricing/gadget/server.ts',
           'packages/workshop-shared/**/*.ts',
           'packages/typed-storage/**/*.ts',
         ],

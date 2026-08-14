@@ -106,3 +106,12 @@ Two lighter options need no build change at all:
    is the mechanism the bundled set is a convenience on top of, not a special case beside.
 2. **Ship no formats.** Point `FORMAT_BLUEPRINTS_DIR` at an empty directory, and the deployment
    simply has none until an admin promotes something.
+
+## Repository-generated blueprints
+
+Most archives in this directory are exports authored in a running Workshop. A deployment may also
+own a reproducible source-to-archive build when a bundled Gadget contains policy that must be code
+reviewed and tested. The In Time Tec fixed-bid estimator is the local example: its TypeScript source,
+tests, and regeneration command live in `packages/fixed-bid-pricing/`, while the generated
+`fixed-bid-pricing.gadget` and curated sidecar stay here so installation follows the one ordinary
+bundled-Blueprint path. Its package build fails if source and the checked-in archive drift.
