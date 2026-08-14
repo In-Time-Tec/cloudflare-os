@@ -15,6 +15,17 @@ const packageDirs = {
 const generatedPaths = Object.fromEntries(
     Object.entries(packageDirs).map(([name, directory]) => [name, join(directory, generatedName)]),
 );
+const resourceNames = [
+  "blueprintsKvNamespace",
+  "avatarsKvNamespace",
+  "blueprintContentBucket",
+  "contextKvNamespace",
+];
+const checkResources = {
+  blueprintsKvNamespaceId: "00000000000000000000000000000001",
+  avatarsKvNamespaceId: "00000000000000000000000000000002",
+  contextKvNamespaceId: "00000000000000000000000000000003",
+};
 
 /** Validate the repository-owned workers.dev deployment contract. */
 export function validateConfig(config) {
@@ -42,16 +53,15 @@ export function validateConfig(config) {
     throw new Error("Context sharingDomain must be a non-empty string.");
   }
 
-  for (const key of [
-    "blueprintsKvNamespaceId",
-    "avatarsKvNamespaceId",
-    "blueprintContentBucket",
-    "contextKvNamespaceId",
-  ]) {
+  for (const key of resourceNames) {
     const value = config.resources?.[key];
-    if (value !== null && (typeof value !== "string" || !value.trim())) {
-      throw new Error(`Deployment resource ${key} must be null or a non-empty string.`);
+    if (typeof value !== "string" ||
+        !/^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/.test(value)) {
+      throw new Error(`Deployment resource ${key} must be a valid Cloudflare resource name.`);
     }
+  }
+  if (new Set(resourceNames.map((key) => config.resources[key])).size !== resourceNames.length) {
+    throw new Error("Deployment resource names must be unique.");
   }
 
   return config;
@@ -68,16 +78,25 @@ function setCommon(base, accountId, name, workersDev = false) {
 }
 
 /** Generate the four Wrangler configurations deployed by `pnpm deploy`. */
-export function generateConfigs(config, accountId, bases) {
+export function generateConfigs(config, accountId, bases, resources) {
   validateConfig(config);
   if (!/^[a-f\d]{32}$/i.test(accountId)) {
     throw new Error("CLOUDFLARE_ACCOUNT_ID must be a 32-character hexadecimal account ID.");
+  }
+  for (const key of [
+    "blueprintsKvNamespaceId",
+    "avatarsKvNamespaceId",
+    "contextKvNamespaceId",
+  ]) {
+    if (!/^[a-f\d]{32}$/i.test(resources?.[key] ?? "")) {
+      throw new Error(`Resolved deployment resource ${key} must be a Cloudflare KV namespace ID.`);
+    }
   }
 
   const context = setCommon(bases.context, accountId, config.workers.context);
   context.kv_namespaces = [{
     binding: "CONTEXT_COLLECTIONS",
-    ...(config.resources.contextKvNamespaceId ? { id: config.resources.contextKvNamespaceId } : {}),
+    id: resources.contextKvNamespaceId,
   }];
 
   const scheduler = setCommon(bases.scheduler, accountId, config.workers.scheduler);
@@ -104,22 +123,16 @@ export function generateConfigs(config, accountId, bases) {
   backend.kv_namespaces = [
     {
       binding: "BLUEPRINTS",
-      ...(config.resources.blueprintsKvNamespaceId
-        ? { id: config.resources.blueprintsKvNamespaceId }
-        : {}),
+      id: resources.blueprintsKvNamespaceId,
     },
     {
       binding: "AVATARS",
-      ...(config.resources.avatarsKvNamespaceId
-        ? { id: config.resources.avatarsKvNamespaceId }
-        : {}),
+      id: resources.avatarsKvNamespaceId,
     },
   ];
   backend.r2_buckets = [{
     binding: "BLUEPRINT_CONTENT",
-    ...(config.resources.blueprintContentBucket
-      ? { bucket_name: config.resources.blueprintContentBucket }
-      : {}),
+    bucket_name: config.resources.blueprintContentBucket,
   }];
 
   const router = setCommon(bases.router, accountId, config.workers.router, true);
@@ -139,6 +152,109 @@ export function generateConfigs(config, accountId, bases) {
   ];
 
   return { context, scheduler, backend, router };
+}
+
+class CloudflareApiError extends Error {
+  constructor(path, status, errors) {
+    const detail = errors.length > 0
+      ? errors.map(({ code, message }) => `${message} (${code})`).join(", ")
+      : `HTTP ${status}`;
+    super(`Cloudflare API request ${path} failed: ${detail}.`);
+    this.status = status;
+  }
+}
+
+async function cloudflareRequest(path, apiToken, options = {}, fetchImpl = fetch) {
+  const response = await fetchImpl(`https://api.cloudflare.com/client/v4${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...options.headers,
+    },
+  });
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new CloudflareApiError(path, response.status, []);
+  }
+  if (!response.ok || payload.success === false) {
+    throw new CloudflareApiError(path, response.status, payload.errors ?? []);
+  }
+  return payload;
+}
+
+async function listKvNamespaces(accountId, apiToken, fetchImpl) {
+  const namespaces = [];
+  let page = 1;
+  while (true) {
+    const payload = await cloudflareRequest(
+        `/accounts/${accountId}/storage/kv/namespaces?per_page=1000&page=${page}`,
+        apiToken,
+        {},
+        fetchImpl,
+    );
+    namespaces.push(...payload.result);
+    if (page >= (payload.result_info?.total_pages ?? 1)) break;
+    page += 1;
+  }
+  return namespaces;
+}
+
+/** Provision or reconnect the stable storage resources needed by the deployment. */
+export async function ensureRemoteResources(config, accountId, apiToken, fetchImpl = fetch) {
+  validateConfig(config);
+  if (!/^[a-f\d]{32}$/i.test(accountId)) {
+    throw new Error("CLOUDFLARE_ACCOUNT_ID must be a 32-character hexadecimal account ID.");
+  }
+  if (!apiToken) {
+    throw new Error("CLOUDFLARE_API_TOKEN is required to deploy.");
+  }
+
+  const kvNames = {
+    blueprintsKvNamespaceId: config.resources.blueprintsKvNamespace,
+    avatarsKvNamespaceId: config.resources.avatarsKvNamespace,
+    contextKvNamespaceId: config.resources.contextKvNamespace,
+  };
+  const existing = new Map(
+      (await listKvNamespaces(accountId, apiToken, fetchImpl)).map(({ title, id }) => [title, id]),
+  );
+  const resolved = {};
+  for (const [key, title] of Object.entries(kvNames)) {
+    let id = existing.get(title);
+    if (!id) {
+      const payload = await cloudflareRequest(
+          `/accounts/${accountId}/storage/kv/namespaces`,
+          apiToken,
+          { method: "POST", body: JSON.stringify({ title }) },
+          fetchImpl,
+      );
+      id = payload.result.id;
+      console.log(`Created KV namespace ${title}.`);
+    } else {
+      console.log(`Reusing KV namespace ${title}.`);
+    }
+    resolved[key] = id;
+  }
+
+  const bucketName = config.resources.blueprintContentBucket;
+  const bucketPath = `/accounts/${accountId}/r2/buckets/${encodeURIComponent(bucketName)}`;
+  try {
+    await cloudflareRequest(bucketPath, apiToken, {}, fetchImpl);
+    console.log(`Reusing R2 bucket ${bucketName}.`);
+  } catch (error) {
+    if (!(error instanceof CloudflareApiError) || error.status !== 404) throw error;
+    await cloudflareRequest(
+        `/accounts/${accountId}/r2/buckets`,
+        apiToken,
+        { method: "POST", body: JSON.stringify({ name: bucketName }) },
+        fetchImpl,
+    );
+    console.log(`Created R2 bucket ${bucketName}.`);
+  }
+
+  return resolved;
 }
 
 async function readJsonc(path) {
@@ -176,12 +292,16 @@ function build() {
 async function main() {
   const config = validateConfig(await readJsonc(join(root, "deployment/workers-dev.jsonc")));
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
+  const check = process.argv.includes("--check");
+  const resources = check
+    ? checkResources
+    : await ensureRemoteResources(config, accountId, process.env.CLOUDFLARE_API_TOKEN ?? "");
   const generated = generateConfigs(config, accountId, {
     router: await readJsonc(join(packageDirs.router, "wrangler.jsonc")),
     backend: await readJsonc(join(packageDirs.backend, "wrangler.jsonc")),
     context: await readJsonc(join(packageDirs.context, "wrangler.jsonc")),
     scheduler: await readJsonc(join(packageDirs.scheduler, "wrangler.jsonc")),
-  });
+  }, resources);
 
   try {
     await Promise.all(Object.entries(generated).map(([name, value]) =>
@@ -189,7 +309,7 @@ async function main() {
     ));
     build();
 
-    const deployArgs = process.argv.includes("--check") ? ["--dry-run"] : [];
+    const deployArgs = check ? ["--dry-run"] : [];
     for (const name of ["context", "scheduler", "backend", "router"]) {
       run(["exec", "wrangler", "deploy", "--config", generatedName, ...deployArgs], packageDirs[name]);
     }

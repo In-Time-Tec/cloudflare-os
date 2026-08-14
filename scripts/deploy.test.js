@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "jsonc-parser";
-import { generateConfigs, validateConfig } from "./deploy.mjs";
+import { ensureRemoteResources, generateConfigs, validateConfig } from "./deploy.mjs";
 
 const accountId = "0123456789abcdef0123456789abcdef";
 const validConfig = {
@@ -15,11 +15,16 @@ const validConfig = {
   auth: { admins: ["admin"] },
   context: { sharingDomain: "acme-workers-dev" },
   resources: {
-    blueprintsKvNamespaceId: null,
-    avatarsKvNamespaceId: null,
-    blueprintContentBucket: null,
-    contextKvNamespaceId: null,
+    blueprintsKvNamespace: "acme-os-backend-blueprints",
+    avatarsKvNamespace: "acme-os-backend-avatars",
+    blueprintContentBucket: "acme-os-backend-blueprint-content",
+    contextKvNamespace: "acme-os-context-collections",
   },
+};
+const resolvedResources = {
+  blueprintsKvNamespaceId: "11111111111111111111111111111111",
+  avatarsKvNamespaceId: "22222222222222222222222222222222",
+  contextKvNamespaceId: "33333333333333333333333333333333",
 };
 
 async function baseConfig(path) {
@@ -45,12 +50,17 @@ test("rejects invalid deployment identities", () => {
   assert.throws(() => validateConfig(malformedAdmin), /username/i);
 
   const missingResource = structuredClone(validConfig);
-  delete missingResource.resources.contextKvNamespaceId;
-  assert.throws(() => validateConfig(missingResource), /contextKvNamespaceId/);
+  delete missingResource.resources.contextKvNamespace;
+  assert.throws(() => validateConfig(missingResource), /contextKvNamespace/);
 });
 
 test("generates the workers.dev composition", async () => {
-  const generated = generateConfigs(validConfig, accountId, await baseConfigs());
+  const generated = generateConfigs(
+      validConfig,
+      accountId,
+      await baseConfigs(),
+      resolvedResources,
+  );
 
   assert.equal(generated.router.name, "acme-os");
   assert.equal(generated.router.workers_dev, true);
@@ -65,10 +75,12 @@ test("generates the workers.dev composition", async () => {
   assert.deepEqual(generated.backend.vars.ADMINS, ["admin"]);
   assert.deepEqual(generated.backend.ai, { binding: "WORKERS_AI" });
   assert.deepEqual(generated.backend.kv_namespaces, [
-    { binding: "BLUEPRINTS" },
-    { binding: "AVATARS" },
+    { binding: "BLUEPRINTS", id: resolvedResources.blueprintsKvNamespaceId },
+    { binding: "AVATARS", id: resolvedResources.avatarsKvNamespaceId },
   ]);
-  assert.deepEqual(generated.backend.r2_buckets, [{ binding: "BLUEPRINT_CONTENT" }]);
+  assert.deepEqual(generated.backend.r2_buckets, [
+    { binding: "BLUEPRINT_CONTENT", bucket_name: "acme-os-backend-blueprint-content" },
+  ]);
   assert.deepEqual(generated.backend.services[0], {
     binding: "GATEKEEPER_CONTEXT",
     service: "acme-os-context",
@@ -77,6 +89,68 @@ test("generates the workers.dev composition", async () => {
   });
 
   assert.equal(generated.context.workers_dev, false);
-  assert.deepEqual(generated.context.kv_namespaces, [{ binding: "CONTEXT_COLLECTIONS" }]);
+  assert.deepEqual(generated.context.kv_namespaces, [{
+    binding: "CONTEXT_COLLECTIONS",
+    id: resolvedResources.contextKvNamespaceId,
+  }]);
   assert.equal(generated.scheduler.workers_dev, false);
+});
+
+test("reuses storage created by a partial deployment and creates only missing resources", async () => {
+  const requests = [];
+  const existingNamespaces = [
+    {
+      title: validConfig.resources.blueprintsKvNamespace,
+      id: resolvedResources.blueprintsKvNamespaceId,
+    },
+    {
+      title: validConfig.resources.avatarsKvNamespace,
+      id: resolvedResources.avatarsKvNamespaceId,
+    },
+    {
+      title: validConfig.resources.contextKvNamespace,
+      id: resolvedResources.contextKvNamespaceId,
+    },
+  ];
+  const fetchImpl = async (input, init = {}) => {
+    const url = new URL(input);
+    requests.push({ path: url.pathname, method: init.method ?? "GET" });
+    if (url.pathname.endsWith("/storage/kv/namespaces")) {
+      return Response.json({
+        success: true,
+        result: existingNamespaces,
+        result_info: { total_pages: 1 },
+      });
+    }
+    if (url.pathname.endsWith(`/${validConfig.resources.blueprintContentBucket}`) &&
+        (init.method ?? "GET") === "GET") {
+      return Response.json(
+          { success: false, errors: [{ code: 10006, message: "bucket not found" }] },
+          { status: 404 },
+      );
+    }
+    if (url.pathname.endsWith("/r2/buckets") && init.method === "POST") {
+      return Response.json({ success: true, result: { name: "created" } });
+    }
+    throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url.pathname}`);
+  };
+
+  const resources = await ensureRemoteResources(validConfig, accountId, "test-token", fetchImpl);
+
+  assert.deepEqual(resources, resolvedResources);
+  assert.deepEqual(requests, [
+    {
+      path: `/client/v4/accounts/${accountId}/storage/kv/namespaces`,
+      method: "GET",
+    },
+    {
+      path: `/client/v4/accounts/${accountId}/r2/buckets/` +
+        validConfig.resources.blueprintContentBucket,
+      method: "GET",
+    },
+    {
+      path: `/client/v4/accounts/${accountId}/r2/buckets`,
+      method: "POST",
+    },
+  ]);
 });

@@ -16,11 +16,11 @@
     "sharingDomain": "intimetec-workers-dev"
   },
 
-  // null lets Wrangler provision storage once and reconnect it on later deployments.
+  // Stable names let stateless CI reconnect storage after retries and partial deployments.
   "resources": {
-    "blueprintsKvNamespaceId": null,
-    "avatarsKvNamespaceId": null,
-    "blueprintContentBucket": null,
-    "contextKvNamespaceId": null
+    "blueprintsKvNamespace": "intimetec-cloudflare-os-backend-blueprints",
+    "avatarsKvNamespace": "intimetec-cloudflare-os-backend-avatars",
+    "blueprintContentBucket": "intimetec-cloudflare-os-backend-blueprint-content",
+    "contextKvNamespace": "intimetec-cloudflare-os-context-context-collections"
   }
 }

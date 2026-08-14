@@ -25,11 +25,12 @@ Cloudflare Workers + KV + R2
 ```
 
 [`scripts/deploy.mjs`](../scripts/deploy.mjs) owns the complete operation: it validates deployment
-configuration, builds the required packages, derives production Wrangler configurations from each
-package's checked-in base config, deploys private dependencies in order, and publishes the router
-last. This code lives in the fork instead of modifying upstream application packages or patching an
-external deployment repository. The temporary environment uses Cloudflare OS's built-in password
-accounts; Microsoft Entra ID will replace them in Phase 1.
+configuration, reconciles stable KV and R2 resources, builds the required packages, derives
+production Wrangler configurations from each package's checked-in base config, deploys private
+dependencies in order, and publishes the router last. This code lives in the fork instead of
+modifying upstream application packages or patching an external deployment repository. The
+temporary environment uses Cloudflare OS's built-in password accounts; Microsoft Entra ID will
+replace them in Phase 1.
 
 ## Deployment identities and state
 
@@ -43,12 +44,17 @@ configuration:
 | Context Gatekeeper | `intimetec-cloudflare-os-context` |
 | Scheduler Gatekeeper | `intimetec-cloudflare-os-scheduler` |
 | Context sharing domain | `intimetec-workers-dev` |
+| Blueprint metadata KV | `intimetec-cloudflare-os-backend-blueprints` |
+| Avatar KV | `intimetec-cloudflare-os-backend-avatars` |
+| Blueprint content R2 | `intimetec-cloudflare-os-backend-blueprint-content` |
+| Context collections KV | `intimetec-cloudflare-os-context-context-collections` |
 
-Wrangler automatically provisions the Workshop blueprint and avatar KV namespaces, blueprint R2
-bucket, and Context KV namespace on the first deployment. Later deployments reconnect resources by
-binding and Worker identity, preserving user, Durable Object, KV, and R2 state. Do not rename these
-Workers, change the Context sharing domain, or replace resource bindings as routine release work;
-that creates or points at a different deployment identity.
+The deploy command looks up each resource by its stable name, creates only what is missing, and
+writes the resolved KV IDs and R2 bucket name into its temporary Wrangler configurations. This
+keeps stateless CI retries safe after partial deployments and preserves user, Durable Object, KV,
+and R2 state. Do not rename these Workers or resources, change the Context sharing domain, or
+replace resource bindings as routine release work; that creates or points at a different deployment
+identity.
 
 The evaluation administrator is the built-in username `dallenpyrah`. On the first visit, create an
 account using exactly that username to receive `/admin` access. Account signup is initially open so
@@ -66,6 +72,10 @@ The repository requires these GitHub Actions secrets:
 - `CLOUDFLARE_API_TOKEN`: Cloudflare API token with Workers, KV, R2, Browser Rendering, Workers AI,
   and Dynamic Worker Loader deployment permissions.
 - `CLOUDFLARE_ACCOUNT_ID`: account that owns all Workers and provisioned resources.
+
+R2 must be enabled for that account in the Cloudflare dashboard before the first deployment. R2
+activation accepts Cloudflare's service and billing terms, so it is an account-owner prerequisite
+rather than an automated CI action.
 
 Secrets are passed only to Wrangler at workflow runtime. They must not appear in the deployment
 JSON, workflow commands, logs, or application configuration. The Blacksmith GitHub App must include
@@ -101,7 +111,7 @@ When an upstream merge changes a deployable package's Wrangler configuration, up
 `scripts/deploy.mjs` only if the new binding or deployment behavior needs account-specific values.
 Run `CLOUDFLARE_ACCOUNT_ID=<account-id> pnpm deploy -- --check` to build every deployable component
 and execute Wrangler dry runs without changing Cloudflare. The normal deployment tests also verify
-the generated service topology and automatic resource bindings in CI.
+the generated service topology and resolved resource bindings in CI.
 
 Before production use, replace `workers.dev` and open password signup with the company domain and
 Microsoft Entra ID, enable the desired production observability/error destination, rotate the
