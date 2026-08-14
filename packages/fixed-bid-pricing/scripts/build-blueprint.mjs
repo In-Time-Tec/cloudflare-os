@@ -72,6 +72,17 @@ function parseArchive(bytes) {
   };
 }
 
+function archiveFiles(bytes) {
+  const parsed = parseArchive(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+  const document = new Y.Doc();
+  Y.applyUpdateV2(document, gunzipSync(parsed.content));
+  const files = new Map();
+  for (const [name, value] of document.getMap().entries()) {
+    files.set(name, value?.toString() ?? "");
+  }
+  return { metadata: parsed.metadata, files };
+}
+
 const [provenance, sidecar, server, client, readme] = await Promise.all([
   readFile(join(packageRoot, "blueprint.json"), "utf8").then(JSON.parse),
   readFile(sidecarPath, "utf8").then(JSON.parse),
@@ -99,6 +110,9 @@ for (const [name, source] of [...sourceFiles].toSorted(([left], [right]) =>
 }
 const update = Y.encodeStateAsUpdateV2(document);
 const content = gzipSync(update, { level: 9, mtime: 0 });
+// zlib stamps the host OS into byte 9 of the gzip header (3 on Linux, 19 on macOS). The field is
+// informational, so normalize it to "unknown" to keep the checked-in Blueprint platform-neutral.
+content[9] = 255;
 const metadata = {
   title: sidecar.title,
   description: sidecar.description,
@@ -145,10 +159,19 @@ if (mode === "--write") {
     }
     throw caught;
   }
-  if (!checkedIn.equals(Buffer.from(archive))) {
+  const checked = archiveFiles(checkedIn);
+  const fresh = archiveFiles(archive);
+  if (JSON.stringify(checked.metadata) !== JSON.stringify(fresh.metadata)) {
     throw new Error(
       "Fixed-bid Blueprint archive is stale; run pnpm build:blueprint and commit the result.",
     );
+  }
+  for (const name of new Set([...checked.files.keys(), ...fresh.files.keys()])) {
+    if (checked.files.get(name) !== fresh.files.get(name)) {
+      throw new Error(
+        "Fixed-bid Blueprint archive is stale; run pnpm build:blueprint and commit the result.",
+      );
+    }
   }
   console.log(`Fixed-bid Blueprint archive matches source (${archive.byteLength} bytes, ${digest})`);
 }
