@@ -48,6 +48,7 @@ describe('SiteLogo', () => {
     expect(image.getAttribute('alt')).toBe('')
     expect(image.width).toBe(20)
     expect(image.height).toBe(20)
+    expect(image.classList.contains('rounded-[22%]')).toBe(true)
     expect(container!.querySelector('[data-fallback]')).toBeNull()
   })
 

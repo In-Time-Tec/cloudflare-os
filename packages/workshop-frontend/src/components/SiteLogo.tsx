@@ -26,7 +26,7 @@ export default function SiteLogo({
       alt=""
       width={size}
       height={size}
-      className={`object-contain ${className ?? ''}`}
+      className={`rounded-[22%] object-contain ${className ?? ''}`}
       onError={() => setFailed(true)}
     />
   )

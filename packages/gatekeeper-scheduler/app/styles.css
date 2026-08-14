@@ -4,40 +4,40 @@
 
 @theme {
   --font-sans: "FT Kunst Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --color-kumo-base: #fcfcfb;
-  --color-kumo-elevated: #f8f8f7;
-  --color-kumo-tint: #f3f3f1;
-  --color-kumo-control: #ffffff;
-  --color-kumo-fill: #e8e7e4;
-  --color-kumo-brand: #ff4801;
-  --color-kumo-brand-hover: #e03f00;
-  --color-kumo-line: #1411100f;
-  --color-kumo-ring: #cac8c3;
+  --color-kumo-base: #fafdf7;
+  --color-kumo-elevated: #fafdf7;
+  --color-kumo-tint: #f0f4ed;
+  --color-kumo-control: #fafdf7;
+  --color-kumo-fill: #e7ece4;
+  --color-kumo-brand: #111512;
+  --color-kumo-brand-hover: #252b26;
+  --color-kumo-line: #dfe5dc;
+  --color-kumo-ring: #aeb8ab;
   --color-kumo-danger: oklch(63.7% 0.237 25.331);
   --color-kumo-danger-tint: oklch(92% 0.06 25);
-  --text-color-kumo-default: #1c1a18;
-  --text-color-kumo-subtle: oklch(52% 0.006 60);
-  --text-color-kumo-inactive: oklch(66% 0.005 60);
-  --text-color-kumo-link: #ff4801;
+  --text-color-kumo-default: #555a55;
+  --text-color-kumo-subtle: #7d837d;
+  --text-color-kumo-inactive: #9ca39c;
+  --text-color-kumo-link: #39433c;
   --text-color-kumo-danger: oklch(63.7% 0.237 25.331);
 }
 
 [data-mode="dark"] {
-  --color-kumo-base: oklch(0.115 0.012 285);
-  --color-kumo-elevated: oklch(0.155 0.011 285);
-  --color-kumo-tint: oklch(0.225 0.025 285);
-  --color-kumo-control: oklch(0.155 0.011 285);
-  --color-kumo-fill: oklch(0.225 0.025 285);
-  --color-kumo-brand: #b84e00;
-  --color-kumo-brand-hover: #a54200;
-  --color-kumo-line: oklch(0.34 0.022 285);
-  --color-kumo-ring: oklch(0.52 0.065 285);
+  --color-kumo-base: #0e1516;
+  --color-kumo-elevated: #0e1516;
+  --color-kumo-tint: #172021;
+  --color-kumo-control: #121a1b;
+  --color-kumo-fill: #202a2a;
+  --color-kumo-brand: #eaf1ea;
+  --color-kumo-brand-hover: #ffffff;
+  --color-kumo-line: #263031;
+  --color-kumo-ring: #667270;
   --color-kumo-danger: oklch(70.4% 0.191 22.216);
   --color-kumo-danger-tint: oklch(0.25 0.065 25.331);
-  --text-color-kumo-default: oklch(0.92 0.01 285);
-  --text-color-kumo-subtle: oklch(0.66 0.02 285);
-  --text-color-kumo-inactive: oklch(0.58 0.025 285);
-  --text-color-kumo-link: #ff8a5c;
+  --text-color-kumo-default: #aab1ab;
+  --text-color-kumo-subtle: #78817c;
+  --text-color-kumo-inactive: #626c68;
+  --text-color-kumo-link: #c6d0c8;
   --text-color-kumo-danger: oklch(70.4% 0.191 22.216);
 }
 
