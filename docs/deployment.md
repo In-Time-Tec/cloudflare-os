@@ -73,9 +73,11 @@ The repository requires these GitHub Actions secrets:
   and Dynamic Worker Loader deployment permissions.
 - `CLOUDFLARE_ACCOUNT_ID`: account that owns all Workers and provisioned resources.
 
-R2 must be enabled for that account in the Cloudflare dashboard before the first deployment. R2
-activation accepts Cloudflare's service and billing terms, so it is an account-owner prerequisite
-rather than an automated CI action.
+The account must be on the **Workers Paid** plan because Cloudflare OS uses Dynamic Workers to run
+agent- and user-authored code in isolated Workers. Dynamic Workers cannot be deployed on the Workers
+Free plan. R2 must also be enabled for the account before the first deployment. Both actions accept
+Cloudflare's service or billing terms, so they are account-owner prerequisites rather than automated
+CI actions.
 
 Secrets are passed only to Wrangler at workflow runtime. They must not appear in the deployment
 JSON, workflow commands, logs, or application configuration. The Blacksmith GitHub App must include
