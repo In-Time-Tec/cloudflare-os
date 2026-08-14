@@ -20,32 +20,31 @@
   --text-lg--line-height: 1.75rem;
 
   /* ===== KUMO SEMANTIC COLOR OVERRIDES =====
-     Near-neutral, barely-warm greys for every surface, border, and neutral text. The brand orange
-     is reserved for *intent only* (active item, links, primary action, focus) so it actually pops.
-     This is the single biggest lever between a "consumer/playground" feel and an enterprise one. */
+     Amp's low-chroma green neutrals keep surfaces quiet; the strongest neutral is reserved for
+     active controls and focus so those states remain legible without a separate accent hue. */
 
-  /* Background tokens — near-white neutrals with a faint warm undertone */
-  --color-kumo-base: #fcfcfb;
-  --color-kumo-elevated: #f8f8f7;
-  --color-kumo-tint: #f3f3f1;
-  --color-kumo-overlay: #fbfbfa;
-  --color-kumo-recessed: #efeeec;
-  --color-kumo-control: #ffffff;
-  --color-kumo-contrast: #14110f;
-  --color-kumo-fill: #e8e7e4;
-  --color-kumo-fill-hover: #dededb;
-  --color-kumo-interact: #cac8c3;
+  /* Amp's cool, very lightly green canvas. */
+  --color-app-frame: #e5eae1;
+  --color-kumo-base: #fafdf7;
+  --color-kumo-elevated: #fafdf7;
+  --color-kumo-tint: #f0f4ed;
+  --color-kumo-overlay: #fafdf7;
+  --color-kumo-recessed: #e9eee6;
+  --color-kumo-control: #fafdf7;
+  --color-kumo-contrast: #111512;
+  --color-kumo-fill: #e7ece4;
+  --color-kumo-fill-hover: #dce2d9;
+  --color-kumo-interact: #c6cec3;
 
-  /* Brand — warm orange accent (intent only) */
-  --color-kumo-brand: #ff4801;
-  --color-kumo-brand-hover: #e03f00;
+  --color-kumo-brand: #111512;
+  --color-kumo-brand-hover: #252b26;
 
   /* Border / line tokens — neutral hairlines */
-  --color-kumo-line: #1411100f;
-  --color-kumo-ring: #cac8c3;
+  --color-kumo-line: #dfe5dc;
+  --color-kumo-ring: #aeb8ab;
 
   /* Chat surface tokens */
-  --color-kumo-bubble-user: #f1f0ee;
+  --color-kumo-bubble-user: #eef2eb;
 
   /* Status tints — keep functional colors, warm the tints */
   --color-kumo-info: oklch(62.3% 0.214 259.815);
@@ -62,33 +61,33 @@
   --color-kumo-tip-stroke: transparent;
 
   /* Text color tokens — near-neutral greys (faint warm undertone, no brown) */
-  --text-color-kumo-default: #1c1a18;
-  --text-color-kumo-default-hover: #100f0d;
+  --text-color-kumo-default: #555a55;
+  --text-color-kumo-default-hover: #252a26;
   --text-color-kumo-inverse: #ffffff;
-  --text-color-kumo-strong: #100f0d;
-  --text-color-kumo-subtle: oklch(52% 0.006 60);
-  --text-color-kumo-inactive: oklch(66% 0.005 60);
-  --text-color-kumo-brand: #ff4801;
-  --text-color-kumo-link: #ff4801;
+  --text-color-kumo-strong: #252a26;
+  --text-color-kumo-subtle: #7d837d;
+  --text-color-kumo-inactive: #9ca39c;
+  --text-color-kumo-brand: #111512;
+  --text-color-kumo-link: #39433c;
   --text-color-kumo-success: oklch(72.3% 0.219 149.579);
   --text-color-kumo-danger: oklch(63.7% 0.237 25.331);
   --text-color-kumo-warning: oklch(47.6% 0.114 61.907);
 
   /* ===== CUSTOM BRAND TOKENS (for direct use alongside Kumo tokens) ===== */
-  --color-accent-100: #ff4801;
-  --color-accent-200: #ff7038;
-  --color-background-100: #fcfcfb;
-  --color-background-200: #f8f8f7;
-  --color-background-300: #f3f3f1;
-  --color-foreground-100: #100f0d;
-  --color-foreground-200: #100f0d;
-  --color-foreground-300: #1c1a18;
-  --color-border-100: #e8e7e4;
-  --color-border-100-50: #e8e7e480;
-  --color-selection-bg: #ffe9e0;
-  --color-selection-text: #ff500a;
-  --color-shadow-accent-light: #ffa683;
-  --color-shadow-accent-dark: #b13200;
+  --color-accent-100: #111512;
+  --color-accent-200: #39433c;
+  --color-background-100: #fafdf7;
+  --color-background-200: #f0f4ed;
+  --color-background-300: #e9eee6;
+  --color-foreground-100: #252a26;
+  --color-foreground-200: #555a55;
+  --color-foreground-300: #7d837d;
+  --color-border-100: #dfe5dc;
+  --color-border-100-50: #dfe5dc80;
+  --color-selection-bg: #dce3da;
+  --color-selection-text: #111512;
+  --color-shadow-accent-light: #d7dfd4;
+  --color-shadow-accent-dark: #899387;
 
   /* Category colors */
   --color-compute-100: #0a95ff;
@@ -136,29 +135,31 @@
   --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 
   /* Shadows */
+  --shadow-app-shell: 0 2px 8px #2831261a, 0 18px 45px #28312614;
   --shadow-stack: 1px 6px 6px 0 #fff3 inset, 0 0 0px 0 #ffffff59 inset,
     0 4px 12px 0 #00000005, 0 0 0px 0 #00000005, 0 2px 12px 0 #00000008;
 }
 
 [data-mode="dark"] {
-  /* Seal-inspired dark palette: violet-tinted surfaces around hue 285, not neutral black. */
-  --color-kumo-base: oklch(0.115 0.012 285);
-  --color-kumo-elevated: oklch(0.155 0.011 285);
-  --color-kumo-tint: oklch(0.225 0.025 285);
-  --color-kumo-overlay: oklch(0.155 0.011 285);
-  --color-kumo-recessed: oklch(0.1 0.012 285);
-  --color-kumo-control: oklch(0.155 0.011 285);
+  /* Amp's near-black teal palette, sampled from the reference shell. */
+  --color-app-frame: #0b0d0b;
+  --color-kumo-base: #0e1516;
+  --color-kumo-elevated: #0e1516;
+  --color-kumo-tint: #172021;
+  --color-kumo-overlay: #121a1b;
+  --color-kumo-recessed: #0a1112;
+  --color-kumo-control: #121a1b;
   --color-kumo-contrast: var(--color-kumo-brand);
   --color-kumo-strong: var(--color-kumo-brand-hover);
-  --color-kumo-fill: oklch(0.225 0.025 285);
-  --color-kumo-fill-hover: oklch(0.295 0.045 285);
-  --color-kumo-interact: oklch(0.34 0.022 285);
-  --color-kumo-line: oklch(0.34 0.022 285);
-  --color-kumo-ring: oklch(0.52 0.065 285);
-  --color-kumo-bubble-user: oklch(0.225 0.025 285);
+  --color-kumo-fill: #202a2a;
+  --color-kumo-fill-hover: #2b3636;
+  --color-kumo-interact: #3d4948;
+  --color-kumo-line: #263031;
+  --color-kumo-ring: #667270;
+  --color-kumo-bubble-user: #202a2a;
 
-  --color-kumo-brand: #b84e00;
-  --color-kumo-brand-hover: #a54200;
+  --color-kumo-brand: #eaf1ea;
+  --color-kumo-brand-hover: #ffffff;
 
   --color-kumo-info: oklch(62.3% 0.214 259.815);
   --color-kumo-info-tint: oklch(0.25 0.065 259.815);
@@ -170,33 +171,33 @@
   --color-kumo-success-tint: oklch(0.25 0.06 150.069);
 
   --color-kumo-tip-shadow: #00000066;
-  --color-kumo-tip-stroke: oklch(0.34 0.022 285);
+  --color-kumo-tip-stroke: #263031;
 
-  --text-color-kumo-default: oklch(0.92 0.01 285);
-  --text-color-kumo-default-hover: oklch(0.97 0.006 285);
-  --text-color-kumo-inverse: #ffffff;
-  --text-color-kumo-strong: oklch(0.92 0.01 285);
-  --text-color-kumo-subtle: oklch(0.66 0.02 285);
-  --text-color-kumo-inactive: oklch(0.58 0.025 285);
-  --text-color-kumo-brand: #ff8a5c;
-  --text-color-kumo-link: #ff8a5c;
+  --text-color-kumo-default: #aab1ab;
+  --text-color-kumo-default-hover: #dce4dd;
+  --text-color-kumo-inverse: #111512;
+  --text-color-kumo-strong: #dce4dd;
+  --text-color-kumo-subtle: #78817c;
+  --text-color-kumo-inactive: #626c68;
+  --text-color-kumo-brand: #eaf1ea;
+  --text-color-kumo-link: #c6d0c8;
   --text-color-kumo-success: oklch(79.2% 0.209 151.711);
   --text-color-kumo-danger: oklch(70.4% 0.191 22.216);
   --text-color-kumo-warning: oklch(82.8% 0.189 84.429);
 
-  --color-accent-100: #b84e00;
-  --color-accent-200: #ff8a5c;
-  --color-background-100: oklch(0.115 0.012 285);
-  --color-background-200: oklch(0.155 0.011 285);
-  --color-background-300: oklch(0.225 0.025 285);
-  --color-foreground-100: oklch(0.92 0.01 285);
-  --color-foreground-200: oklch(0.78 0.018 285);
-  --color-foreground-300: oklch(0.66 0.02 285);
-  --color-border-100: oklch(0.34 0.022 285);
-  --color-border-100-50: oklch(0.34 0.022 285 / 0.5);
+  --color-accent-100: #eaf1ea;
+  --color-accent-200: #c6d0c8;
+  --color-background-100: #0e1516;
+  --color-background-200: #172021;
+  --color-background-300: #202a2a;
+  --color-foreground-100: #dce4dd;
+  --color-foreground-200: #aab1ab;
+  --color-foreground-300: #78817c;
+  --color-border-100: #263031;
+  --color-border-100-50: #26303180;
   --color-selection-bg: color-mix(in srgb, var(--color-kumo-brand) 28%, transparent);
-  --color-selection-text: oklch(0.97 0.006 285);
-  --color-shadow-accent-light: #ff663355;
+  --color-selection-text: #ffffff;
+  --color-shadow-accent-light: #dce4dd33;
   --color-shadow-accent-dark: #00000080;
 
   --color-compute-100: oklch(74% 0.16 250);
@@ -212,6 +213,7 @@
   --color-status-draft: oklch(82.8% 0.189 84.429);
   --color-status-building: oklch(74% 0.16 250);
 
+  --shadow-app-shell: 0 0 0 1px #ffffff05, 0 18px 48px #00000042;
   --shadow-stack: 1px 6px 6px 0 #ffffff08 inset, 0 0 0 1px #ffffff05 inset,
     0 18px 40px 0 #00000033, 0 4px 12px 0 #0000002e;
 }
@@ -221,6 +223,58 @@ body {
   font-family: var(--font-sans);
   background-color: var(--color-kumo-base);
   color: var(--text-color-kumo-default);
+}
+
+@keyframes openwork-logo-light {
+  0%, 100% { background-position: 100% 50%; }
+  50% { background-position: 0% 50%; }
+}
+
+.openwork-logo {
+  color: transparent;
+  background: linear-gradient(
+    105deg,
+    #dce2d9 8%,
+    #f8fbf5 32%,
+    #d8dfd5 48%,
+    #f7faf4 67%,
+    #dce2d9 92%
+  );
+  background-clip: text;
+  background-size: 240% 100%;
+  font-size: clamp(3rem, 7vw, 5.75rem);
+  font-weight: 700;
+  letter-spacing: -0.075em;
+  line-height: 1;
+  filter: drop-shadow(0 1px 0 #ffffff) drop-shadow(0 10px 14px #5e6a5a1f);
+  text-shadow:
+    0 1px 0 #e9eee6,
+    0 2px 0 #d4dcd1,
+    0 3px 0 #cbd4c8,
+    0 7px 13px #5560521c;
+  animation: openwork-logo-light 7s ease-in-out infinite;
+  user-select: none;
+}
+
+[data-mode="dark"] .openwork-logo {
+  background-image: linear-gradient(
+    105deg,
+    #182122 8%,
+    #2b3535 32%,
+    #172020 48%,
+    #303a3a 67%,
+    #182122 92%
+  );
+  filter: drop-shadow(0 1px 0 #313b3b) drop-shadow(0 13px 16px #00000066);
+  text-shadow:
+    0 1px 0 #303a3a,
+    0 2px 0 #252f2f,
+    0 3px 0 #1c2526,
+    0 8px 15px #00000073;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .openwork-logo { animation: none; }
 }
 
 ::selection {

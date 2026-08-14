@@ -48,7 +48,7 @@ vi.mock("./ChatInterface", () => ({
   },
 }));
 
-vi.mock("./components/MeshBackground", () => ({ default: () => null }));
+vi.mock("./components/OpenWorkLogo", () => ({ default: () => <div>OpenWork</div> }));
 vi.mock("./components/AppShell/HomeTaskSuggestions", () => ({ default: () => null }));
 vi.mock("./useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
 
@@ -82,5 +82,7 @@ describe("Home prompt route flow", () => {
     expect(testState.navigate).toHaveBeenCalledWith({ to: "/", search: {}, replace: true });
     expect(testState.newGadget).not.toHaveBeenCalled();
     expect(testState.draftStorageKeys).toContain("gadgets:composer-draft:v1:user-a:home");
+    expect(container.textContent).toContain("OpenWork");
+    expect(container.textContent).not.toContain("What are we working on?");
   });
 });

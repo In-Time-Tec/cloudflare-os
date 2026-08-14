@@ -79,55 +79,55 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <div className="flex h-screen min-h-screen w-screen overflow-hidden bg-kumo-base">
-      {/* Desktop sidebar — hidden on mobile in favor of the drawer. */}
-      <div className="hidden md:flex">
-        <Sidebar collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
-      </div>
-
-      {/* Mobile drawer */}
-      {mobileOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[1px] md:hidden"
-            onClick={() => setMobileOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="fixed inset-y-0 left-0 z-50 md:hidden">
-            <Sidebar collapsed={false} onToggleCollapsed={() => setMobileOpen(false)} />
-          </div>
-        </>
-      )}
-
-      {/* Main column */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* Top bar. Same height as the sidebar's brand row (h-14) so they read as one continuous
-            chrome strip across the top. Mostly empty — carries the mobile hamburger on the left,
-            any admin TopBarNotice centered, and the reconnecting chip on the right. */}
-        <div className="relative flex h-14 shrink-0 items-center justify-between border-b border-kumo-line bg-kumo-base px-3">
-          <button
-            type="button"
-            onClick={() => setMobileOpen((o) => !o)}
-            aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-kumo-default transition-colors hover:bg-kumo-tint md:hidden"
-          >
-            {mobileOpen ? <X size={16} /> : <List size={16} />}
-          </button>
-          <TopBarNotice />
-          {/* `ml-auto` rather than the container's `justify-between`: on desktop the hamburger is
-              hidden, leaving this the only in-flow child, which `justify-between` would park on the
-              left. */}
-          <div className="ml-auto flex items-center gap-2">
-            {connectionLost && <ReconnectingChip />}
-            <span aria-hidden="true" className="h-7 w-7 md:hidden" />
-          </div>
+    <div className="h-screen min-h-screen w-screen overflow-hidden bg-app-frame p-0 md:p-3">
+      <div className="flex h-full w-full overflow-hidden bg-kumo-base md:rounded-2xl md:border md:border-kumo-line md:shadow-app-shell">
+        {/* Desktop sidebar — hidden on mobile in favor of the drawer. */}
+        <div className="hidden md:flex">
+          <Sidebar collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
         </div>
 
-        {/* Routed content. Flat enterprise canvas — no texture. */}
-        <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
-      </div>
+        {/* Mobile drawer */}
+        {mobileOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[1px] md:hidden"
+              onClick={() => setMobileOpen(false)}
+              aria-hidden="true"
+            />
+            <div className="fixed inset-y-0 left-0 z-50 md:hidden">
+              <Sidebar collapsed={false} onToggleCollapsed={() => setMobileOpen(false)} />
+            </div>
+          </>
+        )}
 
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+        {/* Main column */}
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          {/* The desktop canvas begins at the top of the inset, like Amp's empty screen. Mobile
+              retains a conventional bar for the menu affordance. Notices float over the desktop
+              canvas instead of reserving an otherwise-empty row. */}
+          <div className="relative z-20 flex h-14 shrink-0 items-center justify-between border-b border-kumo-line bg-kumo-base px-3 md:pointer-events-none md:absolute md:inset-x-0 md:top-0 md:h-auto md:border-0 md:bg-transparent md:p-3">
+            <button
+              type="button"
+              onClick={() => setMobileOpen((o) => !o)}
+              aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+              className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-md text-kumo-default transition-colors hover:bg-kumo-tint md:hidden"
+            >
+              {mobileOpen ? <X size={16} /> : <List size={16} />}
+            </button>
+            <div className="pointer-events-auto">
+              <TopBarNotice />
+            </div>
+            <div className="pointer-events-auto ml-auto flex items-center gap-2">
+              {connectionLost && <ReconnectingChip />}
+              <span aria-hidden="true" className="h-7 w-7 md:hidden" />
+            </div>
+          </div>
+
+          <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
+        </div>
+
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      </div>
     </div>
   )
 }
