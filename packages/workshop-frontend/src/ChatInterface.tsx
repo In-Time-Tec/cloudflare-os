@@ -7064,7 +7064,7 @@ function ChatInterface({
                   </div>
                 ) : (
                   <div
-                    className={`flex flex-col px-6 pt-8 ${pendingConsoleLogCount > 0 ? "pb-8" : "pb-2"} ${useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}`}
+                    className={`flex flex-col px-6 pt-8 ${pendingConsoleLogCount > 0 ? "pb-72" : "pb-64"} ${useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}`}
                   >
                     {isLoadingEarlier && (
                       <div className="mx-auto mb-6 text-[12px] leading-4 font-medium text-kumo-inactive">
