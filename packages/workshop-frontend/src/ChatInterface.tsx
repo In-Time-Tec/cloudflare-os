@@ -3249,12 +3249,6 @@ export const ChatInput = ({
         </div>
       )}
 
-      {docked && (
-        <div
-          aria-hidden
-          className={`pointer-events-none h-24 ${styles.composerFade}`}
-        />
-      )}
       <div className={docked ? "relative px-4" : "relative"}>
       <div
         ref={promptCardRef}
@@ -6722,9 +6716,10 @@ function ChatInterface({
           </DropdownMenu.Content>
         </DropdownMenu>
       </div>
-      <div className="relative min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="relative min-h-0 flex-1">
         <div className="chat-panel absolute inset-0 overflow-y-auto">
-        <div className="p-3 pb-36">
+        <div className="p-3 pb-8">
         {!chatListReady ? (
           <div className="flex items-center justify-center py-10">
             <div className="w-5 h-5 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
@@ -6884,7 +6879,9 @@ function ChatInterface({
         )}
         </div>
         </div>
-        <div className="absolute inset-x-0 bottom-0 z-10">
+        <div aria-hidden className={styles.transcriptFade} />
+        </div>
+        <div className="shrink-0">
           <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
           <ChatInput
             key={workspaceId}
@@ -7052,6 +7049,7 @@ function ChatInterface({
               )}
 
               {/* Messages */}
+              <div className="flex min-h-0 flex-1 flex-col">
               <div className="relative min-h-0 flex-1">
               <div
                 ref={messagesContainerRef}
@@ -7064,7 +7062,7 @@ function ChatInterface({
                   </div>
                 ) : (
                   <div
-                    className={`flex flex-col px-6 pt-8 ${pendingConsoleLogCount > 0 ? "pb-72" : "pb-64"} ${useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}`}
+                    className={`flex flex-col px-6 pt-8 ${pendingConsoleLogCount > 0 ? "pb-12" : "pb-8"} ${useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}`}
                   >
                     {isLoadingEarlier && (
                       <div className="mx-auto mb-6 text-[12px] leading-4 font-medium text-kumo-inactive">
@@ -7843,7 +7841,9 @@ function ChatInterface({
                   </div>
                 )}
               </div>
-                <div className="absolute inset-x-0 bottom-0 z-10">
+              <div aria-hidden className={styles.transcriptFade} />
+              </div>
+                <div className="shrink-0">
                   <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
                   <ChatInput
                     key={`${workspaceId}:${selectedChatId}`}
