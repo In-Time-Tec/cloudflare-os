@@ -9,6 +9,7 @@ import { cacheBustSiteLogoUrl, prepareSiteLogo } from './siteLogoUtils'
 import SiteLogo from './components/SiteLogo'
 import { useDocumentTitle } from './useDocumentTitle'
 import AdminFormatsPanel from './components/format/AdminFormatsPanel'
+import PageChrome from './components/AppShell/PageChrome'
 
 // Preset accent colors offered in the Theme section ('' = default brand).
 const ACCENT_PRESETS: { label: string; value: string }[] = [
@@ -360,41 +361,41 @@ export default function AdminPage() {
 
   if (!isAdmin) {
     return (
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-16 text-center">
-        <ShieldWarning size={32} className="mx-auto text-kumo-subtle mb-3" />
-        <p className="text-sm text-kumo-default">You don't have access to this page.</p>
-      </div>
+      <PageChrome title="Admin">
+        <div className="py-16 text-center">
+          <ShieldWarning size={32} className="mx-auto text-kumo-subtle mb-3" />
+          <p className="text-sm text-kumo-default">You don't have access to this page.</p>
+        </div>
+      </PageChrome>
     )
   }
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center min-h-[60vh]">
-        <p className="text-kumo-subtle">Loading admin settings...</p>
-      </div>
+      <PageChrome title="Admin">
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <p className="text-kumo-subtle">Loading admin settings...</p>
+        </div>
+      </PageChrome>
     )
   }
 
   if (loadError || !admin) {
     return (
-      <div className="mx-auto w-full max-w-[1040px] px-4 sm:px-8 py-16 text-center">
-        <p className="text-sm text-kumo-danger">Something went wrong loading admin settings.</p>
-        <button onClick={() => window.location.reload()} className="text-kumo-brand mt-2 text-sm underline">
-          Try again
-        </button>
-      </div>
+      <PageChrome title="Admin">
+        <div className="py-16 text-center">
+          <p className="text-sm text-kumo-danger">Something went wrong loading admin settings.</p>
+          <button onClick={() => window.location.reload()} className="text-kumo-brand mt-2 text-sm underline">
+            Try again
+          </button>
+        </div>
+      </PageChrome>
     )
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1040px] px-4 sm:px-8 py-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-kumo-default">Admin</h1>
-        <p className="text-sm text-kumo-subtle mt-1">
-          Deployment-wide settings. Changes apply to all users on their next connection.
-        </p>
-      </div>
-
+    <PageChrome title="Admin">
+      <div className="space-y-6">
       <Tabs
         variant="underline"
         value={activeTab}
@@ -951,6 +952,7 @@ export default function AdminPage() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </PageChrome>
   )
 }

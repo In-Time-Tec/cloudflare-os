@@ -3248,16 +3248,6 @@ export const ChatInput = ({
       )}
 
       <div className="relative">
-      {hasUsage && (
-        <div className="absolute right-4 top-0 z-10 flex -translate-y-[calc(100%-1px)] items-center gap-3 rounded-t-lg border border-b-0 border-kumo-line bg-kumo-control px-2.5 py-1 font-mono text-[11px] leading-4 text-kumo-inactive">
-          {usage?.tokens != null && (
-            <span>{usage.tokens.toLocaleString()} tokens</span>
-          )}
-          {usage?.cost != null && (
-            <span>${usage.cost.toFixed(4)}</span>
-          )}
-        </div>
-      )}
       <div
         ref={promptCardRef}
         className="themed-prompt-card-shadow relative overflow-visible rounded-2xl border border-kumo-line bg-kumo-control transition-shadow duration-150 ease-out"
@@ -3266,6 +3256,26 @@ export const ChatInput = ({
         onDragLeave={handleAttachmentDragLeave}
         onDrop={handleAttachmentDrop}
       >
+        {hasUsage && (
+          <div
+            className={`absolute right-4 top-0 z-10 flex -translate-y-[calc(100%-1px)] items-center gap-3 rounded-t-lg border border-b-0 border-kumo-line px-2.5 py-1 font-mono text-[11px] leading-4 text-kumo-inactive ${
+              draftUpdateBanner ? "bg-kumo-elevated" : "bg-kumo-control"
+            }`}
+          >
+            {usage?.tokens != null && (
+              <span>{usage.tokens.toLocaleString()} tokens</span>
+            )}
+            {usage?.cost != null && (
+              <span>${usage.cost.toFixed(4)}</span>
+            )}
+            <span
+              aria-hidden
+              className={`pointer-events-none absolute inset-x-px -bottom-px h-[2px] ${
+                draftUpdateBanner ? "bg-kumo-elevated" : "bg-kumo-control"
+              }`}
+            />
+          </div>
+        )}
         {isAttachmentDragActive && (
           <div className={`themed-inset-outline pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-2xl border-2 border-dashed p-4 backdrop-blur-[1px] transition-[opacity,transform] duration-150 ease-out ${canAttachMore ? "border-kumo-brand/55 bg-kumo-brand/10" : "border-kumo-warning/60 bg-kumo-warning/10"}`}>
             <div className={`themed-floating-shadow flex items-center gap-2 rounded-full border bg-kumo-base/90 px-3 py-2 text-[13px] font-medium leading-4 tracking-[-0.2px] text-kumo-default ${canAttachMore ? "border-kumo-brand/25" : "border-kumo-warning/30"}`}>

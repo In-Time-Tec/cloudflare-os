@@ -174,26 +174,23 @@ export default function SchedulerPage({
   const isEmpty =
     !loading && !error && schedules.length === 0 && !debouncedQuery && filter === "all";
   return (
-    <main className="mx-auto min-h-full w-full max-w-5xl px-5 py-10 sm:px-8 sm:py-12">
-      <header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-kumo-default">
-            Scheduled tasks
-          </h1>
-          <p className="mt-1 text-sm text-kumo-subtle">
-            Wake a workspace and run its code on a schedule you choose.
-          </p>
-        </div>
+    <main className="flex h-full min-h-full w-full flex-col">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-6">
+        <h1 className="min-w-0 truncate text-[14px] font-medium tracking-[-0.25px] text-kumo-default">
+          Scheduled tasks
+        </h1>
         <button
           type="button"
           data-action="create-schedule"
-          className="press inline-flex h-9 items-center justify-center gap-2 self-start rounded-lg bg-kumo-brand px-3.5 text-sm font-medium text-white hover:bg-kumo-brand-hover"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-[13px] tracking-[-0.25px] text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-default"
           onClick={() => void runHostAction(() => openPrompt(CREATE_SCHEDULE_PROMPT))}
         >
-          <Plus size={16} weight="bold" /> Create schedule
+          <Plus size={14} /> Create
         </button>
       </header>
 
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-4xl px-6 py-4 sm:px-10">
       {!isEmpty && (
         <>
           <label className="mt-4 flex h-9 items-center gap-2 rounded-lg border border-kumo-line bg-kumo-control px-3 text-kumo-inactive focus-within:ring-2 focus-within:ring-kumo-ring">
@@ -324,6 +321,8 @@ export default function SchedulerPage({
           })}
         </div>
       </section>
+        </div>
+      </div>
     </main>
   );
 }

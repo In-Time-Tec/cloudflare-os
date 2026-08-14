@@ -19,6 +19,7 @@ import AddModelModal from '../AddModelModal'
 import { getModelProviderLogo } from '../modelProviderLogo'
 import { useDocumentTitle } from '../useDocumentTitle'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from '../components/menuStyles'
+import PageChrome, { PAGE_ACTION } from '../components/AppShell/PageChrome'
 
 export const Route = createFileRoute('/providers')({ component: ProvidersPage })
 
@@ -230,23 +231,17 @@ function ProvidersPage() {
   })
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-4xl flex-col px-6 sm:px-10">
-      <header className="flex items-end justify-between gap-4 px-3 pb-3 pt-10">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-kumo-default">AI providers</h1>
-          <p className="mt-1 text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-subtle">
-            {canAddModels
-              ? 'Configure the AI models available to your workspaces.'
-              : 'Choose from the AI models available to your workspaces.'}
-          </p>
-        </div>
-        {!loading && canAddModels && (
-          <button type="button" onClick={() => setSheetOpen(true)} className={PRIMARY_BTN}>
-            <Plus size={14} weight="bold" />
-            Add provider
+    <PageChrome
+      title="AI providers"
+      actions={
+        !loading && canAddModels ? (
+          <button type="button" onClick={() => setSheetOpen(true)} className={PAGE_ACTION}>
+            <Plus size={14} />
+            Add
           </button>
-        )}
-      </header>
+        ) : undefined
+      }
+    >
 
       {/* Search — hidden when the user has no models */}
       {!loading && !loadError && models.length > 0 && (
@@ -360,6 +355,6 @@ function ProvidersPage() {
           aiConfig={aiConfig}
         />
       )}
-    </div>
+    </PageChrome>
   )
 }

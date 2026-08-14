@@ -7,8 +7,6 @@ import {
   ArrowsClockwise,
   Plus,
   CaretRight,
-  Hexagon,
-  ShieldCheck,
   Plugs,
 } from '@phosphor-icons/react'
 import ViewToggle from '../components/ViewToggle'
@@ -23,8 +21,8 @@ import {
 } from '@gadgets/workshop-shared/gatekeeper'
 import { GatekeeperVendorInfo } from '@gadgets/workshop-shared/api'
 import { useDocumentTitle } from '../useDocumentTitle'
-import { useSiteName } from '../ServerConfigContext'
 import { AccountsSubscriberAdapter } from '../accountsSubscriber'
+import PageChrome from '../components/AppShell/PageChrome'
 
 export const Route = createFileRoute('/gatekeepers')({
   component: ConnectorsPage,
@@ -252,190 +250,6 @@ function SectionEyebrow({ label, count }: { label: string; count?: number }) {
   )
 }
 
-function ConnectorsHeroDiagram({
-  accounts,
-  vendors,
-  siteName,
-}: {
-  accounts: AccountEntry[]
-  vendors: VendorEntry[]
-  siteName: string
-}) {
-  const [hoveredSource, setHoveredSource] = useState<number | null>(null)
-  const seen = new Set<string>()
-  const nodes = [
-    ...accounts.map((account) => ({
-      key: `account-${account.id}`,
-      vendorId: account.vendorId,
-      logoUrl: account.vendorDescription.logo?.url,
-      color: account.vendorDescription.color,
-      fallback: account.vendorDescription.displayName,
-    })),
-    ...vendors.map((vendor) => ({
-      key: `vendor-${vendor.id}`,
-      vendorId: vendor.id,
-      logoUrl: vendor.description.logo?.url,
-      color: vendor.description.color,
-      fallback: vendor.description.displayName,
-    })),
-  ].filter((node) => {
-    if (seen.has(node.vendorId)) return false
-    seen.add(node.vendorId)
-    return true
-  }).slice(0, 3)
-
-  const sourceNodes = [
-    { className: 'left-1 top-3', x: 4, y: 12 },
-    { className: 'left-10 top-[62px]', x: 40, y: 62 },
-    { className: 'left-1 bottom-3', x: 4, y: 120 },
-  ]
-  const nodeSize = 44
-  const gatekeeper = { x: 176, y: 58, width: 52, height: 52 }
-  const gadget = { x: 268, y: 58, width: 172, height: 52 }
-  const gatekeeperInput = {
-    x: gatekeeper.x,
-    y: gatekeeper.y + gatekeeper.height / 2,
-  }
-  const gatekeeperOutput = {
-    x: gatekeeper.x + gatekeeper.width,
-    y: gatekeeper.y + gatekeeper.height / 2,
-  }
-  const gadgetInput = {
-    x: gadget.x,
-    y: gadget.y + gadget.height / 2,
-  }
-
-  const sourcePoint = (index: number) => ({
-    x: sourceNodes[index].x + nodeSize,
-    y: sourceNodes[index].y + nodeSize / 2,
-  })
-  const inputPath = (index: number) => {
-    const start = sourcePoint(index)
-    const end = gatekeeperInput
-    const dx = end.x - start.x
-    return `M${start.x} ${start.y} C${start.x + dx * 0.45} ${start.y} ${end.x - dx * 0.35} ${end.y} ${end.x} ${end.y}`
-  }
-
-  return (
-    <div className="relative isolate hidden h-[176px] w-[444px] lg:block">
-      <svg
-        className="absolute inset-0 h-full w-full text-kumo-line"
-        viewBox="0 0 444 176"
-        fill="none"
-      >
-        {nodes[0] && (
-          <path
-            d={inputPath(0)}
-            className={hoveredSource === 0 ? 'connectors-hero-flow-line' : ''}
-            stroke="currentColor"
-            strokeWidth="1.2"
-            strokeDasharray="3 7"
-          />
-        )}
-        {nodes[1] && (
-          <path
-            d={inputPath(1)}
-            className={hoveredSource === 1 ? 'connectors-hero-flow-line' : ''}
-            stroke="currentColor"
-            strokeWidth="1.2"
-            strokeDasharray="3 7"
-          />
-        )}
-        {nodes[2] && (
-          <path
-            d={inputPath(2)}
-            className={hoveredSource === 2 ? 'connectors-hero-flow-line' : ''}
-            stroke="currentColor"
-            strokeWidth="1.2"
-            strokeDasharray="3 7"
-          />
-        )}
-        <path
-          d={`M${gatekeeperOutput.x} ${gatekeeperOutput.y} L${gadgetInput.x} ${gadgetInput.y}`}
-          stroke="currentColor"
-          strokeWidth="1.2"
-        />
-        {hoveredSource !== null && (
-          <path
-            d={`M${gatekeeperOutput.x} ${gatekeeperOutput.y} L${gadgetInput.x} ${gadgetInput.y}`}
-            className="connectors-hero-flow-line"
-            stroke="currentColor"
-            strokeWidth="1.2"
-            strokeDasharray="3 7"
-          />
-        )}
-      </svg>
-
-      {nodes.length > 0 ? (
-        nodes.map((node, index) => (
-          <div
-            key={node.key}
-            onMouseEnter={() => setHoveredSource(index)}
-            onMouseLeave={() => setHoveredSource(null)}
-            onFocus={() => setHoveredSource(index)}
-            onBlur={() => setHoveredSource(null)}
-            className={`themed-card-hover-shadow absolute grid h-11 w-11 place-items-center rounded-2xl border border-kumo-line bg-kumo-base transition-[border-color,transform,box-shadow] duration-150 ease-out hover:-translate-y-px hover:border-kumo-fill ${sourceNodes[index].className}`}
-          >
-            <VendorIconTile
-              logoUrl={node.logoUrl}
-              color={node.color}
-              fallback={node.fallback}
-              size={18}
-              className="h-8 w-8 rounded-xl"
-            />
-          </div>
-        ))
-      ) : (
-        <>
-          {sourceNodes.map((node, index) => (
-            <div
-              key={index}
-              onMouseEnter={() => setHoveredSource(index)}
-              onMouseLeave={() => setHoveredSource(null)}
-              className={`themed-card-hover-shadow absolute h-11 w-11 rounded-2xl border border-kumo-line bg-kumo-elevated transition-[border-color,transform,box-shadow] duration-150 ease-out hover:-translate-y-px hover:border-kumo-fill ${node.className}`}
-            />
-          ))}
-        </>
-      )}
-
-      <div className="group absolute left-[176px] top-[58px] z-20">
-        <button
-          type="button"
-          className="themed-card-hover-shadow grid h-[52px] w-[52px] place-items-center rounded-2xl border border-kumo-line bg-kumo-base text-kumo-brand transition-[border-color,box-shadow] hover:border-kumo-fill focus:outline-none focus-visible:ring-2 focus-visible:ring-kumo-ring focus-visible:ring-offset-2 focus-visible:ring-offset-kumo-base"
-          aria-label="Gatekeeper keeps Gadget access limited to connected resources"
-        >
-          <ShieldCheck size={21} weight="duotone" />
-        </button>
-        <div className="themed-floating-shadow-lg pointer-events-none absolute left-1/2 top-[-108px] z-30 w-[228px] origin-bottom -translate-x-1/2 translate-y-1 scale-[0.98] rounded-2xl border border-kumo-line bg-kumo-base p-3 text-left opacity-0 transition-[opacity,transform] delay-0 duration-150 ease-out group-hover:translate-y-0 group-hover:scale-100 group-hover:opacity-100 group-hover:delay-100 group-focus-within:translate-y-0 group-focus-within:scale-100 group-focus-within:opacity-100 group-focus-within:delay-100">
-          <div className="flex items-start gap-2.5">
-            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-kumo-tint text-kumo-brand">
-              <ShieldCheck size={16} weight="duotone" />
-            </div>
-            <div className="min-w-0">
-              <p className="m-0 text-[12px] leading-4 font-semibold tracking-[-0.2px] text-kumo-default">
-                Gatekeeper
-              </p>
-              <p className="mt-1 text-[11px] leading-4 font-normal tracking-[-0.1px] text-kumo-subtle">
-                Keeps each workspace limited to the resources you connect and ensures every user has the required permissions before accessing them.
-              </p>
-            </div>
-          </div>
-          <span className="absolute left-1/2 bottom-[-5px] h-2.5 w-2.5 -translate-x-1/2 rotate-45 border-b border-r border-kumo-line bg-kumo-base" />
-        </div>
-      </div>
-
-      <div className="absolute left-[268px] top-[58px] z-10 flex h-[52px] w-[172px] items-center gap-2 rounded-2xl border border-kumo-line bg-kumo-elevated pl-2 pr-4">
-        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-kumo-base text-kumo-brand">
-          <Hexagon size={17} weight="bold" />
-        </div>
-        <span className="relative -top-px min-w-0 truncate text-base leading-5 font-semibold tracking-tight text-kumo-default">
-          {siteName}
-        </span>
-      </div>
-    </div>
-  )
-}
-
 type ModalTarget =
   | { kind: 'connect'; vendorId: string }
   | { kind: 'manage'; accountId: number }
@@ -443,7 +257,6 @@ type ModalTarget =
 
 function ConnectorsPage() {
   useDocumentTitle('Gatekeepers')
-  const siteName = useSiteName()
 
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
@@ -715,23 +528,12 @@ function ConnectorsPage() {
     accounts.length === 0
 
   return (
-    <div className="min-h-[calc(100vh-3.5rem-1px)] bg-kumo-base">
-      <div className="mx-auto w-full max-w-5xl px-4 py-12 sm:px-8 sm:py-14">
-        <header className="mb-8 grid gap-8 lg:grid-cols-[minmax(0,540px)_444px] lg:items-center lg:justify-between">
-          <div>
-            <h1 className="m-0 text-3xl font-semibold leading-tight tracking-tight text-kumo-default sm:text-[34px]">
-              Gatekeepers
-            </h1>
-            <p className="mt-2 text-[14px] leading-[20px] font-normal tracking-[-0.25px] text-kumo-subtle">
-              Add the apps and accounts your workspaces can use. Connect once, then wire
-              them into anything you build.
-            </p>
-          </div>
-          <ConnectorsHeroDiagram accounts={accounts} vendors={vendors} siteName={siteName} />
-        </header>
-
-        <div className="mb-6 flex items-center gap-3">
-          <div className="relative flex-1">
+    <PageChrome
+      title="Gatekeepers"
+      actions={<ViewToggle view={view} onChange={setView} />}
+    >
+        <div className="mb-6">
+          <div className="relative">
             <MagnifyingGlass
               size={16}
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-kumo-inactive"
@@ -744,7 +546,6 @@ function ConnectorsPage() {
               className="h-10 w-full rounded-lg border border-kumo-line bg-kumo-base pl-9 pr-4 text-[14px] leading-5 tracking-[-0.25px] text-kumo-default placeholder:text-kumo-inactive transition-[border-color,box-shadow] focus:border-kumo-ring focus:outline-none focus:ring-[3px] focus:ring-kumo-ring/15"
             />
           </div>
-          <ViewToggle view={view} onChange={setView} />
         </div>
 
         {loadError && (
@@ -846,8 +647,6 @@ function ConnectorsPage() {
             />
           )}
 
-      </div>
-
       {activeVendor && (
         <ConnectConnectorModal
           key={modalTarget?.kind === 'manage'
@@ -874,6 +673,6 @@ function ConnectorsPage() {
           }}
         />
       )}
-    </div>
+    </PageChrome>
   )
 }

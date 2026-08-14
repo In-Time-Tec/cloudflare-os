@@ -759,26 +759,24 @@ function CreateCollectionView({
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-4xl flex-col px-6 sm:px-10">
-      <header className="ctx-rise px-3 pb-3 pt-10">
+    <div className="flex h-full w-full flex-col">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-kumo-line px-6">
         <button
           type="button"
           onClick={onCancel}
-          className="press mb-3 -ml-1 inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[13px] font-medium tracking-[-0.25px] text-kumo-subtle transition-colors hover:text-kumo-default"
+          className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-[13px] tracking-[-0.25px] text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-default"
         >
           <CaretLeft size={14} />
           Context &amp; Skills
         </button>
-        <h1 className="text-2xl font-semibold tracking-tight text-kumo-default">
+        <h1 className="min-w-0 truncate text-[14px] font-medium tracking-[-0.25px] text-kumo-default">
           New collection
         </h1>
-        <p className="mt-1 max-w-2xl text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-subtle">
-          A collection of documents, skills, and other files your agents can use.
-        </p>
       </header>
 
-      <div className="ctx-scroll min-h-0 flex-1 overflow-y-auto pb-8 pt-1">
-        <div className="max-w-xl px-3">
+      <div className="ctx-scroll min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-4xl px-6 py-4 sm:px-10">
+        <div className="max-w-xl">
           <div className="space-y-5">
             <div className="ctx-rise" style={{ animationDelay: "60ms" }}>
               <CollectionNameField
@@ -917,6 +915,7 @@ function CreateCollectionView({
             </WorkshopButton>
           </div>
         </div>
+        </div>
       </div>
     </div>
   );
@@ -1012,30 +1011,27 @@ export default function ContextLibraryPage() {
   }
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-4xl flex-col px-6 sm:px-10">
-      <header className="flex items-end justify-between gap-4 px-3 pb-3 pt-10">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-kumo-default">
-            Context &amp; Skills
-          </h1>
-          <p className="mt-1 max-w-2xl text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-subtle">
-            Collections of documents, skills, and other files your agents can use.
-          </p>
-        </div>
+    <div className="flex h-full w-full flex-col">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-6">
+        <h1 className="min-w-0 truncate text-[14px] font-medium tracking-[-0.25px] text-kumo-default">
+          Context &amp; Skills
+        </h1>
         {enabled.length > 0 && (
           <button
             type="button"
             onClick={() => setCreating(true)}
-            className="press inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-kumo-brand px-3.5 text-[13px] font-medium tracking-[-0.25px] text-white transition-colors hover:bg-kumo-brand-hover"
+            className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[13px] tracking-[-0.25px] text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-default"
           >
-            <Plus size={14} weight="bold" />
+            <Plus size={14} />
             New collection
           </button>
         )}
       </header>
 
+      <div className="ctx-scroll min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto h-full w-full max-w-4xl px-6 py-4 sm:px-10">
       {enabled.length > 0 && (
-        <div className="mb-4 px-3">
+        <div className="mb-4">
           <div className="relative">
             <MagnifyingGlass
               size={16}
@@ -1052,7 +1048,6 @@ export default function ContextLibraryPage() {
         </div>
       )}
 
-      <div className="ctx-scroll min-h-0 flex-1 overflow-y-auto pb-8 pt-1">
         {initialLoading ? (
           <CollectionsSkeleton />
         ) : filtered.length === 0 ? (
@@ -1092,6 +1087,7 @@ export default function ContextLibraryPage() {
             ))}
           </div>
         )}
+        </div>
       </div>
     </div>
   );
