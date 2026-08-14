@@ -1442,7 +1442,7 @@ export default function GadgetEditor() {
 
         {/* ── LEFT: Chat pane ──────────────────────────────────────────────────── */}
         <div
-          className={`flex flex-col flex-shrink-0 ${workspaceTransitionClass} ${showFullEditor ? 'border-r border-kumo-line' : ''}`}
+          className={`flex h-full min-h-0 flex-col flex-shrink-0 ${workspaceTransitionClass} ${showFullEditor ? 'border-r border-kumo-line' : ''}`}
           style={{
             width: showFullEditor
               ? chatWidth

@@ -6678,7 +6678,7 @@ function ChatInterface({
 
   // ─── sidebar list content (reused in both modes) ──────────────────────────
   const chatListPanel = (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       {/* Chat list header — title doubles as the scope switcher */}
       <div className="flex h-12 flex-shrink-0 items-center border-b border-kumo-line px-4">
         <DropdownMenu>
@@ -6722,9 +6722,9 @@ function ChatInterface({
           </DropdownMenu.Content>
         </DropdownMenu>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col bg-kumo-base">
-        <div className="chat-panel min-h-0 flex-1 overflow-y-auto">
-        <div className="p-3">
+      <div className="relative min-h-0 flex-1">
+        <div className="chat-panel absolute inset-0 overflow-y-auto">
+        <div className="p-3 pb-36">
         {!chatListReady ? (
           <div className="flex items-center justify-center py-10">
             <div className="w-5 h-5 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
@@ -6884,7 +6884,7 @@ function ChatInterface({
         )}
         </div>
         </div>
-        <div className="relative z-10 -mt-24 shrink-0">
+        <div className="absolute inset-x-0 bottom-0 z-10">
           <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
           <ChatInput
             key={workspaceId}
@@ -6915,7 +6915,7 @@ function ChatInterface({
   // ─── main render ─────────────────────────────────────────────────────────────
   return (
     <div
-      className={`flex h-full bg-kumo-base ${sidebarMode ? "flex-row" : "flex-col"}`}
+      className={`flex h-full min-h-0 bg-kumo-base ${sidebarMode ? "flex-row" : "flex-col"}`}
     >
       {/* ── Sidebar mode: conversations list on the left ───────────────────── */}
       {sidebarMode && (
@@ -7052,11 +7052,11 @@ function ChatInterface({
               )}
 
               {/* Messages */}
-              <div className="flex min-h-0 flex-1 flex-col">
+              <div className="relative min-h-0 flex-1">
               <div
                 ref={messagesContainerRef}
                 onScroll={handleMessagesScroll}
-                className="chat-panel min-h-0 flex-1 overflow-y-auto"
+                className="chat-panel absolute inset-0 overflow-y-auto"
               >
                 {isLoading ? (
                   <div className="flex items-center justify-center py-10">
@@ -7843,7 +7843,7 @@ function ChatInterface({
                   </div>
                 )}
               </div>
-                <div className="relative z-10 -mt-24 shrink-0">
+                <div className="absolute inset-x-0 bottom-0 z-10">
                   <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
                   <ChatInput
                     key={`${workspaceId}:${selectedChatId}`}
