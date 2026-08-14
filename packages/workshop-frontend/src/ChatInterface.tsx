@@ -6717,8 +6717,7 @@ function ChatInterface({
         </DropdownMenu>
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="relative min-h-0 flex-1">
-        <div className="chat-panel absolute inset-0 overflow-y-auto">
+        <div className="chat-panel min-h-0 flex-1 overflow-y-auto">
         <div className="p-3 pb-8">
         {!chatListReady ? (
           <div className="flex items-center justify-center py-10">
@@ -6877,7 +6876,6 @@ function ChatInterface({
             )}
           </div>
         )}
-        </div>
         </div>
         <div aria-hidden className={styles.transcriptFade} />
         </div>
@@ -7050,11 +7048,10 @@ function ChatInterface({
 
               {/* Messages */}
               <div className="flex min-h-0 flex-1 flex-col">
-              <div className="relative min-h-0 flex-1">
               <div
                 ref={messagesContainerRef}
                 onScroll={handleMessagesScroll}
-                className="chat-panel absolute inset-0 overflow-y-auto"
+                className="chat-panel min-h-0 flex-1 overflow-y-auto"
               >
                 {isLoading ? (
                   <div className="flex items-center justify-center py-10">
@@ -7062,7 +7059,7 @@ function ChatInterface({
                   </div>
                 ) : (
                   <div
-                    className={`flex flex-col px-6 pt-8 ${pendingConsoleLogCount > 0 ? "pb-12" : "pb-8"} ${useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}`}
+                    className={`flex flex-col px-6 pt-8 ${pendingConsoleLogCount > 0 ? "pb-10" : "pb-8"} ${useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}`}
                   >
                     {isLoadingEarlier && (
                       <div className="mx-auto mb-6 text-[12px] leading-4 font-medium text-kumo-inactive">
@@ -7840,7 +7837,6 @@ function ChatInterface({
                     })()}
                   </div>
                 )}
-              </div>
               <div aria-hidden className={styles.transcriptFade} />
               </div>
                 <div className="shrink-0">
