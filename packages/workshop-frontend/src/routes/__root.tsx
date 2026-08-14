@@ -39,10 +39,6 @@ function RootComponent() {
   // native — sidebar and all — instead of floating on a bare page.
   const standalone = isSignup || (isBlueprint && !isAuthenticated)
 
-  // The workspace editor renders fullscreen (no app chrome). /gadget/ is the legacy URL, kept
-  // here so the chrome doesn't flash in during the redirect to /workspace/.
-  const isWorkspaceEditor = pathname.startsWith('/workspace/') || pathname.startsWith('/gadget/')
-
   const handleLoginSuccess = () => {
     const token = localStorage.getItem('authToken')
     if (token) {
@@ -112,10 +108,7 @@ function RootComponent() {
       <FeatureFlagsProvider>
         <TooltipProvider>
           <Toasty>
-            <AuthenticatedShell
-              authenticatedApi={authenticatedApi}
-              isWorkspaceEditor={isWorkspaceEditor}
-            />
+            <AuthenticatedShell authenticatedApi={authenticatedApi} />
           </Toasty>
         </TooltipProvider>
       </FeatureFlagsProvider>
@@ -130,10 +123,8 @@ function RootComponent() {
  */
 function AuthenticatedShell({
   authenticatedApi,
-  isWorkspaceEditor,
 }: {
   authenticatedApi: RpcStub<AuthenticatedApi>
-  isWorkspaceEditor: boolean
 }) {
   // null = still checking, true = needs onboarding, false = onboarding done
   const [onboardingNeeded, setOnboardingNeeded] = useState<boolean | null>(null)
@@ -164,22 +155,12 @@ function AuthenticatedShell({
     return <OnboardingWizard onComplete={() => setOnboardingNeeded(false)} />
   }
 
-  // Normal app shell. The workspace editor is rendered fullscreen (no chrome); everything else
-  // gets the persistent left-rail AppShell. Connection loss is surfaced by a chip in whichever of
-  // those two top bars is showing, never by a banner that reflows the page (see ReconnectingChip).
-  const fullscreen = isWorkspaceEditor
   return (
     <>
       <AccountSelectionModal />
-      {fullscreen ? (
-        <main>
-          <Outlet />
-        </main>
-      ) : (
-        <AppShell>
-          <Outlet />
-        </AppShell>
-      )}
+      <AppShell>
+        <Outlet />
+      </AppShell>
     </>
   )
 }

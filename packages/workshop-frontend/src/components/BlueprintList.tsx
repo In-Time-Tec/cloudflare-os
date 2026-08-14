@@ -9,7 +9,7 @@ import {
   Trash,
   UploadSimple,
 } from '@phosphor-icons/react'
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type RefObject } from 'react'
 import { DropdownMenu, useKumoToastManager } from '@cloudflare/kumo'
 import { useAuthenticatedApi } from '../AuthContext'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './menuStyles'
@@ -120,7 +120,13 @@ function BlueprintRow({
   )
 }
 
-export default function BlueprintList() {
+export default function BlueprintList({
+  hideToolbarActions = false,
+  uploadInputRef: uploadInputRefProp,
+}: {
+  hideToolbarActions?: boolean
+  uploadInputRef?: RefObject<HTMLInputElement | null>
+} = {}) {
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
 
@@ -129,7 +135,8 @@ export default function BlueprintList() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const uploadInputRef = useRef<HTMLInputElement>(null)
+  const internalUploadRef = useRef<HTMLInputElement>(null)
+  const uploadInputRef = uploadInputRefProp ?? internalUploadRef
 
   // A generation counter so a retry (or unmount) invalidates any in-flight load: only the most
   // recent request is allowed to write state, avoiding races between concurrent loads.
@@ -272,22 +279,24 @@ export default function BlueprintList() {
           </div>
           {/* Grid, not flex: 1fr columns give the two buttons a matching width, where flex would
               size each to its own label. */}
-          <div className="grid shrink-0 grid-cols-2 gap-2">
-            <Link to="/explore" className={ACTION_BUTTON}>
-              <Compass size={14} />
-              Explore
-            </Link>
-            <button
-              type="button"
-              onClick={() => uploadInputRef.current?.click()}
-              disabled={uploading}
-              title="Upload a .gadget archive"
-              className={ACTION_BUTTON}
-            >
-              <UploadSimple size={14} weight="bold" />
-              {uploading ? 'Uploading…' : 'Upload'}
-            </button>
-          </div>
+          {!hideToolbarActions && (
+            <div className="grid shrink-0 grid-cols-2 gap-2">
+              <Link to="/explore" className={ACTION_BUTTON}>
+                <Compass size={14} />
+                Explore
+              </Link>
+              <button
+                type="button"
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={uploading}
+                title="Upload a .gadget archive"
+                className={ACTION_BUTTON}
+              >
+                <UploadSimple size={14} weight="bold" />
+                {uploading ? 'Uploading…' : 'Upload'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

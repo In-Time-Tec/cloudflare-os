@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react'
-import { useParams, useNavigate, useSearch, Link } from '@tanstack/react-router'
+import { useParams, useNavigate, useSearch } from '@tanstack/react-router'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import {
   ShareNetwork,
   Pencil,
   Check,
   X,
-  Hexagon,
   Blueprint,
   Trash,
   ArrowsOutSimple,
@@ -15,9 +14,6 @@ import {
 } from '@phosphor-icons/react'
 import { RpcStub, RpcTarget } from 'capnweb'
 import { useAuthenticatedApi } from './AuthContext'
-import UserMenu from './components/UserMenu'
-import SiteLogo from './components/SiteLogo'
-
 import {
   GadgetClient,
   AiChatAuthorInfo,
@@ -47,11 +43,9 @@ import { FormatGlyph } from './components/format/FormatVisuals'
 import ShareModal from './ShareModal'
 import { GadgetPresence } from './components/GadgetPresence'
 import BlueprintModal from './BlueprintModal'
-import TopBarNotice from './TopBarNotice'
 import { WorkshopButton, WorkshopIconButton, WorkshopInput } from './components/WorkshopControls'
 import { useActions } from './useActions'
 import DeleteConfirmationDialog from './components/DeleteConfirmationDialog'
-import ReconnectingChip from './components/ReconnectingChip'
 import WorkspaceOpenErrorPage from './components/WorkspaceOpenErrorPage'
 import { useWorkspaceOpen } from './useWorkspaceOpen'
 import { reportIssue } from './errorReporting'
@@ -451,7 +445,6 @@ export default function GadgetEditor() {
     overseer,
     metadata,
     error,
-    connectionLost,
     observerConfig,
     retry: retryOpen,
     cancelObserverConfig,
@@ -1251,9 +1244,9 @@ export default function GadgetEditor() {
   }
 
   // ── shared height tokens ──────────────────────────────────────────────────────
-  const TOPBAR_H = 56   // h-14 (matches home page Header)
-  const TABBAR_H = 48   // h-12
-  const RIGHT_CONTENT_H = `calc(100vh - ${TOPBAR_H}px - ${TABBAR_H}px)`
+  const TOPBAR_H = 56
+  const TABBAR_H = 48
+  const RIGHT_CONTENT_H = '100%'
 
   // ── error / loading states ────────────────────────────────────────────────────
   if (error?.kind === 'open') {
@@ -1268,7 +1261,7 @@ export default function GadgetEditor() {
 
   if (error?.kind === 'message') {
     return (
-      <div className="min-h-screen flex items-center justify-center flex-col gap-4 bg-kumo-base">
+      <div className="flex h-full items-center justify-center flex-col gap-4 bg-kumo-base">
         {/* Observer-verification denials list one line per failed connection, so preserve newlines. */}
         <p className="text-sm text-kumo-danger whitespace-pre-line text-center max-w-lg">
           {error.message}
@@ -1290,7 +1283,7 @@ export default function GadgetEditor() {
   if (!metadata || !overseer || !workpiecesReady ||
       (selectedGadgetId !== null && gadget === null)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-kumo-base">
+      <div className="flex h-full items-center justify-center bg-kumo-base">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
           <p className="text-sm text-kumo-subtle">Loading workspace…</p>
@@ -1325,27 +1318,12 @@ export default function GadgetEditor() {
 
   // ── always render the full two-pane edit layout; preview overlays on top ──────
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-kumo-base relative">
-      {/* ═══ SHARED TOP BAR (visible in both modes) ════════════════════════════ */}
+    <div className="relative flex h-full flex-col overflow-hidden bg-kumo-base">
       <div
-        className="relative flex items-center justify-between px-4 sm:px-6 backdrop-blur-md border-b border-kumo-line flex-shrink-0 gap-3"
-        style={{ height: TOPBAR_H, backgroundColor: 'color-mix(in srgb, var(--color-kumo-base) 80%, transparent)' }}
+        className="relative flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-4 sm:px-6"
+        style={{ height: TOPBAR_H }}
       >
-        <TopBarNotice />
-        {/* Left: logo / title */}
-        <div className="flex items-center gap-2 min-w-0">
-          <Link
-            to="/"
-            aria-label="Home"
-            className="flex-shrink-0 hover:opacity-80 transition-opacity"
-          >
-            <SiteLogo size={22}>
-              <Hexagon size={22} className="text-kumo-brand" weight="bold" />
-            </SiteLogo>
-          </Link>
-
-          <span className="text-kumo-inactive flex-shrink-0">/</span>
-
+        <div className="flex min-w-0 items-center gap-2">
           {isEditingTitle ? (
             <div className="flex items-center gap-1">
               <WorkshopInput
@@ -1418,8 +1396,6 @@ export default function GadgetEditor() {
             onViewActivity={openActivity}
           />
 
-          {connectionLost && <ReconnectingChip />}
-
           <WorkshopIconButton
             onClick={() => setShareModalOpen(true)}
             title="Share workspace"
@@ -1447,11 +1423,6 @@ export default function GadgetEditor() {
               <Trash size={16} />
             </WorkshopIconButton>
           )}
-
-          {/* User menu */}
-          <div className="ml-2">
-            <UserMenu />
-          </div>
         </div>
       </div>
 

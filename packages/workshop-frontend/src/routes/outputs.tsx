@@ -19,6 +19,7 @@ import {
 import { OutputSummary } from '@gadgets/workshop-shared/api'
 import { useAuthenticatedApi } from '../AuthContext'
 import { useDocumentTitle } from '../useDocumentTitle'
+import PageChrome from '../components/AppShell/PageChrome'
 import ViewToggle from '../components/ViewToggle'
 import { MENU_CONTENT, MENU_ITEM, MENU_POSITIONER_STYLE } from '../components/menuStyles'
 import { formatOf } from '../components/format/formats'
@@ -573,16 +574,10 @@ function OutputsPage() {
       || (showOwnerFilters && ownerFilter !== 'all')
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-6 sm:px-10">
-      <header className="flex items-end justify-between gap-4 px-3 pb-4 pt-10">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-kumo-default">Outputs</h1>
-          <p className="mt-1 text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-subtle">
-            Everything your workspaces have produced, in one place.
-          </p>
-        </div>
-        <ViewToggle view={view} onChange={setView} />
-      </header>
+    <PageChrome
+      title="Outputs"
+      actions={<ViewToggle view={view} onChange={setView} />}
+    >
 
       {/* Toolbar: format chips on the left (the browsing axis), scope + search on the right (the
           refining controls). Configured categories stay visible with zero counts. */}
@@ -709,6 +704,6 @@ function OutputsPage() {
         onOpenChange={(open) => { if (!open) setRemoveOutput(null) }}
         onConfirm={() => { void confirmRemove() }}
       />
-    </div>
+    </PageChrome>
   )
 }

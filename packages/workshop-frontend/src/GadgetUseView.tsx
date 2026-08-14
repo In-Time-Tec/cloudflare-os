@@ -1,5 +1,3 @@
-import { Link } from '@tanstack/react-router'
-import { Hexagon } from '@phosphor-icons/react'
 import { FormatGlyph } from './components/format/FormatVisuals'
 import { RpcStub } from 'capnweb'
 import {
@@ -11,27 +9,11 @@ import {
   WorkpieceSummary,
 } from '@gadgets/workshop-shared/api'
 import GadgetUI from './GadgetUI'
-import UserMenu from './components/UserMenu'
 import { GadgetPresence } from './components/GadgetPresence'
-import TopBarNotice from './TopBarNotice'
-import SiteLogo from './components/SiteLogo'
 import GadgetExportMenu from './GadgetExportMenu'
 
-// The minimal, "use"-only experience: a shared top bar plus the gadget's deployed UI, and nothing
-// else. Collaborators with the "use" role may only render and interact with the gadget's mainline
-// UI (see UseOverseerInterface in the backend), so we deliberately omit the chat sidebar, the
-// Gadget/Code/Connections controls, workspace activity, and every editor-only control. The
-// overseer and gadget passed in here are the restricted capabilities returned by openGadget() for
-// "use" sessions; calling anything outside getMetadata()/subscribeToMetadata()/subscribeToPresence()/
-// subscribeToWorkpieces()/getGadget() (and, on the gadget, getUiBundle()/connectToGadget()/exportPdf())
-// would throw.
-//
-// When the workspace has more than one gadget, a simple picker in the top bar switches between
-// them (selection is owned by the parent, in the URL's `?w=` search param). Pending gadgets are
-// never listed: the restricted overseer's workpiece subscription withholds them.
 type Props = {
   overseer: RpcStub<Overseer>
-  // The selected gadget's client, or null if the workspace has no gadgets.
   gadget: RpcStub<GadgetClient> | null
   selectedGadgetId: WorkpieceId | null
   gadgets: WorkpieceSummary[]
@@ -41,7 +23,6 @@ type Props = {
   currentUserId: string | null
 }
 
-// Matches the top bar height used by the full editor (and the home page header).
 const TOPBAR_H = 56
 
 export default function GadgetUseView({
@@ -55,35 +36,23 @@ export default function GadgetUseView({
   currentUserId,
 }: Props) {
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-kumo-base relative">
-      {/* ═══ TOP BAR ════════════════════════════════════════════════════════════ */}
+    <div className="relative flex h-full flex-col overflow-hidden bg-kumo-base">
       <div
-        className="relative flex items-center justify-between px-4 sm:px-6 backdrop-blur-md border-b border-kumo-line flex-shrink-0 gap-3"
-        style={{ height: TOPBAR_H, backgroundColor: 'color-mix(in srgb, var(--color-kumo-base) 80%, transparent)' }}
+        className="relative flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-4 sm:px-6"
+        style={{ height: TOPBAR_H }}
       >
-        <TopBarNotice />
-        {/* Left: logo / title */}
-        <div className="flex items-center gap-2 min-w-0">
-          <Link to="/" aria-label="Home" className="flex-shrink-0 hover:opacity-80 transition-opacity">
-            <SiteLogo size={22}>
-              <Hexagon size={22} className="text-kumo-brand" weight="bold" />
-            </SiteLogo>
-          </Link>
-
-          <span className="text-kumo-inactive flex-shrink-0">/</span>
-
-          <span className="text-[14px] leading-5 font-medium tracking-[-0.25px] text-kumo-default truncate">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-[14px] font-medium leading-5 tracking-[-0.25px] text-kumo-default">
             {metadata.title}
           </span>
 
           {metadata.owner && (
-            <span className="text-xs text-kumo-inactive flex-shrink-0">
+            <span className="flex-shrink-0 text-xs text-kumo-inactive">
               by {metadata.owner.name}
             </span>
           )}
         </div>
 
-        {/* Center: gadget picker (only when there's a real choice) */}
         {gadgets.length > 1 && (
           <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
             {gadgets.map(g => (
@@ -107,8 +76,7 @@ export default function GadgetUseView({
           </div>
         )}
 
-        {/* Right: presence and user menu */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-shrink-0 items-center gap-2">
           <GadgetExportMenu
             gadget={gadget}
             gadgetTitle={gadgets.find(g => g.id === selectedGadgetId)?.title ?? 'Gadget'}
@@ -118,17 +86,15 @@ export default function GadgetUseView({
             authenticatedApi={authenticatedApi}
             currentUserId={currentUserId}
           />
-          <UserMenu />
         </div>
       </div>
 
-      {/* ═══ GADGET UI ══════════════════════════════════════════════════════════ */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-hidden">
         {gadget ? (
           <GadgetUI
             key={selectedGadgetId}
             gadget={gadget}
-            height={`calc(100vh - ${TOPBAR_H}px)`}
+            height="100%"
             isVisible={true}
           />
         ) : (
