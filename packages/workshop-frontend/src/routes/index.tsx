@@ -151,8 +151,8 @@ export function HomePageContent({ prompt }: HomeSearch) {
   );
 
   return (
-    <div className="relative isolate flex min-h-full w-full flex-col items-center justify-start px-4 pb-16 pt-12 sm:px-8 sm:pt-20 lg:pt-28">
-      <div className="flex w-full max-w-2xl flex-col items-stretch gap-8">
+    <div className="relative isolate flex min-h-full w-full flex-col items-center justify-center px-4 py-16 sm:px-8">
+      <div className="flex w-full max-w-2xl flex-col items-stretch gap-6">
         <header className="text-center">
           <h1 className="text-3xl font-semibold tracking-tight leading-tight text-kumo-default sm:text-4xl">
             What are we working on?

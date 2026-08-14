@@ -15,6 +15,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { reportIssue } from './errorReporting'
+import ModelProviderMark from "./components/ModelProviderMark";
 import {
   DropdownMenu,
   Popover,
@@ -1816,6 +1817,7 @@ export const ChatInput = ({
   onStop,
   showThinkingTraces = true,
   onToggleThinkingTraces,
+  usage,
 }: {
   createCapsuleGatekeeper: (
     accountId: number,
@@ -1869,6 +1871,7 @@ export const ChatInput = ({
   onStop?: () => void;
   showThinkingTraces?: boolean;
   onToggleThinkingTraces?: () => void;
+  usage?: { tokens?: number; cost?: number };
   /** Show the "Pre-approve actions" menu item (only when there are uncovered candidates). */
   /** Open the pre-approval dialog (owned by the parent). */
   /** Called after a gatekeeper is connected via the attach flow, so the parent can refresh the
@@ -3168,9 +3171,13 @@ export const ChatInput = ({
     : consoleLogSeverity === "warn"
       ? "warning"
       : "log";
+  const selectedModelInfo = selectedModel == null
+    ? null
+    : models.find((model) => model.id === selectedModel);
   const selectedModelLabel = selectedModel == null
     ? "No agent"
-    : models.find((model) => model.id === selectedModel)?.name ?? selectedModel;
+    : selectedModelInfo?.name ?? selectedModel;
+  const hasUsage = usage?.tokens != null || usage?.cost != null;
 
   const hasReadyAttachment = pendingAttachments.some(
     (attachment) => attachment.uploadState === "ready" && attachment.ref,
@@ -3188,7 +3195,7 @@ export const ChatInput = ({
     // captured-log floating chip with z-10, the textarea/mirror with z-[1])
     // so they can't paint on top of body-level portaled popovers like the
     // model picker dropdown opening above the composer.
-    <div className={`px-4 py-4 relative isolate ${styles.chatInputRoot}`}>
+    <div className={`px-4 relative isolate ${hasUsage ? "pb-4 pt-8" : "py-4"} ${styles.chatInputRoot}`}>
       <input
         ref={attachmentInputRef}
         type="file"
@@ -3240,9 +3247,17 @@ export const ChatInput = ({
         </div>
       )}
 
-      {/* Prompt card. Brighter than the page surface (kumo-control vs kumo-base) and gently lifted
-          with a soft neutral shadow so the composer reads as a distinct surface instead of blending
-          into the canvas; the lift intensifies a touch on focus. */}
+      <div className="relative">
+      {hasUsage && (
+        <div className="absolute right-4 top-0 z-10 flex -translate-y-[calc(100%-1px)] items-center gap-3 rounded-t-lg border border-b-0 border-kumo-line bg-kumo-control px-2.5 py-1 font-mono text-[11px] leading-4 text-kumo-inactive">
+          {usage?.tokens != null && (
+            <span>{usage.tokens.toLocaleString()} tokens</span>
+          )}
+          {usage?.cost != null && (
+            <span>${usage.cost.toFixed(4)}</span>
+          )}
+        </div>
+      )}
       <div
         ref={promptCardRef}
         className="themed-prompt-card-shadow relative overflow-visible rounded-2xl border border-kumo-line bg-kumo-control transition-shadow duration-150 ease-out"
@@ -3545,6 +3560,9 @@ export const ChatInput = ({
                       className="group inline-flex h-8 min-w-0 max-w-[180px] cursor-pointer items-center gap-1.5 rounded-lg px-2 text-[13px] leading-5 tracking-[-0.25px] text-kumo-subtle transition-[background-color,color,transform] duration-150 ease-out hover:bg-kumo-tint hover:text-kumo-default focus-visible:bg-kumo-tint focus-visible:text-kumo-default focus-visible:outline-none active:scale-[0.97] data-[popup-open]:bg-kumo-tint data-[popup-open]:text-kumo-default"
                       aria-label="Select model"
                     >
+                      {selectedModelInfo && (
+                        <ModelProviderMark modelId={selectedModelInfo.id} name={selectedModelInfo.name} />
+                      )}
                       <span className="min-w-0 truncate">{selectedModelLabel}</span>
                       <CaretDown
                         size={12}
@@ -3561,8 +3579,9 @@ export const ChatInput = ({
                       <DropdownMenu.Item
                         key={model.id}
                         onClick={() => onModelChange(model.id)}
-                        className="!h-auto rounded-xl !px-2 !py-1.5 text-[12px] leading-4 font-normal tracking-[-0.15px] text-kumo-subtle transition-colors data-highlighted:bg-kumo-tint/70 data-highlighted:text-kumo-default"
+                        className="flex items-center gap-2 !h-auto rounded-xl !px-2 !py-1.5 text-[12px] leading-4 font-normal tracking-[-0.15px] text-kumo-subtle transition-colors data-highlighted:bg-kumo-tint/70 data-highlighted:text-kumo-default"
                       >
+                        <ModelProviderMark modelId={model.id} name={model.name} />
                         <span className="min-w-0 flex-1 truncate">{model.name}</span>
                         {active && (
                           <Check size={12} weight="bold" className="ml-3 flex-shrink-0 text-kumo-inactive" />
@@ -3622,6 +3641,7 @@ export const ChatInput = ({
               )}
           </div>
         </div>
+      </div>
       </div>
 
       <GatekeeperModal
@@ -6844,9 +6864,8 @@ function ChatInterface({
       {/* New chat input — pinned to bottom. ChatInput supplies its own
           horizontal padding, so the wrapper just adds the top divider; no
           extra p-4 (which would shrink the input vs. the in-chat composer). */}
-      <div className="flex-shrink-0 border-t border-kumo-line">
+      <div className="flex-shrink-0">
         <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
-          {/* Attachments and pending resource operations belong to this workspace's composer. */}
           <ChatInput
             key={workspaceId}
             createCapsuleGatekeeper={(accountId, url) =>
@@ -6866,8 +6885,6 @@ function ChatInterface({
               ? composerDraftStorageKey(currentUser.id, `workspace:${workspaceId}:new`)
               : undefined}
           />
-          {/* Reserve the same height as the token/cost row to avoid layout shift. */}
-          <div aria-hidden className="min-h-[1rem]" />
         </div>
       </div>
     </div>
@@ -7805,9 +7822,8 @@ function ChatInterface({
               </div>
 
               {/* ── Bottom: input, update state, and cost ──────────────── */}
-              <div className={`flex-shrink-0 bg-kumo-base ${sidebarMode ? "" : "border-t border-kumo-line"}`}>
+              <div className="flex-shrink-0 bg-kumo-base">
                 <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
-                  {/* Remount all transient composer state when the conversation changes. */}
                   <ChatInput
                     key={`${workspaceId}:${selectedChatId}`}
                     chatKey={selectedChatId}
@@ -7820,6 +7836,10 @@ function ChatInterface({
                     models={availableModels}
                     selectedModel={selectedModel}
                     onModelChange={handleModelChange}
+                    usage={currentChatMetadata ? {
+                      tokens: currentChatMetadata.totalTokens,
+                      cost: currentChatMetadata.totalCost,
+                    } : undefined}
                     pendingConsoleLogCount={pendingConsoleLogCount}
                     consoleLogPreview={consoleLogPreview}
                     consoleLogSeverity={consoleLogSeverity}
@@ -7903,18 +7923,6 @@ function ChatInterface({
                       );
                     })()}
                   />
-
-                  {/* Token / cost summary. */}
-                  <div className="-mt-1 flex min-h-[1.25rem] items-start justify-end gap-4 px-4 pb-1 font-mono text-[11px] leading-4 text-kumo-inactive">
-                    {currentChatMetadata?.totalTokens != null && (
-                      <span>
-                        {currentChatMetadata.totalTokens.toLocaleString()} tokens
-                      </span>
-                    )}
-                    {currentChatMetadata?.totalCost != null && (
-                      <span>${currentChatMetadata.totalCost.toFixed(4)}</span>
-                    )}
-                  </div>
                 </div>
               </div>
             </>

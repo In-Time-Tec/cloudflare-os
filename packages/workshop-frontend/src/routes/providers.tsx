@@ -15,11 +15,8 @@ import {
   MagnifyingGlass,
   DotsThreeVertical,
 } from '@phosphor-icons/react'
-import anthropicLogo from '@lobehub/icons-static-svg/icons/anthropic.svg'
-import geminiLogo from '@lobehub/icons-static-svg/icons/gemini-color.svg'
-import kimiLogo from '@lobehub/icons-static-svg/icons/kimi.svg'
-import openAiLogo from '@lobehub/icons-static-svg/icons/openai.svg'
 import AddModelModal from '../AddModelModal'
+import { getModelProviderLogo } from '../modelProviderLogo'
 import { useDocumentTitle } from '../useDocumentTitle'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from '../components/menuStyles'
 
@@ -32,17 +29,8 @@ const PROVIDER_ORDER = Object.keys(SUGGESTED_MODELS) as AiModelProvider[]
 const PRIMARY_BTN =
   'press inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-kumo-brand px-3.5 text-[13px] font-medium tracking-[-0.25px] text-white transition-colors hover:bg-kumo-brand-hover'
 
-const MODEL_PROVIDER_LOGOS = [
-  { prefix: 'openai/', src: openAiLogo, monochrome: true },
-  { prefix: 'anthropic/', src: anthropicLogo, monochrome: true },
-  { prefix: 'google/', src: geminiLogo, monochrome: false },
-  { prefix: 'moonshotai/', src: kimiLogo, monochrome: true },
-] as const
-
-// ─── model row ─────────────────────────────────────────────────────────────────
-
 function ModelLogo({ model }: { model: AiChatAuthorInfo }) {
-  const logo = MODEL_PROVIDER_LOGOS.find(({ prefix }) => model.id.startsWith(prefix))
+  const logo = getModelProviderLogo(model.id)
 
   return (
     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-kumo-fill text-[12px] font-medium text-kumo-subtle">
