@@ -77,18 +77,19 @@ export default function SidebarUtilityStrip({ collapsed = false }: { collapsed?:
   return (
     <div
       className={[
-        // shrink-0 + solid base so the strip is visually pinned above the scrolling rail body
-        // and content can't bleed through it. Flat treatment — no top shadow.
-        'shrink-0 flex items-center gap-1 border-t border-kumo-line bg-kumo-elevated px-3 py-2',
-        collapsed ? 'flex-col justify-center gap-2 px-1.5' : '',
+        'shrink-0 flex items-center border-t border-kumo-line bg-kumo-elevated',
+        collapsed ? 'flex-col justify-center gap-2 px-1.5 py-2' : 'gap-2 px-3 py-2',
       ].join(' ')}
     >
-      <StripLink to="/gatekeepers" label="Gatekeepers">
-        <Plug size={15} />
-      </StripLink>
-      <div className={collapsed ? 'flex flex-col items-center gap-2' : 'ml-auto flex items-center gap-1'}>
+      <div className={collapsed ? '' : 'min-w-0 flex-1'}>
+        <UserMenu showName={!collapsed} square />
+      </div>
+      {!collapsed && <div className="h-4 w-px shrink-0 bg-kumo-line" aria-hidden="true" />}
+      <div className={collapsed ? 'flex flex-col items-center gap-2' : 'flex shrink-0 items-center gap-0.5'}>
         <ThemeModeButton />
-        <UserMenu />
+        <StripLink to="/gatekeepers" label="Gatekeepers">
+          <Plug size={15} />
+        </StripLink>
       </div>
     </div>
   )

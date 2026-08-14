@@ -10,13 +10,7 @@ import {
   type ReactNode,
 } from 'react'
 import { Link } from '@tanstack/react-router'
-import {
-  ArrowRight,
-  CaretDown,
-  MagnifyingGlass,
-  Star,
-} from '@phosphor-icons/react'
-import { openCommandPalette } from './commandPaletteBus'
+import { ArrowRight } from '@phosphor-icons/react'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import type { RpcStub } from 'capnweb'
 import {
@@ -64,7 +58,7 @@ function useWorkspacesContext(): WorkspacesContextValue {
 /**
  * ─────────────────────────────────────────────────────────────────────────────
  * Provider: owns all the data + mutation handlers, plus the share / delete dialogs. Renders its
- * children inside its context so SidebarWorkspacesTools and SidebarWorkspacesLists can be placed
+ * children inside its context so SidebarWorkspacesLists can be placed
  * independently in the parent layout (pinned vs. scrolling areas).
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -259,39 +253,6 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
   )
 }
 
-/**
- * ─────────────────────────────────────────────────────────────────────────────
- * Tools (search). Lives in the rail's pinned-top area so it stays put while the lists below scroll.
- * Only renders in collapsed mode — see the note below.
- * ─────────────────────────────────────────────────────────────────────────────
- */
-export function SidebarWorkspacesTools({ collapsed = false }: { collapsed?: boolean }) {
-  // No "New workspace" button: Home *is* the new-workspace launcher, so it would be redundant.
-  // Search lives as a magnifying-glass icon in the brand row when expanded; when collapsed the
-  // brand-row buttons are hidden, so we surface a compact search icon here instead.
-  if (!collapsed) return null
-
-  return (
-    <div className="flex flex-col items-center px-2">
-      <button
-        type="button"
-        onClick={() => openCommandPalette()}
-        aria-label="Search"
-        title="Search (⌘K)"
-        className="press flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-default"
-      >
-        <MagnifyingGlass size={15} />
-      </button>
-    </div>
-  )
-}
-
-/**
- * ─────────────────────────────────────────────────────────────────────────────
- * Lists (Favorites / Recent workspaces). Lives in the rail's scrolling middle
- * region. In collapsed mode shows a compact avatar stack.
- * ─────────────────────────────────────────────────────────────────────────────
- */
 export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: boolean }) {
   const {
     search,
@@ -337,7 +298,6 @@ export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: bool
         count={favorites.length}
         open={favOpen}
         onToggle={() => setFavOpen((o) => !o)}
-        icon={<Star size={12} weight="regular" className="text-kumo-inactive" />}
       >
         {favorites.length === 0 ? (
           <p className="px-2.5 py-1.5 text-[12px] leading-4 tracking-[-0.2px] text-kumo-inactive">
@@ -359,9 +319,9 @@ export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: bool
         )}
       </SidebarSection>
 
-      {/* Recent workspaces — no count here; the "Show all (N)" link already carries it. */}
       <SidebarSection
         label="Recent workspaces"
+        count={recent.length}
         open={recentOpen}
         onToggle={() => setRecentOpen((o) => !o)}
       >
@@ -407,14 +367,12 @@ export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: bool
 function SidebarSection({
   label,
   count,
-  icon,
   open,
   onToggle,
   children,
 }: {
   label: string
   count?: number
-  icon?: ReactNode
   open: boolean
   onToggle: () => void
   children: ReactNode
@@ -424,16 +382,12 @@ function SidebarSection({
       <button
         type="button"
         onClick={onToggle}
-        className="flex h-6 cursor-pointer items-center gap-1 px-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-kumo-inactive transition-colors hover:text-kumo-subtle"
+        aria-expanded={open}
+        className="flex h-6 w-full cursor-pointer items-center gap-2 px-1.5 text-[11px] font-medium tracking-[-0.1px] text-kumo-inactive transition-colors hover:text-kumo-subtle"
       >
-        <CaretDown
-          size={10}
-          weight="bold"
-          className={['transition-transform', open ? '' : '-rotate-90'].join(' ')}
-        />
-        {icon}
-        <span>{label}</span>
-        {count !== undefined && <span className="ml-1 text-kumo-inactive">{count}</span>}
+        <span className="shrink-0">{label}</span>
+        <span className="h-px min-w-2 flex-1 bg-kumo-line" aria-hidden="true" />
+        {count !== undefined && <span className="shrink-0 tabular-nums">{count}</span>}
       </button>
       {open && <div className="mt-0.5">{children}</div>}
     </div>

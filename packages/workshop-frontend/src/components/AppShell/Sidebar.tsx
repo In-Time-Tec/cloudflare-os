@@ -17,7 +17,6 @@ import { openCommandPalette } from './commandPaletteBus'
 import SidebarItem from './SidebarItem'
 import {
   SidebarWorkspacesProvider,
-  SidebarWorkspacesTools,
   SidebarWorkspacesLists,
 } from './SidebarWorkspaces'
 import SidebarUtilityStrip from './SidebarUtilityStrip'
@@ -53,68 +52,87 @@ export default function Sidebar({
       className={[
         // Sidebar is the app chrome: a hair greyer than the (lighter) content canvas so the two
         // surfaces read as distinct without a heavy divider.
-        'flex h-full flex-col border-r border-kumo-line bg-kumo-elevated',
+        'group/sidebar flex h-full flex-col border-r border-kumo-line bg-kumo-elevated',
         collapsed ? 'w-[56px]' : 'w-[260px]',
         'shrink-0 transition-[width] duration-200 ease-out',
       ].join(' ')}
     >
-      {/* Brand row */}
       <div
         className={[
           'flex h-14 shrink-0 items-center border-b border-kumo-line',
           collapsed ? 'justify-center px-1.5' : 'justify-between gap-2 px-3',
         ].join(' ')}
       >
-        <Link to="/" aria-label={siteName} className="flex min-w-0 items-center gap-2">
-          <SiteLogo size={20} className="shrink-0">
-            <Hexagon size={20} weight="bold" className="text-kumo-brand shrink-0" />
-          </SiteLogo>
-          {!collapsed && (
-            <span className="truncate text-[14px] leading-5 font-semibold tracking-[-0.25px] text-kumo-default">
-              {siteName}
-            </span>
-          )}
-        </Link>
-        {!collapsed && (
-          <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              onClick={() => openCommandPalette()}
-              aria-label="Search"
-              title="Search (⌘K)"
-              className="press flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
-            >
-              <MagnifyingGlass size={15} />
-            </button>
+        {collapsed ? (
+          <div className="relative flex h-7 w-7 items-center justify-center">
             <button
               type="button"
               onClick={onToggleCollapsed}
-              aria-label="Collapse sidebar"
-              title="Collapse sidebar"
-              className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
+              className="peer absolute inset-0 z-10 flex cursor-pointer items-center justify-center rounded-md text-kumo-inactive opacity-0 pointer-events-none transition-colors hover:bg-kumo-tint hover:text-kumo-default group-hover/sidebar:pointer-events-auto group-hover/sidebar:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
             >
-              <SidebarSimple size={15} />
+              <SidebarSimple size={15} className="rotate-180" />
             </button>
+            <Link
+              to="/"
+              aria-label={siteName}
+              className="flex items-center justify-center group-hover/sidebar:invisible peer-focus-visible:invisible"
+            >
+              <SiteLogo size={20} className="shrink-0">
+                <Hexagon size={20} weight="bold" className="text-kumo-brand shrink-0" />
+              </SiteLogo>
+            </Link>
           </div>
+        ) : (
+          <>
+            <Link to="/" aria-label={siteName} className="flex min-w-0 items-center gap-2">
+              <SiteLogo size={20} className="shrink-0">
+                <Hexagon size={20} weight="bold" className="text-kumo-brand shrink-0" />
+              </SiteLogo>
+              <span className="truncate text-[14px] leading-5 font-semibold tracking-[-0.25px] text-kumo-default">
+                {siteName}
+              </span>
+            </Link>
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => openCommandPalette()}
+                aria-label="Search"
+                title="Search (⌘K)"
+                className="press flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
+              >
+                <MagnifyingGlass size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={onToggleCollapsed}
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
+              >
+                <SidebarSimple size={15} />
+              </button>
+            </div>
+          </>
         )}
       </div>
 
-      {/* Expand affordance when collapsed — placed just under the logo for discoverability. */}
       {collapsed && (
         <button
           type="button"
-          onClick={onToggleCollapsed}
-          aria-label="Expand sidebar"
-          title="Expand sidebar"
-          className="mx-auto mt-2 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
+          onClick={() => openCommandPalette()}
+          aria-label="Search"
+          title="Search (⌘K)"
+          className="press mx-auto mt-2 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
         >
-          <SidebarSimple size={15} className="rotate-180" />
+          <MagnifyingGlass size={15} />
         </button>
       )}
 
       <SidebarWorkspacesProvider>
         {/* Pinned top stack. shrink-0 keeps it from squishing when the lists below grow. */}
-        <div className="flex shrink-0 flex-col gap-3 pt-3">
+        <div className={['flex shrink-0 flex-col', collapsed ? 'pt-2' : 'pt-3'].join(' ')}>
           {/* Primary nav */}
           <nav className="flex flex-col gap-0.5 px-2">
             <SidebarItem
@@ -187,9 +205,6 @@ export default function Sidebar({
               collapsed={collapsed}
             />
           </nav>
-
-          {/* Workspace tools: search. Pinned so it's always reachable. */}
-          <SidebarWorkspacesTools collapsed={collapsed} />
         </div>
 
         {/* Scrolling middle: only the Favorites / Recent workspaces / Recent blueprints lists.
