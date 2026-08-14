@@ -3255,7 +3255,7 @@ export const ChatInput = ({
           className={`pointer-events-none h-24 ${styles.composerFade}`}
         />
       )}
-      <div className="relative">
+      <div className={docked ? "relative px-4" : "relative"}>
       <div
         ref={promptCardRef}
         className={
@@ -6883,6 +6883,7 @@ function ChatInterface({
         )}
         </div>
         <div className="sticky bottom-0 z-10 -mt-24">
+          <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
           <ChatInput
             key={workspaceId}
             createCapsuleGatekeeper={(accountId, url) =>
@@ -6903,6 +6904,7 @@ function ChatInterface({
               ? composerDraftStorageKey(currentUser.id, `workspace:${workspaceId}:new`)
               : undefined}
           />
+          </div>
         </div>
       </div>
     </div>
@@ -7838,6 +7840,7 @@ function ChatInterface({
                   </div>
                 )}
                 <div className="sticky bottom-0 z-10 -mt-24">
+                  <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
                   <ChatInput
                     key={`${workspaceId}:${selectedChatId}`}
                     chatKey={selectedChatId}
@@ -7938,6 +7941,7 @@ function ChatInterface({
                       );
                     })()}
                   />
+                  </div>
                 </div>
               </div>
             </>
