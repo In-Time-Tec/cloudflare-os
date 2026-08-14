@@ -3,7 +3,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useKumoToastManager } from "@cloudflare/kumo";
 import { ChatInput } from "../ChatInterface";
-import OpenWorkLogo from "../components/OpenWorkLogo";
 import HomeTaskSuggestions from "../components/AppShell/HomeTaskSuggestions";
 import { useAuthenticatedApi } from "../AuthContext";
 import { RpcStub } from "capnweb";
@@ -154,9 +153,14 @@ export function HomePageContent({ prompt }: HomeSearch) {
   return (
     <div className="relative isolate flex min-h-full w-full flex-col items-center justify-start px-4 pb-16 pt-12 sm:px-8 sm:pt-20 lg:pt-28">
       <div className="flex w-full max-w-2xl flex-col items-stretch gap-8">
-        <div className="flex h-32 items-center justify-center sm:h-40">
-          <OpenWorkLogo />
-        </div>
+        <header className="text-center">
+          <h1 className="text-3xl font-semibold tracking-tight leading-tight text-kumo-default sm:text-4xl">
+            What are we working on?
+          </h1>
+          <p className="mx-auto mt-3 max-w-md text-[14px] leading-5 tracking-[-0.25px] text-kumo-subtle">
+            Ask a question, create an output, or create an app that works with your tools and data.
+          </p>
+        </header>
 
         {/* Composer */}
         <ChatInput
