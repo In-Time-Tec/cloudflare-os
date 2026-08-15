@@ -19,3 +19,16 @@ export function setActiveAuthenticatedApi(stub: RpcStub<AuthenticatedApi> | null
 export function getActiveAuthenticatedApi(): RpcStub<AuthenticatedApi> | null {
   return active
 }
+
+import type { ConversationsApi } from '@gadgets/workshop-shared/gatekeeper'
+
+let activeConversations: RpcStub<ConversationsApi> | null = null
+
+/** Called by ConversationsProvider once the account's conversations capability is acquired. */
+export function setActiveConversationsApi(stub: RpcStub<ConversationsApi> | null): void {
+  activeConversations = stub
+}
+
+export function getActiveConversationsApi(): RpcStub<ConversationsApi> | null {
+  return activeConversations
+}
