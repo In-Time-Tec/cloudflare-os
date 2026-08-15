@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister'
+import type { PersistedClient } from '@tanstack/query-persist-client-core'
 import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval'
 
 // Persisted queries are read-mostly, non-secret, plain-data responses that make the sidebar and
@@ -41,8 +42,26 @@ export const queryClient = new QueryClient({
 })
 
 /** IndexedDB persister (async, off the main thread). Keyed for schema versioning. */
+export // RPC payloads carry Date objects; a JSON round-trip turns them into strings, which crashes
+// consumers calling `.getTime()` on restore. Revive ISO date strings recursively on read.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/
+
+function reviveDates(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(reviveDates)
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const [key, entry] of Object.entries(record)) {
+      out[key] = typeof entry === 'string' && ISO_DATE.test(entry) ? new Date(entry) : reviveDates(entry)
+    }
+    return out
+  }
+  return value
+}
+
 export const asyncPersister = createAsyncStoragePersister({
   storage: { getItem: idbGet, setItem: idbSet, removeItem: idbDel },
-  key: 'WORKSHOP_QUERY_CACHE_V1',
+  key: 'WORKSHOP_QUERY_CACHE_V2',
   throttleTime: 1000,
+  deserialize: (cachedString) => reviveDates(JSON.parse(cachedString)) as PersistedClient,
 })
