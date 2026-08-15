@@ -135,6 +135,7 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
     const connect = () => {
       stub.getLiveEndpoint().then(({ webSocketUrl }) => {
         if (closed) return
+        console.debug('conversations: live socket connecting', webSocketUrl.slice(0, 80))
         socket = new WebSocket(webSocketUrl)
         socketRef.current = socket
         socket.addEventListener('open', () => {
@@ -167,13 +168,15 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
             // malformed frame — ignore
           }
         })
-        socket.addEventListener('close', () => {
+        socket.addEventListener('close', event => {
+          console.debug('conversations: live socket closed', event.code)
           socketRef.current = null
           if (closed) return
           attempt += 1
           retryTimer = setTimeout(connect, Math.min(30000, 1000 * 2 ** attempt))
         })
-      }).catch(() => {
+      }).catch(err => {
+        console.debug('conversations: live endpoint failed', err)
         if (!closed) {
           attempt += 1
           retryTimer = setTimeout(connect, Math.min(30000, 1000 * 2 ** attempt))
