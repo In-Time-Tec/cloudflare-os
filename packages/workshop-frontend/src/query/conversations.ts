@@ -23,28 +23,28 @@ function api() {
 }
 
 export function useConversationsQuery() {
-  return useQuery({ queryKey: conversationsKey, queryFn: () => api().listConversations() })
+  return useQuery({ queryKey: conversationsKey, queryFn: async () => await api().listConversations() })
 }
 
 export function useChannelsQuery() {
-  return useQuery({ queryKey: channelsKey, queryFn: () => api().listChannels() })
+  return useQuery({ queryKey: channelsKey, queryFn: async () => await api().listChannels() })
 }
 
 export function useEmailsQuery() {
-  return useQuery({ queryKey: emailsKey, queryFn: () => api().listEmails() })
+  return useQuery({ queryKey: emailsKey, queryFn: async () => await api().listEmails() })
 }
 
 export function useAgendaQuery(from: Date, to: Date) {
   return useQuery({
     queryKey: agendaKey(from.toISOString().slice(0, 10)),
-    queryFn: () => api().listAgenda(from, to),
+    queryFn: async () => await api().listAgenda(from, to),
   })
 }
 
 export function useMessagesQuery(ref: ConversationRef | null) {
   return useQuery({
     queryKey: ref ? messagesKey(ref) : ['messages', 'none'],
-    queryFn: () => api().getMessages(ref!),
+    queryFn: async () => await api().getMessages(ref!),
     enabled: ref !== null,
     placeholderData: keepPreviousData,
   })
@@ -53,7 +53,7 @@ export function useMessagesQuery(ref: ConversationRef | null) {
 export function useEmailDetailQuery(id: string | null) {
   return useQuery({
     queryKey: id ? emailDetailKey(id) : ['emailDetail', 'none'],
-    queryFn: () => api().getEmail(id!),
+    queryFn: async () => await api().getEmail(id!),
     enabled: id !== null,
     placeholderData: keepPreviousData,
   })

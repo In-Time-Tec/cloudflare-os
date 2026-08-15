@@ -5,10 +5,10 @@ import {
   BookOpen,
   MagnifyingGlass,
 } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BlueprintPublicInfo } from "@gadgets/workshop-shared/api";
 import { VendorDescription } from "@gadgets/workshop-shared/gatekeeper";
-import { useAuthenticatedApi } from "./AuthContext";
+import { useFeaturedBlueprints, useGatekeeperVendors } from "./query/hooks";
 import { BindingBadge, uniqueBindingBadges } from "./components/BlueprintCard";
 import { BlueprintPreviewPlaceholder } from "./components/BlueprintPreviewImage";
 import ViewToggle from "./components/ViewToggle";
@@ -17,14 +17,16 @@ import PageChrome from "./components/AppShell/PageChrome";
 type VendorMap = Map<string, VendorDescription>;
 
 export default function BlueprintsPage() {
-  const { authenticatedApi } = useAuthenticatedApi();
   const toasts = useKumoToastManager();
   const toastsRef = useRef(toasts);
   toastsRef.current = toasts;
 
-  const [featuredBlueprints, setFeaturedBlueprints] = useState<BlueprintPublicInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [vendorDescriptions, setVendorDescriptions] = useState<VendorMap>(() => new Map());
+  const { data: featuredBlueprints = [], isLoading: loading } = useFeaturedBlueprints();
+  const { data: rawVendors } = useGatekeeperVendors();
+  const vendorDescriptions = useMemo(
+    () => new Map<string, VendorDescription>((rawVendors ?? []).map((vendor) =>
+      [vendor.id.toLowerCase(), vendor.description]) as [string, VendorDescription][]),
+    [rawVendors])
 
   const [view, setView] = useState<"grid" | "list">(() => {
     if (typeof window === "undefined") return "grid";
@@ -36,36 +38,7 @@ export default function BlueprintsPage() {
     localStorage.setItem("explore-view", view);
   }, [view]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
 
-    Promise.all([
-      authenticatedApi.listFeaturedBlueprints(),
-      authenticatedApi.listGatekeeperVendors(),
-    ])
-      .then(([featured, vendors]) => {
-        if (cancelled) return;
-        setFeaturedBlueprints(featured);
-        setVendorDescriptions(
-          new Map(vendors.map((vendor) => [vendor.id.toLowerCase(), vendor.description])),
-        );
-      })
-      .catch((err) => {
-        console.error("Failed to load Explore data:", err);
-        toastsRef.current.add({
-          title: "Failed to load featured blueprints",
-          variant: "error",
-        });
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authenticatedApi]);
 
   const q = search.trim().toLowerCase();
   const filtered = featuredBlueprints.filter((b) => {
