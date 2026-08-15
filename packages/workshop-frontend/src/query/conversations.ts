@@ -23,21 +23,22 @@ function api() {
 }
 
 export function useConversationsQuery() {
-  return useQuery({ queryKey: conversationsKey, queryFn: async () => await api().listConversations() })
+  return useQuery({ queryKey: conversationsKey, queryFn: async () => await api().listConversations(), enabled: getActiveConversationsApi() !== null })
 }
 
 export function useChannelsQuery() {
-  return useQuery({ queryKey: channelsKey, queryFn: async () => await api().listChannels() })
+  return useQuery({ queryKey: channelsKey, queryFn: async () => await api().listChannels(), enabled: getActiveConversationsApi() !== null })
 }
 
 export function useEmailsQuery() {
-  return useQuery({ queryKey: emailsKey, queryFn: async () => await api().listEmails() })
+  return useQuery({ queryKey: emailsKey, queryFn: async () => await api().listEmails(), enabled: getActiveConversationsApi() !== null })
 }
 
 export function useAgendaQuery(from: Date, to: Date) {
   return useQuery({
     queryKey: agendaKey(from.toISOString().slice(0, 10)),
     queryFn: async () => await api().listAgenda(from, to),
+    enabled: getActiveConversationsApi() !== null,
   })
 }
 
