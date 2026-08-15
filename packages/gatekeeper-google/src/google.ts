@@ -1,7 +1,7 @@
 import { WorkerEntrypoint, DurableObject, RpcTarget, RpcStub } from "cloudflare:workers";
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
-import { GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor as GatekeeperVendorIface, Gatekeeper, ResourceDescription, ApprovalQueue, ObservationDescription, VendorDescription, GatekeeperConnectCallback, GatekeeperConnectOptions, AccountDescription, SupportedResource, ResourceConfiguratorFrame, Cursor, ActionKind, stripTrailingSlashes } from '@gadgets/workshop-shared/gatekeeper';
-import { exchangeAuthCode, getAccessToken, getGoogleAccountDescription, getGoogleVerifiedEmail, GmailApi, GmailMessageRaw, GmailOutboundMessage, GoogleAccessToken, normalizeEmailRecipients, revokeGoogleToken } from "./google-api";
+import { AuthenticatedIdentity, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor as GatekeeperVendorIface, Gatekeeper, ResourceDescription, ApprovalQueue, ObservationDescription, VendorDescription, GatekeeperConnectCallback, GatekeeperConnectOptions, AccountDescription, SupportedResource, ResourceConfiguratorFrame, Cursor, ActionKind, stripTrailingSlashes } from '@gadgets/workshop-shared/gatekeeper';
+import { exchangeAuthCode, getAccessToken, getGoogleAccountDescription, getGoogleVerifiedIdentity, GOOGLE_ISSUER, GmailApi, GmailMessageRaw, GmailOutboundMessage, GoogleAccessToken, normalizeEmailRecipients, revokeGoogleToken } from "./google-api";
 import {
   GmailSession, GmailThread, GmailMessage,
   GmailThreadInfo, GmailThreadEntry, GmailMessageInfo, GmailLabel, GmailSystemLabel, EmailContent
@@ -816,16 +816,23 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     return description;
   }
 
-  async getAuthenticatedEmail(): Promise<string | null> {
-    // Contract is Promise<string | null>: never throw. The access token fetch can throw if the
-    // (possibly transient sign-in) grant has been cleaned up, and the userinfo call can throw on a
-    // non-2xx response — treat any failure as "no email available".
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
+    // Contract is Promise<AuthenticatedIdentity | null>: never throw. The access token fetch can
+    // throw if the (possibly transient sign-in) grant has been cleaned up, and the userinfo call
+    // can throw on a non-2xx response — treat any failure as "no identity available".
     try {
       let id = this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId);
       let obj = this.ctx.exports.UserAccount.get(id);
       let token = await obj.getAccessToken();
       if (!token) return null;
-      return await getGoogleVerifiedEmail(token.token);
+      let identity = await getGoogleVerifiedIdentity(token.token);
+      if (!identity) return null;
+      return {
+        issuer: GOOGLE_ISSUER,
+        subject: identity.sub,
+        email: identity.email,
+        displayName: identity.displayName,
+      };
     } catch {
       return null;
     }

@@ -17,7 +17,7 @@ const validConfig = {
     context: "acme-os-context",
     scheduler: "acme-os-scheduler",
   },
-  auth: { admins: ["admin"] },
+  auth: { admins: ["password:admin"] },
   context: { sharingDomain: "acme-workers-dev" },
   ai: {
     providers: ["openrouter"],
@@ -55,8 +55,8 @@ test("rejects invalid deployment identities", () => {
   assert.throws(() => validateConfig(duplicate), /unique/i);
 
   const malformedAdmin = structuredClone(validConfig);
-  malformedAdmin.auth.admins = ["Admin User"];
-  assert.throws(() => validateConfig(malformedAdmin), /username/i);
+  malformedAdmin.auth.admins = ["no-colon-principal"];
+  assert.throws(() => validateConfig(malformedAdmin), /principal/i);
 
   const missingResource = structuredClone(validConfig);
   delete missingResource.resources.contextKvNamespace;
@@ -85,7 +85,7 @@ test("generates the workers.dev composition", async () => {
   assert.equal(generated.router.assets.directory, "../workshop-frontend/dist");
 
   assert.equal(generated.backend.workers_dev, false);
-  assert.deepEqual(generated.backend.vars.ADMINS, ["admin"]);
+  assert.deepEqual(generated.backend.vars.ADMINS, ["password:admin"]);
   assert.equal(generated.backend.vars.DEPLOYMENT_AI_PROVIDERS, "openrouter");
   assert.equal(generated.backend.vars.DEPLOYMENT_AI_DEFAULT_MODEL, "openai/gpt-5.6-luna");
   assert.deepEqual(generated.backend.ai, { binding: "WORKERS_AI" });

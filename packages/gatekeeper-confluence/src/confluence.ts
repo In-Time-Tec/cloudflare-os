@@ -29,7 +29,7 @@ import {
   type ResourceConfiguratorFrame,
   type ResourceDescription,
   type SupportedResource,
-  type VendorDescription,
+  type VendorDescription, AuthenticatedIdentity,
 } from "@gadgets/workshop-shared/gatekeeper";
 import {
   CONFLUENCE_SCOPES,
@@ -442,7 +442,7 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     };
   }
 
-  async getAuthenticatedEmail(): Promise<string | null> {
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
     // Confluence is a data connector, not a sign-in provider (see README for the fast-follow note).
     return null;
   }

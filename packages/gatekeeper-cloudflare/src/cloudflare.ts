@@ -1,7 +1,7 @@
 import { WorkerEntrypoint, DurableObject } from "cloudflare:workers";
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
 import {
-  GatekeeperVendor as GatekeeperVendorIface, Gatekeeper, GatekeeperUserVerifier, VendorDescription,
+  AuthenticatedIdentity, GatekeeperVendor as GatekeeperVendorIface, Gatekeeper, GatekeeperUserVerifier, VendorDescription,
   GatekeeperConnectCallback, GatekeeperConnectOptions, AccountDescription,
   SupportedResource, ResourceConfiguratorFrame, stripTrailingSlashes,
 } from "@gadgets/workshop-shared/gatekeeper";
@@ -28,6 +28,10 @@ type StoredNonce = {
 
 // A cached access token plus its absolute expiry (unix ms).
 type StoredAccessToken = { token: string; expires: number };
+
+// The fixed identity issuer for Cloudflare sign-ins: the dashboard OAuth client has no OIDC
+// issuer, so the API hostname namespaces Cloudflare's stable user ids.
+const CLOUDFLARE_ISSUER = "api.cloudflare.com";
 
 const NONCE_BYTES = 32;
 const INITIATION_NONCE_LIFETIME_MS = 10 * 60 * 1000;
@@ -354,11 +358,17 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     };
   }
 
-  async getAuthenticatedEmail(): Promise<string | null> {
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
     const token = await this.#account().getAccessToken();
     if (!token) return null;
     const identity = await fetchIdentity(token);
-    return identity?.email ?? null;
+    if (!identity) return null;
+    return {
+      issuer: CLOUDFLARE_ISSUER,
+      subject: identity.id,
+      email: identity.email,
+      displayName: identity.displayName,
+    };
   }
 
   async ensureResources(_resourceUrlPatterns: string[]): Promise<{url?: string}> {

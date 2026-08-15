@@ -26,7 +26,7 @@ export const TEST_GATEKEEPER_WORKER = "gatekeeper-test";
 export const TEST_GATEKEEPER_BINDING = "TEST";
 export const TEST_VENDOR_ID = TEST_GATEKEEPER_BINDING.toLowerCase();
 
-/** Username that `vars.ADMINS` grants deployment-admin rights to, mirroring run-dev-server.js. */
+/** Username of the password account granted deployment-admin rights, mirroring run-dev-server.js. */
 export const ADMIN_USERNAME = "admin";
 
 // The slice of wrangler.jsonc the harness reads or rewrites. Loose on purpose: everything else a
@@ -94,7 +94,7 @@ function workshopConfig(
   }));
 
   // No CF_ACCESS_AUD, so /api takes the unauthenticated path and password signup is available.
-  config.vars = { ...config.vars, ADMINS: [ADMIN_USERNAME] };
+  config.vars = { ...config.vars, ADMINS: [`password:${ADMIN_USERNAME}`] };
 
   // Gadget code is never executed here (a gatekeeper is in observer scope purely by having a
   // vendorId), so drop the Worker Loader rather than requiring it to start.

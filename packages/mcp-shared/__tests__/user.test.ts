@@ -42,7 +42,7 @@ it("provides the common MCP account lifecycle", async () => {
     uniqueName: "https://mcp.example/rpc",
     avatar: { url: "data:image/svg+xml,test" },
   });
-  expect(await subject.getAuthenticatedEmail()).toBeNull();
+  expect(await subject.getAuthenticatedIdentity()).toBeNull();
   expect(await subject.ensureResources([])).toEqual({});
 
   await subject.revoke();

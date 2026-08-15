@@ -5,7 +5,8 @@
 import { WorkerEntrypoint, DurableObject, RpcStub as NativeRpcStub, RpcTarget as NativeRpcTarget } from "cloudflare:workers";
 import { RpcStub } from "capnweb";
 import { validateRpc, skipRpcValidation } from "capnweb-validate";
-import { boundAgentCatalog } from "@gadgets/workshop-shared/gatekeeper";
+import { boundAgentCatalog, AuthenticatedIdentity,
+} from "@gadgets/workshop-shared/gatekeeper";
 import type {
   VendorDescription, AccountDescription, AgentCatalog, AgentCatalogRequest,
   AppUiContext, GatekeeperUser, GatekeeperUiFrame, ApprovalQueue, ObservationAuthorizer,
@@ -185,7 +186,7 @@ export class ContextAccount
   reconnect(): never {
     throw new Error("The Context Library is a singleton gatekeeper; it has no connect flow.");
   }
-  async getAuthenticatedEmail(): Promise<string | null> {
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
     return null;
   }
 

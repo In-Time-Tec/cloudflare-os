@@ -9,10 +9,12 @@ import { getAuthVendorBinding } from "./auth/auth-vendors.js";
 import { getUsageInfo } from "./ai-gateway-billing/limits/usage-checker.js";
 import { listConnectedAccounts, selectAccount } from "./ai-gateway-billing/cloudflare/connection-service.js";
 import { PendingLogin, LoginConnectCallbackImpl } from "./auth/login-flow.js";
+import { IdentityDirectory, identityDirectoryId, PASSWORD_ISSUER, SessionPrincipal } from "./auth/identity-directory.js";
 import { deploymentOutputForBlueprint, listFormatOffers, readAdminConfig } from "./admin-config.js";
 
 // Re-export the optional-feature Durable Objects + entrypoints so they can be bound in wrangler.
 export { PendingLogin, LoginConnectCallbackImpl };
+export { IdentityDirectory };
 import { GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
 import { LanguageModelGatekeeper } from "./ai-models";
 import { getManagedAiConfig } from "./ai-gateway.js";
@@ -76,10 +78,14 @@ type Env = Cloudflare.Env & {
 class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   constructor(private ctx: ExecutionContext, private env: Env,
       userId: DurableObjectId,
-      private abortSession: (reason: Error) => void) {
+      principal: SessionPrincipal,
+      private abortSession: (reason: Error) => void,
+      sessionSecret?: string) {
     super();
 
     this.#userId = userId;
+    this.#principal = principal;
+    this.#sessionSecret = sessionSecret;
     this.overseers = this.ctx.exports.OverseerDurableObject;
     this.adminSettings = this.ctx.exports.AdminSettings;
     this.users = this.ctx.exports.UserDurableObject;
@@ -90,6 +96,13 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   private users: DurableObjectNamespace<UserDurableObject>;
 
   #userId: DurableObjectId;
+  // The verified principal that authenticated this connection: the session's recorded
+  // issuer/subject, or the Access JWT's verified claims. Authorization (the ADMINS check) keys off
+  // this, never off mutable profile data.
+  #principal: SessionPrincipal;
+  // The session secret this connection authenticated with, when token-based (absent for CF
+  // Access). Held only so logout() can delete the session server-side.
+  #sessionSecret?: string;
 
   // Get a stub pointing at the user DO. We create a new stub for every request so that we don't
   // have to worry about detecting when a stub has become broken.
@@ -98,10 +111,8 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   }
 
   #isAdmin(): boolean {
-    let name = this.#userId.name;
     let admins = this.env.ADMINS;
-
-    if (!name || !admins) return false;
+    if (!admins) return false;
 
     if (typeof admins === "string") {
       // Admins should be a JSON binding of array type, but `.env` doesn't actually let you
@@ -110,10 +121,12 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     }
 
     if (!Array.isArray(admins)) {
-      throw new TypeError("ADMINS must be configured as an array of usernames.");
+      throw new TypeError("ADMINS must be configured as an array of principals.");
     }
 
-    return admins.includes(name);
+    // Admins are identified by verified principal, formatted "<issuer>:<subject>" — e.g.
+    // "password:admin" or "https://accounts.google.com:103245...". Never by email or username.
+    return admins.includes(`${this.#principal.issuer}:${this.#principal.subject}`);
   }
 
   whoami(): Promise<AiChatAuthorInfo> {
@@ -127,6 +140,14 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   }
   hasPasswordLogin(): Promise<boolean> {
     return this.#user.hasPasswordLogin();
+  }
+  getLoginUsername(): Promise<string | null> {
+    return this.#user.getLoginUsername();
+  }
+  async logout(): Promise<void> {
+    if (this.#sessionSecret) {
+      await this.#user.deleteSession(this.#sessionSecret);
+    }
   }
   listModels(): Promise<AiChatAuthorInfo[]> {
     return this.#user.listModels();
@@ -182,8 +203,9 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
       }
     }
     // Avatar data lives in KV (global), not the user's DO storage, so we
-    // read/write it directly here to avoid routing through the DO location.
-    let userId = this.#userId.name!;
+    // read/write it directly here to avoid routing through the DO location. Keyed by the opaque
+    // user id, which is also every profile's id.
+    let userId = this.#userId.toString();
     if (data) {
       await this.env.AVATARS.put(userId, data);
     } else {
@@ -210,14 +232,14 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   }
 
   getUiFeatureFlags(): Promise<UiFeatureFlags> {
-    return resolveUiFeatureFlags(this.env, this.#userId.name!);
+    return resolveUiFeatureFlags(this.env, this.#userId.toString());
   }
 
   async #openGadgetInternal(id: string, shareKey?: string,
                             configureObservers?: RpcStub<ObserverConfigCallback>)
       : Promise<NativeRpcStub<Overseer>> {
     let userId = this.#userId.toString();
-    let profileId = this.#userId.name!;
+    let profileId = this.#userId.toString();
     let overseerId;
     try {
       overseerId = this.overseers.idFromString(id);
@@ -591,12 +613,12 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
 
   async getAdminApi(): Promise<RpcStub<AdminApi> | null> {
     if (!this.#isAdmin()) return null;
-    // #isAdmin() guarantees a non-empty user id name. Forwarded to gatekeepers when listing the
-    // resource catalog so RBAC-gated ones still surface for this admin.
-    let adminUserId = this.#userId.name!;
+    // The admin's opaque user id, forwarded to gatekeepers when listing the resource catalog so
+    // RBAC-gated ones still surface for this admin.
+    let adminUserId = this.#userId.toString();
     // @ts-expect-error Cap'n Web RPC stubs and native RPC targets are compatible but the type
     //     system doesn't know this.
-    return new AdminApiImpl(this.adminSettings.getByName(""), adminUserId);
+    return new AdminApiImpl(this.adminSettings.getByName(""), adminUserId, this.users);
   }
 }
 
@@ -679,14 +701,21 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
       throw createAuthError(AUTH_ERROR_CODES.invalidSessionToken);
     }
 
-    let userId = this.users.idFromName(split[0]);
-    await this.users.get(userId).authenticate(split[1]);
+    // The token prefix is the opaque internal user id (never an email or username).
+    let userId;
+    try {
+      userId = this.users.idFromString(split[0]);
+    } catch {
+      throw createAuthError(AUTH_ERROR_CODES.invalidSessionToken);
+    }
+    let principal = await this.users.get(userId).authenticate(split[1]);
     recordAnalytics(this.ctx, this.env, {
       event_name: "user_authenticated",
       user_id: userId.toString(),
       source: "session_token",
     });
-    return new AuthenticatedApiImpl(this.ctx, this.env, userId, this.abortSession);
+    return new AuthenticatedApiImpl(
+        this.ctx, this.env, userId, principal, this.abortSession, split[1]);
   }
 
   async authenticateFromCfAccess(): Promise<AuthenticatedApi> {
@@ -694,11 +723,26 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
       throw createAuthError(AUTH_ERROR_CODES.notAuthenticatedWithAccess);
     }
 
-    let email = this.accessPayload.email as string;
-    let userId = this.users.idFromName(email);
+    // The verified Access JWT is the identity: `iss` + `sub` key the identity directory, so a
+    // changed email never changes the account, and the same subject under two Access teams can't
+    // collide. Email only seeds the initial display name.
+    let iss = this.accessPayload.iss;
+    let sub = this.accessPayload.sub;
+    if (typeof iss !== "string" || !iss || typeof sub !== "string" || !sub) {
+      throw createAuthError(AUTH_ERROR_CODES.notAuthenticatedWithAccess);
+    }
+    let identity = { issuer: iss, subject: sub };
     let signupsEnabled = (await readAdminConfig(this.env)).signupsEnabled;
+    let directory = this.ctx.exports.IdentityDirectory.get(
+        identityDirectoryId(this.ctx.exports.IdentityDirectory, identity));
+    let resolved = await directory.resolveUser(identity, signupsEnabled);
+    if (resolved === null) {
+      throw new Error("New sign-ups are currently disabled on this deployment.");
+    }
+    let userId = this.users.idFromString(resolved.userId);
+    let email = typeof this.accessPayload.email === "string" ? this.accessPayload.email : "";
     let accountCreated =
-        await this.users.get(userId).authenticateFromCfAccess(email, signupsEnabled);
+        await this.users.get(userId).ensureCreatedFromAccess(email.split("@")[0] || sub);
     if (accountCreated) {
       recordAnalytics(this.ctx, this.env, {
         event_name: "account_created",
@@ -711,7 +755,7 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
       user_id: userId.toString(),
       source: "cf_access",
     });
-    return new AuthenticatedApiImpl(this.ctx, this.env, userId, this.abortSession);
+    return new AuthenticatedApiImpl(this.ctx, this.env, userId, identity, this.abortSession);
   }
 
   async login(username: string, passwordHash: Uint8Array): Promise<string | null> {
@@ -725,7 +769,8 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
     username = normalizeUsername(username);
 
     let id = this.users.idFromName(username);
-    let token = await this.users.get(id).login(passwordHash);
+    let token = await this.users.get(id)
+        .login(passwordHash, { issuer: PASSWORD_ISSUER, subject: username });
     if (!token) return null;
 
     recordAnalytics(this.ctx, this.env, {
@@ -734,7 +779,7 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
       source: "password",
     });
 
-    return `${username}:${token}`;
+    return `${id.toString()}:${token}`;
   }
 
   async createAccount(username: string, displayName: string, passwordHash: Uint8Array)
@@ -754,7 +799,8 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
     let id = this.users.idFromName(username);
     let user = this.users.get(id);
 
-    let token = await user.createAccount(username, displayName, passwordHash);
+    let token = await user.createAccount(username, displayName, passwordHash,
+        { issuer: PASSWORD_ISSUER, subject: username });
     if (!token) return null;
 
     recordAnalytics(this.ctx, this.env, {
@@ -763,7 +809,7 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
       source: "password",
     });
 
-    return `${username}:${token}`;
+    return `${id.toString()}:${token}`;
   }
 
   async getBlueprint(id: string): Promise<BlueprintPublicInfo | null> {
@@ -843,8 +889,10 @@ export default {
         const payload = await verifyCfAccessJwt(req, env);
         if (!payload) return new Response("Invalid CF access JWT.", { status: 403 });
 
-        if (!payload.email) {
-          return new Response("Access JWT didn't specify email address.", { status: 403 });
+        // Identity comes from the verified `iss`/`sub` claims; email is only display metadata.
+        if (typeof payload.iss !== "string" || !payload.iss ||
+            typeof payload.sub !== "string" || !payload.sub) {
+          return new Response("Access JWT didn't carry an issuer and subject.", { status: 403 });
         }
 
         accessPayload = payload;

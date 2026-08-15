@@ -5529,7 +5529,7 @@ class OverseerImpl implements AgentHooks {
       let selfStub = this.ctx.exports.AgentSelfLoopback({props: {
         overseerId: this.ctx.id.toString(),
         chatId,
-        initiatorUserId: this.users.idFromName(initiator.id).toString(),
+        initiatorUserId: this.users.idFromString(initiator.id).toString(),
         initiatorModelId,
       }});
 
@@ -5753,10 +5753,10 @@ class OverseerImpl implements AgentHooks {
   // their own library, not the workspace owner's. There is no search index; these corpora are
   // small, so the formatted text is handed to the model to scan directly.
   async listAvailableBlueprints(initiator: AiChatAuthorInfo): Promise<string> {
-    // User DOs are named by user identifier, and `initiator.id` is one: the initiating user for
-    // "user" turns, the spawning gadget's owner for "gadget" turns (see AiChatAuthorInfo) -- the
-    // same resolution executeCodeMode uses for its self-loopback props.
-    let userStub = this.users.get(this.users.idFromName(initiator.id));
+    // `initiator.id` is an opaque user DO id: the initiating user for "user" turns, the spawning
+    // gadget's owner for "gadget" turns (see AiChatAuthorInfo) -- the same resolution
+    // executeCodeMode uses for its self-loopback props.
+    let userStub = this.users.get(this.users.idFromString(initiator.id));
     let [own, library, featured, formats] = await Promise.all([
       userStub.listBlueprints(),
       userStub.listLibraryBlueprints(),
@@ -6068,7 +6068,7 @@ class OverseerImpl implements AgentHooks {
     for (let i = 0; i < affected.length; i += LISTING_REFRESH_BATCH) {
       let batch = affected.slice(i, i + LISTING_REFRESH_BATCH);
       let results = await Promise.allSettled(batch.map(entry => {
-        let user = this.users.get(this.users.idFromName(entry.profile.id));
+        let user = this.users.get(this.users.idFromString(entry.profile.id));
         return entry.newRole === null
           ? user.forgetSharedGadget(gadgetId)
           : user.updateSharedGadgetRole(gadgetId, entry.newRole);
@@ -8808,10 +8808,15 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     return (await this.impl.getSharingManager()).listCollaborators();
   }
 
-  async addCollaborator(username: string, role: CollaboratorRole, note?: string)
+  async addCollaborator(userId: string, role: CollaboratorRole, note?: string)
       : Promise<CollaboratorInfo | null> {
-    // Look up the user DO to check if the account exists.
-    let userDoId = this.impl.users.idFromName(username);
+    // Look up the user DO (by opaque user id) to check the account exists.
+    let userDoId;
+    try {
+      userDoId = this.impl.users.idFromString(userId);
+    } catch {
+      return null;
+    }
     let userDo = this.impl.users.get(userDoId);
     let profile = await userDo.whoamiIfExists();
     if (!profile) {

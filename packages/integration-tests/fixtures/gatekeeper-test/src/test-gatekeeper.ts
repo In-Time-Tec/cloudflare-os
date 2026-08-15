@@ -24,7 +24,7 @@ import { DurableObject, WorkerEntrypoint, type RpcStub } from "cloudflare:worker
 import type {
   AccountDescription, ActionKind, ApprovalQueue, Gatekeeper, GatekeeperConnectCallback,
   GatekeeperUser, GatekeeperUserVerifier, ResourceDescription, ResourceConfiguratorFrame,
-  SupportedResource, VendorDescription,
+  SupportedResource, VendorDescription, AuthenticatedIdentity,
 } from "@gadgets/workshop-shared/gatekeeper";
 
 // Nothing but classes and the default handler may be exported from a Worker entry module: workerd
@@ -181,7 +181,7 @@ export class TestAccount
     return {};
   }
 
-  async getAuthenticatedEmail(): Promise<string | null> {
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
     return null;
   }
 

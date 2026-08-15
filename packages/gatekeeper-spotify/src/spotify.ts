@@ -14,7 +14,7 @@ import {
   type ResourceConfiguratorFrame,
   type ResourceDescription,
   type SupportedResource,
-  type VendorDescription,
+  type VendorDescription, AuthenticatedIdentity,
 } from "@gadgets/workshop-shared/gatekeeper";
 import {
   SpotifyApi,
@@ -665,7 +665,7 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
   }
 
   /** Spotify is not offered as a sign-in identity provider (no verified-email flag exposed). */
-  async getAuthenticatedEmail(): Promise<string | null> {
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
     return null;
   }
 

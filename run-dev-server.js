@@ -471,9 +471,11 @@ for (const gk of gatekeepers) {
 
   config.services = config.services || [];
 
-  // For local testing, create an account named "admin" to test admin features.
+  // For local testing, create an account named "admin" to test admin features. Admins are
+  // identified by verified principal ("<issuer>:<subject>"); "password:admin" is the local
+  // password account named "admin".
   config.vars = config.vars || {};
-  config.vars.ADMINS = ["admin"];
+  config.vars.ADMINS = ["password:admin"];
 
   // Pass through the optional OAuth sign-in / AI Gateway billing env vars from the shell
   // environment, so you can run e.g.

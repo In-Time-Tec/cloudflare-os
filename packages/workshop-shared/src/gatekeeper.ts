@@ -34,6 +34,47 @@ export type AvatarImage = {
   url: string;
 }
 
+/**
+ * The provider-verified identity of a signed-in account, returned by
+ * `GatekeeperUser.getAuthenticatedIdentity()` for vendors that advertise `providesAuth`.
+ *
+ * `(issuer, subject)` is the canonical external identity key: the Workshop maps it to an opaque
+ * internal user through its identity directory and never uses email as identity authority. All
+ * fields are server-verified provider assertions — a gatekeeper must never populate them from
+ * browser-supplied claims.
+ */
+export type AuthenticatedIdentity = {
+  /**
+   * Normalized, verified provider/tenant namespace that asserted this identity — e.g. an OIDC
+   * `iss` URL, or a fixed per-vendor constant for providers without one (like "github.com").
+   * A multi-tenant provider MUST include the tenant in the issuer so the same subject under
+   * different tenants never collides.
+   */
+  issuer: string;
+
+  /**
+   * The immutable subject identifier asserted by `issuer` — e.g. an OIDC `sub`/Entra `oid`, a
+   * GitHub numeric user id, or a Google `sub`. Must be stable across email and profile changes.
+   */
+  subject: string;
+
+  /**
+   * The account's verified email address, if the provider supplies one. Profile/contact metadata
+   * only: it seeds the initial display name and is never used as an identity key.
+   */
+  email?: string;
+
+  /** Human-readable display name, if known. Profile metadata only; mutable. */
+  displayName?: string;
+
+  /**
+   * Server-verified provider role assertions (e.g. validated Entra app roles), if any. The
+   * Workshop treats these as provider claims to be mapped through deployment-owned policy — they
+   * are never authority by themselves.
+   */
+  roles?: string[];
+};
+
 /** Describes a connected GatekeeperVendor, for display purposes. */
 export type VendorDescription = {
   /** Human-readable name of the service, e.g. "Google", "GitHub", etc. */
@@ -64,8 +105,9 @@ export type VendorDescription = {
 
   /**
    * True if this vendor can authenticate a user for sign-in: i.e. its connect flow yields a
-   * provider-verified email (via GatekeeperUser.getAuthenticatedEmail()). The Workshop may offer
-   * such a vendor as a login method, subject to its own auth allowlist. Defaults to false.
+   * provider-verified structured identity (via GatekeeperUser.getAuthenticatedIdentity()). The
+   * Workshop may offer such a vendor as a login method, subject to its own auth allowlist.
+   * Defaults to false.
    */
   providesAuth?: boolean;
 
@@ -464,9 +506,10 @@ export interface GatekeeperVendor extends WorkerEntrypoint {
    * `options.scopes` selects how much access to request (default "full"):
    *   - "full": the gatekeeper's full capability scopes (repos, docs, etc.). The resulting
    *     connection is persisted as a usable connected account.
-   *   - "auth": only the minimal scopes needed to verify the user's email for sign-in. The grant is
-   *     transient — after `complete()` lets the caller read getAuthenticatedEmail(), the gatekeeper
-   *     discards it. Vendors without `providesAuth` ignore this and always use their full scopes.
+   *   - "auth": only the minimal scopes needed to verify the user's identity for sign-in. The
+   *     grant is transient — after `complete()` lets the caller read getAuthenticatedIdentity(),
+   *     the gatekeeper discards it. Vendors without `providesAuth` ignore this and always use
+   *     their full scopes.
    *
    * `options.resourceUrlPatterns`, if given, limits the connection to the authorization needed for
    * those grantable resource types. If omitted, authorization for all of the vendor's resource
@@ -615,13 +658,13 @@ export interface GatekeeperUser extends WorkerEntrypoint {
   reconnect(): Promise<{url: string}>;
 
   /**
-   * For vendors that advertise `providesAuth`, returns the account's email address for use as the
-   * user's sign-in identity. The email MUST be verified by the provider (e.g. Google
-   * `email_verified`, a GitHub primary+verified email, or a Cloudflare account email) — the
-   * Workshop keys accounts by email, so an unverified address would allow account takeover.
-   * Returns null when the account has no verified email or the vendor does not support auth.
+   * For vendors that advertise `providesAuth`, returns the provider-verified structured identity
+   * of the signed-in account. `(issuer, subject)` is the canonical external identity key the
+   * Workshop maps to an internal user, so both values MUST be server-verified assertions from the
+   * provider — never claims relayed from the browser. Returns null when the vendor does not
+   * support auth or no verified identity is available.
    */
-  getAuthenticatedEmail(): Promise<string | null>;
+  getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null>;
 
   /** Get a `GatekeeperUserVerifier` representing this user. */
   getVerifier(): Promise<Fetcher<GatekeeperUserVerifier>>;

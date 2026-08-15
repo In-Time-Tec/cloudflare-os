@@ -14,7 +14,7 @@ import {
   GatekeeperConnectOptions,
   AccountDescription,
   SupportedResource,
-  ResourceConfiguratorFrame,
+  ResourceConfiguratorFrame, AuthenticatedIdentity,
 } from "@gadgets/workshop-shared/gatekeeper";
 import type {
   Cursor,
@@ -712,7 +712,7 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     });
   }
 
-  async getAuthenticatedEmail(): Promise<string | null> {
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
     // This vendor does not advertise providesAuth, so this is never used for sign-in.
     return null;
   }

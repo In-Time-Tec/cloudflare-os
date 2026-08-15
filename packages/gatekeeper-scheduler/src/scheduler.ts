@@ -25,7 +25,7 @@ import type {
   ResourceConfiguratorFrame,
   ResourceDescription,
   SupportedResource,
-  VendorDescription,
+  VendorDescription, AuthenticatedIdentity,
 } from "@gadgets/workshop-shared/gatekeeper";
 import {
   normalizeCalendarRule,
@@ -377,7 +377,7 @@ export class ScheduleAccount
   }
 
   /** Returns no authentication identity. */
-  async getAuthenticatedEmail(): Promise<string | null> {
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
     return null;
   }
 

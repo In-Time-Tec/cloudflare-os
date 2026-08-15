@@ -9,6 +9,7 @@ import {
   type Gatekeeper,
   type GatekeeperConnectCallback,
   type GatekeeperConnectOptions,
+  type AuthenticatedIdentity,
   type GatekeeperUser,
   type GatekeeperUserVerifier,
   type GatekeeperVendor as GatekeeperVendorIface,
@@ -77,6 +78,10 @@ import GITHUB_REPO_CONFIGURATOR_HTML from "./generated/github-repo-configurator-
 import { obsContext } from "./observability.js";
 
 const VENDOR_ID = "github";
+
+// The fixed identity issuer for GitHub sign-ins. GitHub has no OIDC issuer for its OAuth user
+// flow, so the vendor's canonical hostname namespaces its immutable numeric user ids.
+const GITHUB_ISSUER = "github.com";
 
 const logger = obsContext.createLogger({
   component: "gatekeeper.github", vendorId: VENDOR_ID,
@@ -275,7 +280,8 @@ const MAX_REPLY_TARGET_HOPS = 50;
 
 const GITHUB_LOGO_URL = `data:image/svg+xml,${encodeURIComponent(GITHUB_LOGO_SVG)}`;
 
-// `user:email` lets us read the account's primary verified email for sign-in (getAuthenticatedEmail).
+// `user:email` lets us read the account's primary verified email for sign-in profile metadata
+// (getAuthenticatedIdentity).
 const OAUTH_SCOPES = ["repo", "read:user", "user:email"];
 
 // Minimal scopes for sign-in only (verify the user's email). Used when connecting in "auth" mode;
@@ -1220,9 +1226,21 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     });
   }
 
-  async getAuthenticatedEmail(): Promise<string | null> {
-    // GitHub's primary email is verified by GitHub, so it's safe as a sign-in identity.
-    return await this.#withApi(api => api.getPrimaryVerifiedEmail());
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
+    // The immutable numeric account id is the identity subject; the primary verified email (when
+    // GitHub reports one) is profile metadata only.
+    return await this.#withApi(async api => {
+      const [{ user }, email] = await Promise.all([
+        api.getViewer(),
+        api.getPrimaryVerifiedEmail(),
+      ]);
+      return {
+        issuer: GITHUB_ISSUER,
+        subject: String(user.id),
+        email: email ?? undefined,
+        displayName: user.name ?? user.login,
+      };
+    });
   }
 
   async getSupportedResources(): Promise<SupportedResource[]> {

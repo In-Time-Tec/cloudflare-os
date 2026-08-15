@@ -46,10 +46,12 @@ export function validateConfig(config) {
     throw new Error("Worker names must be unique.");
   }
 
+  // Admins are verified principals, "<issuer>:<subject>" — e.g. "password:admin" for a local
+  // password account, or "<provider issuer>:<provider subject>" for OAuth sign-ins.
   if (!Array.isArray(config.auth?.admins) || config.auth.admins.length === 0 ||
-      !config.auth.admins.every((username) =>
-        typeof username === "string" && /^[a-z][a-z0-9_]*$/.test(username))) {
-    throw new Error("Every administrator must be a normalized password-account username.");
+      !config.auth.admins.every((principal) =>
+        typeof principal === "string" && principal.includes(":"))) {
+    throw new Error('Every administrator must be a "<issuer>:<subject>" principal.');
   }
   if (typeof config.context?.sharingDomain !== "string" || !config.context.sharingDomain.trim()) {
     throw new Error("Context sharingDomain must be a non-empty string.");
