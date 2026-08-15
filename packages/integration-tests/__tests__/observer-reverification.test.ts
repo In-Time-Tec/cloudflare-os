@@ -118,8 +118,9 @@ async function shareGadgetWithBob(
   const [alice, bob] = nextUsernames("alice", "bob");
 
   const aliceApi = await signUp(publicApi, alice);
-  // Bob must exist before he can be added as a collaborator.
+  // Bob must exist before he can be added as a collaborator; sharing is by opaque user id.
   const bobApi = await signUp(publicApi, bob);
+  const bobId = (await bobApi.whoami()).id;
 
   const aliceAccount = await provisionAccount(aliceApi);
 
@@ -128,7 +129,7 @@ async function shareGadgetWithBob(
     await overseer.newGatekeeper(aliceAccount.id, thingUrl(thingName));
   }
   const { id: gadgetId } = await overseer.getMetadata();
-  const collaborator = await overseer.addCollaborator(bob, "build");
+  const collaborator = await overseer.addCollaborator(bobId, "build");
   if (!collaborator) throw new Error(`Failed to share the gadget with ${bob}`);
   overseer[Symbol.dispose]();
 
@@ -205,7 +206,8 @@ describe("observer re-verification", () => {
 
       const ownerWorkspace = await aliceApi.newGadget();
       const { id: gadgetId } = await ownerWorkspace.getMetadata();
-      const collaborator = await ownerWorkspace.addCollaborator(bob, "build");
+      const collaborator = await ownerWorkspace.addCollaborator(
+          (await bobApi.whoami()).id, "build");
       if (!collaborator) throw new Error(`Failed to share the gadget with ${bob}`);
       ownerWorkspace[Symbol.dispose]();
 
