@@ -413,8 +413,18 @@ export class ChatMirror extends DurableObject<Env> {
     }
   }
 
-  async webSocketClose(): Promise<void> {}
-  async webSocketError(): Promise<void> {}
+  async webSocketClose(ws: WebSocket): Promise<void> {
+    logger.warn("chatmirror socket closed", {
+      event: "chatmirror.ws.closed",
+      closeCode: ws.readyState === 3 ? "closed" : "open",
+    });
+  }
+  async webSocketError(ws: WebSocket): Promise<void> {
+    logger.warn("chatmirror socket error", {
+      event: "chatmirror.ws.error",
+      readyState: ws.readyState,
+    });
+  }
 
   #broadcast(ref: ConversationRef, message: ConversationMessage): void {
     const payload = JSON.stringify({ kind: "message", ref, message });
