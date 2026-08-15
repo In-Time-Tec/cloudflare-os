@@ -14,7 +14,7 @@
 // reads are authorized observations, writes are queued actions applied only after approval.
 // Graph requests happen in @gadgets/microsoft-graph; Effect stays inside the Worker.
 
-import { WorkerEntrypoint, DurableObject } from "cloudflare:workers";
+import { WorkerEntrypoint, DurableObject, RpcStub, RpcTarget } from "cloudflare:workers";
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
 import {
   AuthenticatedIdentity, GatekeeperVendor as GatekeeperVendorIface, Gatekeeper,
@@ -33,6 +33,10 @@ import {
 import { VENDOR_ID } from "./vendor.js";
 import { obsContext } from "./observability.js";
 import TYPES_CODE from "./types.txt";
+import MAILBOX_CONFIGURATOR_HTML from "./generated/mailbox-configurator-ui.txt";
+import CALENDAR_CONFIGURATOR_HTML from "./generated/calendar-configurator-ui.txt";
+import FILES_CONFIGURATOR_HTML from "./generated/files-configurator-ui.txt";
+import TEAMS_CONFIGURATOR_HTML from "./generated/teams-configurator-ui.txt";
 
 export {
   MailboxGatekeeperImpl, CalendarGatekeeperImpl, FilesGatekeeperImpl, TeamsGatekeeperImpl,
@@ -488,10 +492,19 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     }
   }
 
-  async startResourceConfigurator(_resourceUrlPattern: string): Promise<ResourceConfiguratorFrame> {
-    throw new Error(
-        "Microsoft resources connect at whole-capability granularity; bind a resource URL " +
-        "directly (e.g. https://outlook.office.com/mail/).");
+  async startResourceConfigurator(resourceUrlPattern: string): Promise<ResourceConfiguratorFrame> {
+    // Whole-capability resources: each configurator is a single fixed choice that resolves to the
+    // capability's canonical resource URL.
+    const html = {
+      [MAILBOX_RESOURCE.urlPattern]: MAILBOX_CONFIGURATOR_HTML,
+      [CALENDAR_RESOURCE.urlPattern]: CALENDAR_CONFIGURATOR_HTML,
+      [FILES_RESOURCE.urlPattern]: FILES_CONFIGURATOR_HTML,
+      [TEAMS_RESOURCE.urlPattern]: TEAMS_CONFIGURATOR_HTML,
+    }[resourceUrlPattern];
+    if (!html) {
+      throw new Error(`Not a supported Microsoft resource type: ${resourceUrlPattern}`);
+    }
+    return { iframeHtml: html, ui: new RpcStub(new MicrosoftConfiguratorUI()) };
   }
 
   async revoke(): Promise<void> {
@@ -514,6 +527,9 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     return this.ctx.exports.MicrosoftVerifier({});
   }
 }
+
+/** The configurator UIs need no gatekeeper RPCs; this empty capability satisfies the frame contract. */
+class MicrosoftConfiguratorUI extends RpcTarget {}
 
 // Personal Microsoft data is never shared with observers, so no verification is ever performed.
 @validateRpc()

@@ -492,6 +492,9 @@ importers:
       '@gadgets/backend-utils':
         specifier: workspace:*
         version: link:../backend-utils
+      '@gadgets/configurator-ui':
+        specifier: workspace:*
+        version: link:../configurator-ui
       '@gadgets/microsoft-graph':
         specifier: workspace:*
         version: link:../microsoft-graph
