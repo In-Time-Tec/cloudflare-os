@@ -6,7 +6,9 @@ import type { ProductAnalyticsRecord } from "./analytics";
 declare global {
   namespace Cloudflare {
     interface Env {
-      // Deployment-wide admin usernames.
+      // Deployment-wide admins, identified by verified principal "<issuer>:<subject>" — e.g.
+      // "password:admin" for a password account, or "<provider issuer>:<provider subject>" for an
+      // OAuth sign-in. Never an email or other mutable profile attribute.
       ADMINS?: string[];
 
       // Workers AI binding (injected by generate-wrangler-prod / run-dev-server; not in base wrangler.jsonc).

@@ -1,6 +1,7 @@
 import { WorkerEntrypoint, DurableObject, RpcTarget, RpcStub } from "cloudflare:workers";
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
 import {
+  AuthenticatedIdentity,
   GatekeeperUser,
   GatekeeperUserVerifier,
   GatekeeperVendor as GatekeeperVendorIface,
@@ -364,7 +365,7 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
   }
 
   /** This gatekeeper does not provide sign-in. */
-  async getAuthenticatedEmail(): Promise<string | null> {
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
     return null;
   }
 

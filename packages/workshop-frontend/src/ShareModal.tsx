@@ -565,7 +565,7 @@ export default function ShareModal({ open, onClose, overseer, metadata, currentU
     try {
       const result = await overseer.addCollaborator(username, addRole, undefined)
       if (result === null) {
-        toasts.add({ title: 'No account found for that username.', variant: 'error' })
+        toasts.add({ title: 'No account found for that user ID.', variant: 'error' })
       } else {
         const landedId = result.profile.id
         setAddUsername('')
@@ -804,8 +804,8 @@ export default function ShareModal({ open, onClose, overseer, metadata, currentU
             </div>
             <input
               type="search"
-              placeholder="Username or email"
-              aria-label="Username or email"
+              placeholder="User ID"
+              aria-label="User ID"
               value={addUsername}
               onChange={(e) => setAddUsername(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleAddCollaborator() }}

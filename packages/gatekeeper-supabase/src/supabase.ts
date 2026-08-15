@@ -12,7 +12,7 @@ import {
   type ResourceConfiguratorFrame,
   type ResourceDescription,
   type SupportedResource,
-  type VendorDescription,
+  type VendorDescription, AuthenticatedIdentity,
 } from "@gadgets/workshop-shared/gatekeeper";
 import {
   SupabaseApi,
@@ -585,7 +585,7 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     });
   }
 
-  async getAuthenticatedEmail(): Promise<string | null> {
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
     return null;
   }
 

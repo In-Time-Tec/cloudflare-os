@@ -220,8 +220,10 @@ export default function SettingsPage() {
     setPasswordError(null)
 
     try {
-      const oldHash = await hashPassword(userInfo.id, currentPassword)
-      const newHash = await hashPassword(userInfo.id, newPassword)
+      const username = await authenticatedApi.getLoginUsername()
+      if (!username) throw new Error('This account does not use password login.')
+      const oldHash = await hashPassword(username, currentPassword)
+      const newHash = await hashPassword(username, newPassword)
       await authenticatedApi.changePassword(oldHash, newHash)
       toasts.add({ title: 'Password changed successfully', variant: 'success' })
       setCurrentPassword('')

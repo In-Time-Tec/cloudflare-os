@@ -56,6 +56,12 @@
       // login back to the waiting browser.
       "tag": "v2",
       "new_sqlite_classes": [ "PendingLogin" ]
+    },
+    {
+      // Structured identity: one IdentityDirectory DO per (issuer, subject) maps each verified
+      // external identity to its opaque internal user.
+      "tag": "v3",
+      "new_sqlite_classes": [ "IdentityDirectory" ]
     }
   ],
 

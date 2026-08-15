@@ -150,7 +150,7 @@ function verificationSection(rendered: HTMLElement, headingId: string): HTMLElem
 }
 
 async function invite(rendered: HTMLElement, username: string) {
-  const input = rendered.querySelector<HTMLInputElement>('input[aria-label="Username or email"]')!
+  const input = rendered.querySelector<HTMLInputElement>('input[aria-label="User ID"]')!
   const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
   await act(async () => {
     setValue.call(input, username)

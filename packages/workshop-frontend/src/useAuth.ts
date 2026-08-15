@@ -102,7 +102,10 @@ export function useAuth(publicApi: RpcStub<PublicApi>) {
     // Use functional updater to read current state (avoids stale closure).
     setAuthState(prev => {
       if (prev.authenticatedApi) {
-        prev.authenticatedApi[Symbol.dispose]()
+        // Delete the session server-side (best-effort — the token is gone locally regardless),
+        // then dispose the stub.
+        const api = prev.authenticatedApi
+        api.logout().catch(() => {}).finally(() => api[Symbol.dispose]())
       }
       return {
         token: null,

@@ -566,12 +566,23 @@ export class AdminApiImpl extends RpcTarget implements AdminApi {
    * `adminUserId` is the requesting admin's identity, forwarded to gatekeepers when listing the
    * resource catalog (some are RBAC-gated per user). It's plain data — not a user-DO dependency.
    */
-  constructor(private admin: DurableObjectStub<AdminSettings>, private adminUserId: string) {
+  constructor(private admin: DurableObjectStub<AdminSettings>, private adminUserId: string,
+              private users: DurableObjectNamespace<UserDurableObject>) {
     super();
   }
 
   getSettings(): Promise<AdminSettingsView> {
     return this.admin.getSettings(this.adminUserId);
+  }
+
+  async revokeUserSessions(userId: string): Promise<void> {
+    let id;
+    try {
+      id = this.users.idFromString(userId);
+    } catch {
+      throw new Error("Unknown user id.");
+    }
+    await this.users.get(id).revokeAllSessions();
   }
 
   async setSignupsEnabled(enabled: boolean): Promise<void> {

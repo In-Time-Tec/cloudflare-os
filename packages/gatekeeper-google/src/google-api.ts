@@ -181,12 +181,17 @@ export async function getGoogleAccountDescription(accessToken: string)
   };
 }
 
+/** Google's OIDC issuer, used as the `issuer` half of the sign-in identity key. */
+export const GOOGLE_ISSUER = "https://accounts.google.com";
+
 /**
- * Fetch the account's email for use as a sign-in identity, but only if Google reports it as
- * verified (`email_verified`). Returns null otherwise, so the Workshop never keys an account by an
- * unverified address.
+ * Fetch the account's structured sign-in identity from Google's userinfo endpoint. The stable
+ * OIDC `sub` is the identity subject; the email is included only when Google reports it verified
+ * (`email_verified`), and even then it's profile metadata, not identity. Returns null when no
+ * `sub` is available.
  */
-export async function getGoogleVerifiedEmail(accessToken: string): Promise<string | null> {
+export async function getGoogleVerifiedIdentity(accessToken: string)
+    : Promise<{ sub: string; email?: string; displayName?: string } | null> {
   const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
     method: 'GET',
     headers: {
@@ -201,8 +206,12 @@ export async function getGoogleVerifiedEmail(accessToken: string): Promise<strin
   }
 
   let data: any = await response.json();
-  if (!data.email || data.email_verified !== true) return null;
-  return data.email;
+  if (!data.sub) return null;
+  return {
+    sub: String(data.sub),
+    email: data.email && data.email_verified === true ? data.email : undefined,
+    displayName: data.name || undefined,
+  };
 }
 
 /** `signal` lets the caller bound the round trip; UserAccount holds the credential mutex across this. */

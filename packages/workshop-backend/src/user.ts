@@ -1,6 +1,6 @@
 import { RpcStub } from "capnweb";
 import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, BlueprintMetadata, BlueprintLibrarySummary, BlueprintSource, BlueprintUserSummary, BLUEPRINT_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, BlueprintOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
-import { Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
+import { AuthenticatedIdentity, Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
 import { shouldAutoProvisionAccount, ambientGatekeeperMode } from "./provisioning-policy.js";
 import { CloudflareGatekeeperUser } from "@gadgets/workshop-shared/cloudflare-gatekeeper";
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
@@ -12,6 +12,7 @@ import type { AdminSettings } from "./admin-settings.js";
 import { isReservedBlueprintKey, readBlueprintKvRecord } from "./blueprint-archive.js";
 import { filterEnabledResources, isResourceDisabled, readAdminConfig } from "./admin-config.js";
 import { buildGatekeeperVendorMap } from "./auth/auth-vendors.js";
+import { SessionPrincipal } from "./auth/identity-directory.js";
 
 const logger = createWorkshopLogger("workshop.user");
 
@@ -80,7 +81,17 @@ export type UserChatContext = {
 type LoginSessionRecord = {
   tokenId: string,  // sha256 hash of token, hex-formatted
   created: Date,
+  // Absolute expiry. Expired sessions fail authenticate() with a typed sessionExpired error and
+  // are deleted server-side.
+  expiresAt: Date,
+  // The external principal that authenticated this session. Recorded at login and returned by
+  // authenticate() so authorization (e.g. the ADMINS check) keys off the verified issuer/subject,
+  // never off mutable profile data.
+  principal: SessionPrincipal,
 }
+
+/** How long a session token stays valid. Expired sessions require a fresh sign-in. */
+export const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
 // Blueprint record stored in the user's `blueprints` collection.
 type BlueprintUserRecord = {
@@ -192,10 +203,13 @@ function makeUserStorage(storage: DurableObjectStorage) {
       cloudflareBilling: <CloudflareBilling | null>null,
 
       created: false,
+      // The password-login username (null for gatekeeper/Access accounts). Addressing only — the
+      // password DO is keyed idFromName(username) — and the client-side hash salt; never identity.
+      username: <string | null>null,
       profile: <AiChatAuthorInfo>{
         type: "user",
         name: "User",
-        id: "user@example.com",
+        id: "",
       },
       quickModel: <string | null>null,
       preferredModel: <string | null>null,
@@ -301,7 +315,13 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     this.vendors = buildGatekeeperVendorMap(env);
   }
 
-  async authenticate(token: string): Promise<void> {
+  /**
+   * Validate a session secret. Returns the principal recorded at login so callers can make
+   * authorization decisions (e.g. the ADMINS check) from the verified issuer/subject. Expired
+   * sessions are deleted and fail with a typed `sessionExpired` error so the client can prompt a
+   * fresh sign-in.
+   */
+  async authenticate(token: string): Promise<SessionPrincipal> {
     let tokenBytes: Uint8Array;
     try {
       tokenBytes = Uint8Array.fromBase64(token);
@@ -316,24 +336,26 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     if (!session) {
       throw createAuthError(AUTH_ERROR_CODES.invalidSessionToken);
     }
+    if (session.expiresAt.valueOf() <= Date.now()) {
+      this.storage.sessions.delete(tokenId);
+      throw createAuthError(AUTH_ERROR_CODES.sessionExpired);
+    }
+    return session.principal;
   }
 
   /**
-   * Returns true when this login created the account on first use. When the account doesn't yet
-   * exist and `allowCreate` is false (deployment signups are closed), refuses rather than creating —
-   * existing users can still sign in.
+   * Ensure this account exists for a Cloudflare Access sign-in, creating it on first use (the
+   * caller already resolved this DO through the identity directory, so creation here is just
+   * writing the profile). `displayNameSeed` seeds the initial display name — profile metadata
+   * only, never identity. Returns true when this login created the account.
    */
-  async authenticateFromCfAccess(email: string, allowCreate: boolean): Promise<boolean> {
+  async ensureCreatedFromAccess(displayNameSeed: string): Promise<boolean> {
     if (!this.storage.created.get()) {
-      if (!allowCreate) {
-        throw new Error("New sign-ups are currently disabled on this deployment.");
-      }
-      // Create on first use.
       this.storage.created.put(true);
       this.storage.profile.put({
         type: "user",
-        name: email.split("@")[0],
-        id: email,
+        name: displayNameSeed,
+        id: this.ctx.id.toString(),
       });
       return true;
     }
@@ -341,17 +363,41 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return false;
   }
 
-  async #newSessionToken(): Promise<string> {
+  /** Delete the session minted from this secret (server-side logout). Unknown tokens are a no-op. */
+  async deleteSession(token: string): Promise<void> {
+    let tokenBytes: Uint8Array;
+    try {
+      tokenBytes = Uint8Array.fromBase64(token);
+    } catch {
+      return;
+    }
+    let tokenId = new Uint8Array(await crypto.subtle.digest('SHA-256', tokenBytes)).toHex();
+    this.storage.sessions.delete(tokenId);
+  }
+
+  /** Revoke every session for this user (admin offboarding). Takes effect on the next RPC. */
+  async revokeAllSessions(): Promise<void> {
+    for (let session of Array.from(this.storage.sessions.list())) {
+      this.storage.sessions.delete(session.tokenId);
+    }
+  }
+
+  async #newSessionToken(principal: SessionPrincipal): Promise<string> {
     let sessionToken = new Uint8Array(32);
     crypto.getRandomValues(sessionToken);
 
     let tokenId = new Uint8Array(await crypto.subtle.digest('SHA-256', sessionToken)).toHex();
-    this.storage.sessions.put({ tokenId, created: new Date() });
+    this.storage.sessions.put({
+      tokenId,
+      created: new Date(),
+      expiresAt: new Date(Date.now() + SESSION_LIFETIME_MS),
+      principal,
+    });
 
     return sessionToken.toBase64();
   }
 
-  async login(passwordHash: Uint8Array): Promise<string | null> {
+  async login(passwordHash: Uint8Array, principal: SessionPrincipal): Promise<string | null> {
     let passwordHashHash = new Uint8Array(await crypto.subtle.digest('SHA-256', passwordHash));
 
     let actualHashHash = this.storage.passwordHashHash.get();
@@ -363,67 +409,64 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       return null;
     }
 
-    return this.#newSessionToken();
+    return this.#newSessionToken(principal);
   }
 
-  async createAccount(username: string, displayName: string, passwordHash: Uint8Array)
-      : Promise<string | null> {
+  async createAccount(username: string, displayName: string, passwordHash: Uint8Array,
+                      principal: SessionPrincipal): Promise<string | null> {
     if (this.storage.created.get()) {
       return null;
     }
 
-    // Do a little migration here for old data.
-    // TODO(soon): Delete this.
-    for (let gadget of Array.from(this.storage.gadgets.list())) {
-      if (!gadget.created || !gadget.lastActive) {
-        if (!gadget.created) {
-          gadget.created = new Date("2026-01-01");
-        }
-        if (!gadget.lastActive) {
-          gadget.lastActive = new Date("2026-01-01");;
-        }
-        this.storage.gadgets.put(gadget);
-      }
-    }
-
     this.storage.created.put(true);
+    this.storage.username.put(username);
     this.storage.profile.put({
       type: "user",
       name: displayName,
-      id: username,
+      // The profile id is the account's opaque DO id — usernames and emails are never identity.
+      id: this.ctx.id.toString(),
     });
 
     let passwordHashHash = new Uint8Array(await crypto.subtle.digest('SHA-256', passwordHash));
     this.storage.passwordHashHash.put(passwordHashHash);
 
-    return this.#newSessionToken();
+    return this.#newSessionToken(principal);
   }
 
   /**
-   * Log in via an authentication gatekeeper, creating the account on first use. The user DO is keyed
-   * by the verified email (this DO's id derives from idFromName(email)), so `email` is also used as
-   * the profile id and the initial display name is the email's local-part — consistent with the
-   * Cloudflare Access flow. Password login is left disabled for these accounts. Returns the session
-   * secret to store client-side.
+   * Log in via an authentication gatekeeper, creating the account on first use. The caller already
+   * resolved this DO through the identity directory, so this method only initializes the profile
+   * (on first sign-in) and mints a session recording the verified principal. The profile id is
+   * this DO's opaque id; the identity's display name (or email local-part, or subject) seeds the
+   * initial display name — profile metadata only, never identity. Password login is left disabled
+   * for these accounts. Returns the session secret to store client-side.
    *
    * The profile is written only on first sign-in. We intentionally do NOT refresh the display name
-   * on later logins: once set, the name is the user's to change (via setOwnDisplayName), so we don't
-   * clobber a customized name with the email local-part.
-   *
-   * When the account doesn't yet exist and `allowCreate` is false (deployment signups are closed),
-   * returns null instead of creating one — existing users can still sign in.
+   * on later logins: once set, the name is the user's to change (via setOwnDisplayName), so we
+   * don't clobber a customized name with provider metadata.
    */
-  async loginOrCreateViaGatekeeper(email: string, allowCreate: boolean): Promise<string | null> {
+  async loginViaGatekeeper(identity: AuthenticatedIdentity): Promise<string> {
     if (!this.storage.created.get()) {
-      if (!allowCreate) return null;
       this.storage.created.put(true);
       this.storage.profile.put({
         type: "user",
-        name: email.split("@")[0],
-        id: email,
+        name: identity.displayName || identity.email?.split("@")[0] || identity.subject,
+        id: this.ctx.id.toString(),
       });
     }
-    return this.#newSessionToken();
+    return this.#newSessionToken({
+      issuer: identity.issuer,
+      subject: identity.subject,
+      roles: identity.roles,
+    });
+  }
+
+  /**
+   * The password-login username, or null for accounts without password login. The client needs it
+   * to salt password hashes (see PublicApi.login()); it is not identity.
+   */
+  async getLoginUsername(): Promise<string | null> {
+    return this.storage.username.get();
   }
 
   /** Whether this account has a password set (false for gatekeeper sign-in accounts). */
@@ -1557,8 +1600,8 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   /**
    * Persist a connected gatekeeper account that was established during sign-in (rather than via the
    * usual logged-in connectAccount flow). Used for providers like Cloudflare where signing in also
-   * links the account for AI Gateway billing: the login callback resolves this user by verified
-   * email, then calls here to store the full-scope grant.
+   * links the account for AI Gateway billing: the login callback resolves this user through the
+   * identity directory, then calls here to store the full-scope grant.
    */
   async linkConnectedAccountFromLogin(
       account: Fetcher<GatekeeperUser>, vendorId: string, expiresAt?: Date): Promise<void> {

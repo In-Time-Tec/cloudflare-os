@@ -5,7 +5,7 @@ import {
   ApprovalQueue, VendorDescription, GatekeeperConnectCallback, GatekeeperConnectOptions,
   AccountDescription, SupportedResource, ResourceConfiguratorFrame, ActionKind, Cursor,
   GatekeeperUserVerifier, ObservationDescription,
-  stripTrailingSlashes,
+  stripTrailingSlashes, AuthenticatedIdentity,
 } from "@gadgets/workshop-shared/gatekeeper";
 import {
   SlackApi, SlackApiError, SlackAccessToken, SlackConversationTypeFilter, exchangeAuthCode,
@@ -548,7 +548,7 @@ export class SlackUserImpl extends WorkerEntrypoint<Env, SlackUserImplProps>
     return description;
   }
 
-  async getAuthenticatedEmail(): Promise<string | null> {
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
     return null;
   }
 

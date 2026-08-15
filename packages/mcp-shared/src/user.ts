@@ -1,5 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
-import type { AccountDescription, AvatarImage } from "@gadgets/workshop-shared/gatekeeper";
+import type { AccountDescription, AvatarImage, AuthenticatedIdentity,
+} from "@gadgets/workshop-shared/gatekeeper";
 
 import type { ConnectedServer } from "./account.js";
 import { generateNonce } from "./connect-nonce.js";
@@ -49,7 +50,7 @@ export abstract class McpGatekeeperUserBase<E>
   }
 
   /** MCP OAuth does not establish a sign-in identity. */
-  async getAuthenticatedEmail(): Promise<string | null> {
+  async getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
     return null;
   }
 

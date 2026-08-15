@@ -331,6 +331,7 @@ export const getOpenGadgetErrorCode = openGadgetErrors.getCode;
 /** Stable error codes attached to authentication failures. */
 export const AUTH_ERROR_CODES = {
   invalidSessionToken: "INVALID_SESSION_TOKEN",
+  sessionExpired: "SESSION_EXPIRED",
   notAuthenticatedWithAccess: "NOT_AUTHENTICATED_WITH_ACCESS",
 } as const;
 
@@ -341,6 +342,7 @@ export type AuthErrorCode = typeof AUTH_ERROR_CODES[keyof typeof AUTH_ERROR_CODE
  * classification fallback. */
 export const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
   [AUTH_ERROR_CODES.invalidSessionToken]: "invalid session token",
+  [AUTH_ERROR_CODES.sessionExpired]: "session expired",
   [AUTH_ERROR_CODES.notAuthenticatedWithAccess]: "Not authenticated with Access.",
 };
 
@@ -372,6 +374,18 @@ export interface AuthenticatedApi extends RpcTarget {
    * which case the change-password UI should be hidden.
    */
   hasPasswordLogin(): Promise<boolean>;
+
+  /**
+   * The password-login username of this account, or null when it has no password login. Used by
+   * the change-password UI to salt hashes the same way login() does; not an identity.
+   */
+  getLoginUsername(): Promise<string | null>;
+
+  /**
+   * Delete the session this connection authenticated with, server-side. The client should also
+   * discard its stored token. A no-op for Cloudflare Access connections (Access owns that session).
+   */
+  logout(): Promise<void>;
 
   /**
    * List the user's configured AI models.
@@ -921,6 +935,13 @@ export type AdminFormat = {
 export interface AdminApi {
   /** Read all admin-managed settings for the admin UI in one call. */
   getSettings(): Promise<AdminSettingsView>;
+
+  /**
+   * Immediately revoke every session of the given user (by opaque user id). The user's next RPC
+   * fails with a typed auth error and they must sign in again — the offboarding backstop when a
+   * provider-side disable must take effect before natural session expiry.
+   */
+  revokeUserSessions(userId: string): Promise<void>;
 
   /** Enable or disable new account signups. Existing users can still log in while signups are closed. */
   setSignupsEnabled(enabled: boolean): Promise<void>;
@@ -2029,12 +2050,13 @@ export interface Overseer extends RpcTarget {
   listCollaborators(): Promise<CollaboratorInfo[]>;
 
   /**
-   * Add a collaborator by username/email. The caller must be the owner or an existing
-   * collaborator. `role` is the access level to grant; the caller may not grant a role higher
-   * than their own effective role. Returns the new collaborator's info, or null if the username
-   * doesn't correspond to an existing account.
+   * Add a collaborator by opaque user id (a profile.id, e.g. from a chat author or an existing
+   * collaborator list). The caller must be the owner or an existing collaborator. `role` is the
+   * access level to grant; the caller may not grant a role higher than their own effective role.
+   * Returns the new collaborator's info, or null if the id doesn't correspond to an existing
+   * account.
    */
-  addCollaborator(username: string, role: CollaboratorRole,
+  addCollaborator(userId: string, role: CollaboratorRole,
                   note?: string): Promise<CollaboratorInfo | null>;
 
   /**
@@ -2185,7 +2207,10 @@ export type AiChatAuthorInfo = {
    */
   type: "user" | "agent" | "gadget";
 
-  /** Unique user identifier, e.g. "kenton@cloudflare.com" or "gpt-5.1-pro". */
+  /**
+   * Unique author identifier: for users, the opaque internal user id (a Durable Object id string);
+   * for agents, the model id (e.g. "gpt-5.1-pro"). Never an email.
+   */
   id: string;
 
   /** Display name for author, e.g. "Kenton Varda" or "GPT" */

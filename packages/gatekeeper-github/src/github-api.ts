@@ -5,6 +5,8 @@ export type GitHubOAuthGrant = {
 };
 
 export type GitHubSimpleUser = {
+  /** GitHub's immutable numeric account id — the sign-in identity subject (logins are mutable). */
+  id: number;
   login: string;
   name?: string | null;
   avatar_url: string;
