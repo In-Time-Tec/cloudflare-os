@@ -14,9 +14,9 @@ import {
 } from '@phosphor-icons/react'
 import { RpcStub, RpcTarget } from 'capnweb'
 import { useAuthenticatedApi } from './AuthContext'
+import { useWhoami } from './query/hooks'
 import {
   GadgetClient,
-  AiChatAuthorInfo,
   ConsoleLogSubscriber,
   ConsoleLogEvent,
   ActionLogEntry,
@@ -462,7 +462,7 @@ export default function GadgetEditor() {
       toasts.add({ title: 'Invalid or expired share link.', variant: 'error' })
     },
   })
-  const [userInfo, setUserInfo] = useState<AiChatAuthorInfo | null>(null)
+  const { data: userInfo = null } = useWhoami()
 
   // ── role gating ────────────────────────────────────────────────────────────────
   // "use"-role collaborators receive a restricted overseer that only permits rendering and
@@ -1199,9 +1199,6 @@ export default function GadgetEditor() {
   useEffect(() => { setUiReloadTrigger(t => t + 1) }, [previewChatId, proposedChanges])
 
   // ── user info ─────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    authenticatedApi.whoami().then(setUserInfo).catch(() => {})
-  }, [authenticatedApi])
 
   // ── title save/cancel ─────────────────────────────────────────────────────────
   const titleSaveInFlight = useRef(false)

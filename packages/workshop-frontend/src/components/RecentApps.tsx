@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { Clock, ArrowRight } from '@phosphor-icons/react'
-import { useAuthenticatedApi } from '../AuthContext'
-import { useState, useEffect } from 'react'
+import { useMemo } from 'react'
+import { useGadgets } from '../query/hooks'
 import { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
 
 // A simple deterministic gradient based on the gadget ID
@@ -71,24 +71,10 @@ function AppRow({ gadget }: { gadget: GadgetMetadataWithTimestamps }) {
 }
 
 export default function RecentApps() {
-  const { authenticatedApi } = useAuthenticatedApi()
-  const [gadgets, setGadgets] = useState<GadgetMetadataWithTimestamps[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    authenticatedApi.listGadgets().then((list) => {
-      if (cancelled) return
-      const sorted = [...list].toSorted((a, b) => b.lastActive.getTime() - a.lastActive.getTime())
-      setGadgets(sorted.slice(0, 4))
-      setLoading(false)
-    }).catch((err) => {
-      console.error('Failed to load recent gadgets:', err)
-      if (!cancelled) { setLoading(false); setLoadError(true) }
-    })
-    return () => { cancelled = true }
-  }, [authenticatedApi])
+  const { data: rawGadgets = [], isLoading: loading, isError: loadError } = useGadgets()
+  const gadgets = useMemo(
+    () => [...rawGadgets].toSorted((a, b) => b.lastActive.getTime() - a.lastActive.getTime()).slice(0, 4),
+    [rawGadgets])
 
   if (loading) {
     return (

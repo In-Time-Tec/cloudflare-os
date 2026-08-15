@@ -1,4 +1,3 @@
-import { logRpcFailure } from '../../rpcErrors'
 import {
   createContext,
   useCallback,
@@ -15,9 +14,10 @@ import type { RpcStub } from 'capnweb'
 import {
   GadgetMetadataWithTimestamps,
   Overseer,
-  AiChatAuthorInfo,
 } from '@gadgets/workshop-shared/api'
 import { useAuthenticatedApi } from '../../AuthContext'
+import { useQueryClient } from '@tanstack/react-query'
+import { gadgetsKey, useGadgets, useWhoami } from '../../query/hooks'
 import ShareModal from '../../ShareModal'
 import DeleteConfirmationDialog from '../DeleteConfirmationDialog'
 import SidebarGadgetRow from './SidebarGadgetRow'
@@ -65,8 +65,9 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
 
-  const [gadgets, setGadgets] = useState<GadgetMetadataWithTimestamps[]>([])
-  const [gadgetsLoading, setGadgetsLoading] = useState(true)
+  const queryClient = useQueryClient()
+  const { data: gadgets = [], isLoading: gadgetsLoading } = useGadgets()
+  const { data: currentUser = null } = useWhoami()
 
   const [search, setSearch] = useState('')
 
@@ -75,28 +76,6 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
   const [isDeleting, setIsDeleting] = useState(false)
   const [shareTarget, setShareTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
   const [shareOverseer, setShareOverseer] = useState<{ stub: RpcStub<Overseer> } | null>(null)
-  const [currentUser, setCurrentUser] = useState<AiChatAuthorInfo | null>(null)
-
-  useEffect(() => {
-    authenticatedApi.whoami().then(setCurrentUser).catch(() => {})
-  }, [authenticatedApi])
-
-  // Load gadgets. Refresh on mount + after mutation; no live subscription yet.
-  useEffect(() => {
-    let cancelled = false
-    setGadgetsLoading(true)
-    authenticatedApi.listGadgets()
-      .then((list) => {
-        if (cancelled) return
-        setGadgets(list)
-        setGadgetsLoading(false)
-      })
-      .catch((err) => {
-        logRpcFailure('Failed to load workspaces for sidebar:', err)
-        if (!cancelled) setGadgetsLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [authenticatedApi])
 
   // Dispose share overseer on close / unmount.
   useEffect(() => {
@@ -134,13 +113,15 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
 
   const onTogglePin = useCallback(async (g: GadgetMetadataWithTimestamps) => {
     const newPinned = !g.pinned
-    setGadgets((prev) => prev.map((x) => (x.id === g.id ? { ...x, pinned: newPinned } : x)))
+    queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
+      (prev ?? []).map((x) => (x.id === g.id ? { ...x, pinned: newPinned } : x)))
     const overseer = authenticatedApi.openGadget(g.id) // pipelining
     try {
       await overseer.setPinned(newPinned)
     } catch (err) {
       console.error('Failed to toggle pin:', err)
-      setGadgets((prev) => prev.map((x) => (x.id === g.id ? { ...x, pinned: g.pinned } : x)))
+      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
+      (prev ?? []).map((x) => (x.id === g.id ? { ...x, pinned: g.pinned } : x)))
       toasts.add({ title: 'Failed to update favorite', variant: 'error' })
     } finally {
       overseer[Symbol.dispose]()
@@ -148,13 +129,15 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
   }, [authenticatedApi, toasts])
 
   const onRename = useCallback(async (g: GadgetMetadataWithTimestamps, newTitle: string) => {
-    setGadgets((prev) => prev.map((x) => (x.id === g.id ? { ...x, title: newTitle } : x)))
+    queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
+      (prev ?? []).map((x) => (x.id === g.id ? { ...x, title: newTitle } : x)))
     const overseer = authenticatedApi.openGadget(g.id)
     try {
       await overseer.setTitle(newTitle)
     } catch (err) {
       console.error('Failed to rename:', err)
-      setGadgets((prev) => prev.map((x) => (x.id === g.id ? { ...x, title: g.title } : x)))
+      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
+      (prev ?? []).map((x) => (x.id === g.id ? { ...x, title: g.title } : x)))
       toasts.add({ title: 'Failed to rename workspace', variant: 'error' })
     } finally {
       overseer[Symbol.dispose]()
@@ -190,7 +173,8 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
           overseer[Symbol.dispose]()
         }
       }
-      setGadgets((prev) => prev.filter((x) => x.id !== deleteTarget.id))
+      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
+      (prev ?? []).filter((x) => x.id !== deleteTarget.id))
       toasts.add({
         title: deleteTarget.owner ? 'Workspace removed' : 'Workspace deleted',
         variant: 'success',

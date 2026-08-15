@@ -1,5 +1,7 @@
 import { useKumoToastManager } from '@cloudflare/kumo'
 import { useAuthenticatedApi } from './AuthContext'
+import { useQueryClient } from '@tanstack/react-query'
+import { useWhoami, whoamiKey } from './query/hooks'
 import { useState, useEffect, useRef } from 'react'
 import { AiChatAuthorInfo } from '@gadgets/workshop-shared/api'
 import { hashPassword } from './passwordHash'
@@ -89,8 +91,8 @@ export default function SettingsPage() {
 
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
-  const [userInfo, setUserInfo] = useState<AiChatAuthorInfo | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: userInfo = null, isLoading: loading } = useWhoami()
+  const queryClient = useQueryClient()
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
 
@@ -117,6 +119,11 @@ export default function SettingsPage() {
 
   const avatarUrl = useAvatar(authenticatedApi, userInfo?.id)
 
+  // Keep the editable name input in sync with the cached profile.
+  useEffect(() => {
+    if (userInfo) setNameInput(userInfo.name)
+  }, [userInfo])
+
   // Determine whether to show the change-password section.
   useEffect(() => {
     let cancelled = false
@@ -126,26 +133,6 @@ export default function SettingsPage() {
     return () => { cancelled = true }
   }, [authenticatedApi])
 
-  // Fetch user info
-  useEffect(() => {
-    let cancelled = false
-    const fetchUserInfo = async () => {
-      try {
-        const info = await authenticatedApi.whoami()
-        if (cancelled) return
-        setUserInfo(info)
-        setNameInput(info.name)
-      } catch (error) {
-        console.error('Failed to fetch user info:', error)
-        if (!cancelled) toasts.add({ title: 'Failed to load user information', variant: 'error' })
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    fetchUserInfo()
-    return () => { cancelled = true }
-  }, [authenticatedApi])
 
   const handleSaveName = async () => {
     if (!nameInput.trim()) {
@@ -155,7 +142,8 @@ export default function SettingsPage() {
 
     try {
       await authenticatedApi.setOwnDisplayName(nameInput.trim())
-      setUserInfo(prev => prev ? { ...prev, name: nameInput.trim() } : null)
+      queryClient.setQueryData(whoamiKey, (prev: AiChatAuthorInfo | undefined) =>
+        prev ? { ...prev, name: nameInput.trim() } : prev)
       setIsEditingName(false)
       toasts.add({ title: 'Display name updated', variant: 'success' })
     } catch (err) {
