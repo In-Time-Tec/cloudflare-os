@@ -14,11 +14,11 @@ const SECTION_HEADER =
   'tracking-[-0.1px] text-kumo-inactive transition-colors hover:text-kumo-subtle'
 
 const ROW =
-  'group flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-1.5 text-left ' +
-  'transition-colors hover:bg-kumo-elevated'
+  'group flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-left ' +
+  'transition-colors hover:bg-kumo-tint'
 
 const ROW_TEXT =
-  'min-w-0 flex-1 truncate text-[12.5px] tracking-[-0.1px] text-kumo-subtle group-hover:text-kumo-default'
+  'min-w-0 flex-1 truncate text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default'
 
 const INITIAL_LIMIT = 6
 

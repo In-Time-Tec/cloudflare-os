@@ -48,7 +48,7 @@ export default function SidebarItem({
       {...linkProps}
       title={collapsed ? label : undefined}
       className={[
-        'group relative flex h-8 items-center rounded-lg text-[13px] leading-[18px] tracking-[-0.25px] transition-colors',
+        'group relative flex h-7 items-center rounded-md text-[12.5px] leading-[18px] tracking-[-0.1px] transition-colors',
         collapsed ? 'justify-center' : 'gap-1.5 px-2.5',
         isActive
           ? 'bg-kumo-fill font-medium text-kumo-strong'

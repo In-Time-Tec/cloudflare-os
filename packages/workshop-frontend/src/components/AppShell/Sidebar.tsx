@@ -21,18 +21,17 @@ import {
 } from './SidebarWorkspaces'
 import SidebarConversations from '../../conversations/SidebarConversations'
 import SidebarUtilityStrip from './SidebarUtilityStrip'
+import SidebarScrollRegion from './SidebarScrollRegion'
 
 /**
- * The persistent left rail. Three pinned regions sandwich a single scrolling region of lists, so
- * the user can always reach Search, primary nav, and the bottom utility strip no matter how many
- * workspaces they have.
+ * The persistent left rail. The brand row and the bottom utility strip stay pinned; everything
+ * between them — primary nav, communications sections, Favorites / Recent workspaces — scrolls as
+ * one region with edge fades that appear only while content is actually beneath them.
  *
  * Layout (top → bottom):
- *   • brand row                            pinned
- *   • primary nav (Home, Workspaces, …)    pinned
- *   • workspace tools (⌘K search)          pinned
- *   • Favorites / Recent workspaces        SCROLLS
- *   • utility strip (plug, avatar)         pinned
+ *   • brand row                                    pinned
+ *   • nav + conversations + workspace lists        SCROLLS (fades top/bottom)
+ *   • utility strip (plug, avatar)                 pinned
  */
 export default function Sidebar({
   collapsed,
@@ -132,8 +131,10 @@ export default function Sidebar({
       )}
 
       <SidebarWorkspacesProvider>
-        {/* Pinned top stack. shrink-0 keeps it from squishing when the lists below grow. */}
-        <div className={['flex shrink-0 flex-col', collapsed ? 'pt-2' : 'pt-3'].join(' ')}>
+        {/* Everything between the brand row and the utility strip scrolls as one region, with
+            edge fades that appear only while content is beneath them. */}
+        <SidebarScrollRegion>
+        <div className={['flex flex-col', collapsed ? 'pt-2' : 'pt-3'].join(' ')}>
           {/* Primary nav */}
           <nav className="flex flex-col gap-0.5 px-2">
             <SidebarItem
@@ -208,12 +209,11 @@ export default function Sidebar({
           </nav>
         </div>
 
-        {/* Scrolling middle: only the Favorites / Recent workspaces / Recent blueprints lists.
-            min-h-0 lets flex children compute scroll height correctly. */}
-        <div className="sidebar-scroll mt-1 min-h-0 flex-1 overflow-y-auto">
+        <div className="mt-1 pb-2">
           <SidebarConversations collapsed={collapsed} />
           <SidebarWorkspacesLists collapsed={collapsed} />
         </div>
+        </SidebarScrollRegion>
       </SidebarWorkspacesProvider>
 
       <SidebarUtilityStrip collapsed={collapsed} />
