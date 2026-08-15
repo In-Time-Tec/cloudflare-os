@@ -220,9 +220,12 @@ describe("teams chats", () => {
   it("creates 1:1 and group chats with bound members", async () => {
     const { transport, requests } = canned({ "chats": { id: "chat-1" } });
     await Effect.runPromise(teams.createChat(transport, "self-oid", ["bob@corp.example"]));
-    expect(requests[0].body).toMatchObject({ chatType: "oneOnOne" });
-    expect(requests[0].body.members).toHaveLength(2);
-    expect(requests[0].body.members[1]["user@odata.bind"])
+    const chatBody = requests[0].body as {
+      chatType: string; members: Record<string, string>[];
+    };
+    expect(chatBody).toMatchObject({ chatType: "oneOnOne" });
+    expect(chatBody.members).toHaveLength(2);
+    expect(chatBody.members[1]["user@odata.bind"])
         .toBe("https://graph.microsoft.com/v1.0/users('bob@corp.example')");
 
     await Effect.runPromise(teams.createChat(transport, "self-oid",
