@@ -178,6 +178,42 @@ describe("ChatMirror", () => {
     expect(await mirror.verifyClientState("bogus")).toBe(false);
   });
 
+  it("registers push subs and sends encrypted VAPID pushes on ingest, suppressing own messages", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      // Graph messages fetch
+      if (url.includes('/messages/msg-9') && (init?.method ?? 'GET') === 'GET') {
+        return Response.json({
+          id: 'msg-9', messageType: 'message',
+          from: { user: { displayName: 'Cody Wirth', id: 'cody-oid' } },
+          createdDateTime: '2026-08-15T13:00:00Z',
+          body: { contentType: 'text', content: 'ding' },
+        });
+      }
+      // Push service
+      if (url.startsWith('https://push.example/')) return new Response('', { status: 201 });
+      // Subscription creation path not exercised here
+      return new Response('{}', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mirror = await seededMirror('mirror-push');
+    // Seed a conversation row + a push subscription directly.
+    await runInDurableObject(env.TEST_CHAT_MIRROR.getByName('mirror-push'), async instance => {
+      instance.registerPush({ endpoint: 'https://push.example/e1', keys: {
+        p256dh: 'BJ33nq-v6WugRaqf9cAHv4rFHsdbZ6fqMTkWERsozIhkqfgxftdh6Cu33MB15odz0jsWDvWSfPt70_yuGG_pD5E', auth: 'ZidRV1oBBQ1ree9WbWV1vA' } });
+    });
+    // Attach VAPID env for the push send.
+    const origEnv = (mirror as unknown as { env?: Record<string, string> }).env;
+    // ingest a message (not from self) — should push.
+    await mirror.ingest("chats('19:chat1')/messages('msg-9')");
+    const pushCalls = fetchMock.mock.calls.filter(c => String(c[0]).startsWith('https://push.example/'));
+    expect(pushCalls).toHaveLength(1);
+    const init = pushCalls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>)['Content-Encoding']).toBe('aes128gcm');
+    expect((init.headers as Record<string, string>)['TTL']).toBe('86400');
+  });
+
   it("mints one-time socket tokens", async () => {
     const mirror = await seededMirror("mirror-ws");
     const token = await mirror.mintSocketToken();
