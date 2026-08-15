@@ -4,7 +4,8 @@ import {
 } from 'react'
 import type { RpcStub } from 'capnweb'
 import type {
-  ConversationMessage, ConversationRef, ConversationsApi, ConversationSummary,
+  CalendarEntry, ConversationMessage, ConversationRef, ConversationsApi, ConversationSummary,
+  EmailSummary,
 } from '@gadgets/workshop-shared/gatekeeper'
 import { useAuthenticatedApi } from '../AuthContext'
 
@@ -24,6 +25,13 @@ export function parseRefKey(key: string): ConversationRef {
 }
 
 type ConversationsState = {
+  emails: EmailSummary[]
+  emailsLoading: boolean
+  refreshEmails(): void
+  /** This week's agenda (rolling window), fetched lazily. */
+  agenda: CalendarEntry[]
+  agendaLoading: boolean
+  refreshAgenda(from: Date, to: Date): void
   /** null = still probing; false = no provider account connected. */
   available: boolean | null
   conversations: ConversationSummary[]
@@ -61,6 +69,10 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   const [channels, setChannels] = useState<ConversationSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [avatars, setAvatars] = useState<Map<string, string>>(new Map())
+  const [emails, setEmails] = useState<EmailSummary[]>([])
+  const [emailsLoading, setEmailsLoading] = useState(false)
+  const [agenda, setAgenda] = useState<CalendarEntry[]>([])
+  const [agendaLoading, setAgendaLoading] = useState(false)
   const avatarPending = useRef(new Set<string>())
   const listeners = useRef(new Set<(event: LiveEvent) => void>())
   const socketRef = useRef<WebSocket | null>(null)
@@ -195,6 +207,39 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
     return undefined
   }, [api, avatars])
 
+  const refreshEmails = useCallback(() => {
+    const stub = api?.stub
+    if (!stub) return
+    setEmailsLoading(true)
+    stub.listEmails()
+      .then(setEmails)
+      .catch(err => console.debug('emails refresh failed', err))
+      .finally(() => setEmailsLoading(false))
+  }, [api])
+
+  const refreshAgenda = useCallback((from: Date, to: Date) => {
+    const stub = api?.stub
+    if (!stub) return
+    setAgendaLoading(true)
+    stub.listAgenda(from, to)
+      .then(setAgenda)
+      .catch(err => console.debug('agenda refresh failed', err))
+      .finally(() => setAgendaLoading(false))
+  }, [api])
+
+  // Sidebar previews: load emails + this week's agenda once the capability is live.
+  useEffect(() => {
+    if (!api) return
+    refreshEmails()
+    const now = new Date()
+    const weekStart = new Date(now)
+    weekStart.setDate(now.getDate() - now.getDay())
+    weekStart.setHours(0, 0, 0, 0)
+    const weekEnd = new Date(weekStart)
+    weekEnd.setDate(weekStart.getDate() + 7)
+    refreshAgenda(weekStart, weekEnd)
+  }, [api, refreshEmails, refreshAgenda])
+
   const onEvent = useCallback((listener: (event: LiveEvent) => void) => {
     listeners.current.add(listener)
     return () => { listeners.current.delete(listener) }
@@ -210,7 +255,9 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(() => ({
     available, conversations, channels, loading, refresh, api, avatarFor, onEvent, setViewing,
-  }), [available, conversations, channels, loading, refresh, api, avatarFor, onEvent, setViewing])
+    emails, emailsLoading, refreshEmails, agenda, agendaLoading, refreshAgenda,
+  }), [available, conversations, channels, loading, refresh, api, avatarFor, onEvent, setViewing,
+       emails, emailsLoading, refreshEmails, agenda, agendaLoading, refreshAgenda])
 
   return <Context.Provider value={value}>{children}</Context.Provider>
 }

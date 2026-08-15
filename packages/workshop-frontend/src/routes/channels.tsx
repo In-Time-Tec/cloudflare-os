@@ -7,30 +7,30 @@ import { refKey, useConversations } from '../conversations/ConversationsContext'
 import { Avatar, ListRow, formatTime } from '../conversations/primitives'
 import { useDocumentTitle } from '../useDocumentTitle'
 
-// The Conversations page: 1:1 and group Teams chats only — the list pane is scoped to this section.
+// The Channels page: Teams channels only — the list pane is scoped to this section.
 
-export const Route = createFileRoute('/conversations')({
+export const Route = createFileRoute('/channels')({
   component: Page,
   validateSearch: (search: Record<string, unknown>): { c?: string } =>
     typeof search.c === 'string' ? { c: search.c } : {},
 })
 
 function Page() {
-  useDocumentTitle('Conversations')
+  useDocumentTitle('Channels')
   const { c: selectedKey } = Route.useSearch()
   const navigate = Route.useNavigate()
-  const { conversations, loading, avatarFor, available } = useConversations()
-  const items = conversations
+  const { channels, loading, avatarFor, available } = useConversations()
+  const items = channels
   const selected = useMemo(() =>
     items.find(x => refKey(x.ref) === selectedKey) ?? null, [items, selectedKey])
 
   if (available === false) {
     return (
-      <CommsLayout title="Conversations" list={null} detail={
+      <CommsLayout title="Channels" list={null} detail={
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
           <ChatsCircle size={40} className="text-kumo-inactive" />
           <p className="text-[14px] text-kumo-subtle">
-            Connect your Microsoft account with the Teams capability to see your conversations here.
+            Connect your Microsoft account with the Teams capability to see your channels here.
           </p>
         </div>
       } />
@@ -39,7 +39,7 @@ function Page() {
 
   return (
     <CommsLayout
-      title="Conversations"
+      title="Channels"
       list={
         <div className="flex flex-col py-1">
           {items.map(conversation => {

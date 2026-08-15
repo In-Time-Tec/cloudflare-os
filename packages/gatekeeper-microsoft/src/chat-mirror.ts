@@ -14,10 +14,11 @@
 import { DurableObject } from "cloudflare:workers";
 import { Effect, Result } from "effect";
 import {
-  ConversationMessage, ConversationRef, ConversationSummary,
+  CalendarEntry, ConversationMessage, ConversationRef, ConversationSummary, EmailDetail,
+  EmailSummary,
 } from "@gadgets/workshop-shared/gatekeeper";
 import {
-  GraphError, GraphTransport, makeTransport, profile, subscriptions, teams,
+  calendar, GraphError, GraphTransport, mail, makeTransport, profile, subscriptions, teams,
 } from "@gadgets/microsoft-graph";
 import { sanitizeTeamsHtml, escapeHtml } from "./sanitize.js";
 import { PushSubscriptionInfo, sendWebPush } from "./webpush.js";
@@ -526,6 +527,52 @@ export class ChatMirror extends DurableObject<Env> {
         followed ? 1 : 0, refKey(ref));
   }
 
+  // ── Email and calendar (thin, always-fresh Graph reads) ───────────────────
+
+  async listEmails(): Promise<EmailSummary[]> {
+    const page = await this.#run(mail.listInbox(this.#transport(), { top: 30 }));
+    return page.messages.map(message => ({
+      id: message.id,
+      subject: message.subject,
+      from: message.from,
+      received: message.received,
+      preview: message.preview,
+      isRead: message.isRead,
+      hasAttachments: message.hasAttachments,
+    }));
+  }
+
+  async getEmail(id: string): Promise<EmailDetail> {
+    const detail = await this.#run(mail.getMessage(this.#transport(), id));
+    const html = detail.bodyHtml
+        ? await sanitizeTeamsHtml(detail.bodyHtml)
+        : `<p>${escapeHtml(detail.bodyText ?? "")}</p>`;
+    return {
+      id: detail.id,
+      subject: detail.subject,
+      from: detail.from,
+      received: detail.received,
+      preview: detail.preview,
+      isRead: detail.isRead,
+      hasAttachments: detail.hasAttachments,
+      to: detail.to,
+      html,
+      webLink: detail.webLink,
+    };
+  }
+
+  async listAgenda(from: Date, to: Date): Promise<CalendarEntry[]> {
+    const transport = this.#transport();
+    const entries: CalendarEntry[] = [];
+    let page = await this.#run(calendar.listAgenda(transport, from, to));
+    entries.push(...page.events.map(toCalendarEntry));
+    for (let i = 0; page.next && i < 4; i++) {
+      page = await this.#run(calendar.nextEventPage(transport, page.next));
+      entries.push(...page.events.map(toCalendarEntry));
+    }
+    return entries;
+  }
+
   // ── Subscription lifecycle ────────────────────────────────────────────────
 
   /** How many most-recently-active chats keep live subscriptions (Graph per-chat model). */
@@ -638,4 +685,20 @@ export class ChatMirror extends DurableObject<Env> {
 function stripBase(baseUrl: string | undefined): string {
   const url = baseUrl || "http://localhost:8787/gatekeeper/microsoft";
   return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+function toCalendarEntry(event: calendar.EventSummary): CalendarEntry {
+  return {
+    id: event.id,
+    subject: event.subject,
+    start: event.start,
+    end: event.end,
+    location: event.location,
+    isAllDay: event.isAllDay,
+    isCancelled: event.isCancelled,
+    organizer: event.organizer,
+    attendees: event.attendees,
+    joinUrl: event.joinUrl,
+    webUrl: event.webLink,
+  };
 }

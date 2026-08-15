@@ -173,9 +173,44 @@ export type ConversationEvent = {
   message: ConversationMessage;
 };
 
+/** One email in the mailbox listing. */
+export type EmailSummary = {
+  id: string;
+  subject: string;
+  from?: { name?: string; address: string };
+  received?: Date;
+  preview: string;
+  isRead: boolean;
+  hasAttachments: boolean;
+};
+
+/** One full email. `html` is provider HTML already sanitized by the gatekeeper. */
+export type EmailDetail = EmailSummary & {
+  to: { name?: string; address: string }[];
+  html: string;
+  webLink?: string;
+};
+
+/** One calendar entry for the agenda/week views. Times are UTC instants. */
+export type CalendarEntry = {
+  id: string;
+  subject: string;
+  start?: Date;
+  end?: Date;
+  location?: string;
+  isAllDay: boolean;
+  isCancelled: boolean;
+  organizer?: { name?: string; address: string; userId?: string };
+  attendees: { address: string; name?: string; response?: string }[];
+  /** Online-meeting join link (e.g. Teams), when the event has one. */
+  joinUrl?: string;
+  webUrl?: string;
+};
+
 /**
  * The human-facing conversations capability of one connected account. Obtained via
  * `GatekeeperUser.getConversationsApi()`; all methods act as the signed-in user directly.
+ * Alongside chat it exposes the account's email and calendar for the same first-party UI.
  */
 export interface ConversationsApi extends RpcTarget {
   /** People conversations (1:1 and group chats), most recently active first. */
@@ -210,6 +245,15 @@ export interface ConversationsApi extends RpcTarget {
 
   /** Remove this browser's Web Push subscription. */
   unregisterPush(endpoint: string): Promise<void>;
+
+  /** Recent inbox emails, newest first. */
+  listEmails(): Promise<EmailSummary[]>;
+
+  /** One full email with its sanitized HTML body. */
+  getEmail(id: string): Promise<EmailDetail>;
+
+  /** The user's calendar entries between two instants (recurrences expanded), in start order. */
+  listAgenda(from: Date, to: Date): Promise<CalendarEntry[]>;
 }
 
 

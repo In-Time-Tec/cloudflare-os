@@ -681,6 +681,18 @@ class ConversationsApiImpl extends RpcTarget implements ConversationsApi {
   unregisterPush(endpoint: string): Promise<void> {
     return this.mirror.unregisterPush(endpoint);
   }
+
+  listEmails() {
+    return this.mirror.listEmails();
+  }
+
+  getEmail(id: string) {
+    return this.mirror.getEmail(id);
+  }
+
+  listAgenda(from: Date, to: Date) {
+    return this.mirror.listAgenda(from, to);
+  }
 }
 
 // Personal Microsoft data is never shared with observers, so no verification is ever performed.

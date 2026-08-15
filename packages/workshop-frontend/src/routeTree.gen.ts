@@ -12,8 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as BlueprintsRouteImport } from './routes/blueprints'
+import { Route as CalendarRouteImport } from './routes/calendar'
+import { Route as ChannelsRouteImport } from './routes/channels'
 import { Route as ContextRouteImport } from './routes/context'
 import { Route as ConversationsRouteImport } from './routes/conversations'
+import { Route as EmailRouteImport } from './routes/email'
 import { Route as ExploreRouteImport } from './routes/explore'
 import { Route as GatekeepersRouteImport } from './routes/gatekeepers'
 import { Route as OutputsRouteImport } from './routes/outputs'
@@ -41,6 +44,16 @@ const BlueprintsRoute = BlueprintsRouteImport.update({
   path: '/blueprints',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CalendarRoute = CalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChannelsRoute = ChannelsRouteImport.update({
+  id: '/channels',
+  path: '/channels',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ContextRoute = ContextRouteImport.update({
   id: '/context',
   path: '/context',
@@ -49,6 +62,11 @@ const ContextRoute = ContextRouteImport.update({
 const ConversationsRoute = ConversationsRouteImport.update({
   id: '/conversations',
   path: '/conversations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EmailRoute = EmailRouteImport.update({
+  id: '/email',
+  path: '/email',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ExploreRoute = ExploreRouteImport.update({
@@ -111,8 +129,11 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/blueprints': typeof BlueprintsRoute
+  '/calendar': typeof CalendarRoute
+  '/channels': typeof ChannelsRoute
   '/context': typeof ContextRoute
   '/conversations': typeof ConversationsRoute
+  '/email': typeof EmailRoute
   '/explore': typeof ExploreRoute
   '/gatekeepers': typeof GatekeepersRoute
   '/outputs': typeof OutputsRoute
@@ -129,8 +150,11 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/blueprints': typeof BlueprintsRoute
+  '/calendar': typeof CalendarRoute
+  '/channels': typeof ChannelsRoute
   '/context': typeof ContextRoute
   '/conversations': typeof ConversationsRoute
+  '/email': typeof EmailRoute
   '/explore': typeof ExploreRoute
   '/gatekeepers': typeof GatekeepersRoute
   '/outputs': typeof OutputsRoute
@@ -148,8 +172,11 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/blueprints': typeof BlueprintsRoute
+  '/calendar': typeof CalendarRoute
+  '/channels': typeof ChannelsRoute
   '/context': typeof ContextRoute
   '/conversations': typeof ConversationsRoute
+  '/email': typeof EmailRoute
   '/explore': typeof ExploreRoute
   '/gatekeepers': typeof GatekeepersRoute
   '/outputs': typeof OutputsRoute
@@ -168,8 +195,11 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/blueprints'
+    | '/calendar'
+    | '/channels'
     | '/context'
     | '/conversations'
+    | '/email'
     | '/explore'
     | '/gatekeepers'
     | '/outputs'
@@ -186,8 +216,11 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/blueprints'
+    | '/calendar'
+    | '/channels'
     | '/context'
     | '/conversations'
+    | '/email'
     | '/explore'
     | '/gatekeepers'
     | '/outputs'
@@ -204,8 +237,11 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/blueprints'
+    | '/calendar'
+    | '/channels'
     | '/context'
     | '/conversations'
+    | '/email'
     | '/explore'
     | '/gatekeepers'
     | '/outputs'
@@ -223,8 +259,11 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   BlueprintsRoute: typeof BlueprintsRoute
+  CalendarRoute: typeof CalendarRoute
+  ChannelsRoute: typeof ChannelsRoute
   ContextRoute: typeof ContextRoute
   ConversationsRoute: typeof ConversationsRoute
+  EmailRoute: typeof EmailRoute
   ExploreRoute: typeof ExploreRoute
   GatekeepersRoute: typeof GatekeepersRoute
   OutputsRoute: typeof OutputsRoute
@@ -261,6 +300,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BlueprintsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/calendar': {
+      id: '/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof CalendarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/channels': {
+      id: '/channels'
+      path: '/channels'
+      fullPath: '/channels'
+      preLoaderRoute: typeof ChannelsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/context': {
       id: '/context'
       path: '/context'
@@ -273,6 +326,13 @@ declare module '@tanstack/react-router' {
       path: '/conversations'
       fullPath: '/conversations'
       preLoaderRoute: typeof ConversationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/email': {
+      id: '/email'
+      path: '/email'
+      fullPath: '/email'
+      preLoaderRoute: typeof EmailRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/explore': {
@@ -359,8 +419,11 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   BlueprintsRoute: BlueprintsRoute,
+  CalendarRoute: CalendarRoute,
+  ChannelsRoute: ChannelsRoute,
   ContextRoute: ContextRoute,
   ConversationsRoute: ConversationsRoute,
+  EmailRoute: EmailRoute,
   ExploreRoute: ExploreRoute,
   GatekeepersRoute: GatekeepersRoute,
   OutputsRoute: OutputsRoute,
