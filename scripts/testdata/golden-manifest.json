@@ -592,6 +592,86 @@
         "MCP_ALLOW_INSECURE": "false"
       }
     },
+    "gatekeeper-microsoft": {
+      "bindings": [
+        {
+          "name": "CLIENT_ID",
+          "text": "$SECRET(CLIENT_ID)",
+          "type": "secret_text"
+        },
+        {
+          "name": "CLIENT_SECRET",
+          "text": "$SECRET(CLIENT_SECRET)",
+          "type": "secret_text"
+        },
+        {
+          "name": "TENANT_ID",
+          "text": "$SECRET(TENANT_ID)",
+          "type": "secret_text"
+        }
+      ],
+      "compatibilityDate": "2026-02-02",
+      "compatibilityFlags": [
+        "allow_irrevocable_stub_storage",
+        "nodejs_als"
+      ],
+      "inputs": [
+        {
+          "consoleUrl": "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+          "kind": "secret",
+          "label": "Entra application (client) ID",
+          "name": "CLIENT_ID",
+          "redirectUriTemplate": "{PUBLIC_BASE_URL}/gatekeeper/microsoft/oauth",
+          "setupSteps": [
+            "In the Microsoft Entra admin center, register a new application (single tenant).",
+            "Under Authentication, add a Web platform with the redirect URI below.",
+            "Under Certificates & secrets, create a client secret.",
+            "Copy the Application (client) ID, the client secret, and the Directory (tenant) ID here."
+          ]
+        },
+        {
+          "kind": "secret",
+          "label": "Entra client secret",
+          "name": "CLIENT_SECRET"
+        },
+        {
+          "kind": "secret",
+          "label": "Entra directory (tenant) ID",
+          "name": "TENANT_ID"
+        }
+      ],
+      "installable": true,
+      "kind": "gatekeeper",
+      "mainModule": "microsoft.js",
+      "migrations": [
+        {
+          "new_sqlite_classes": [
+            "UserAccount"
+          ],
+          "tag": "v0"
+        }
+      ],
+      "modules": [
+        {
+          "name": "microsoft.js",
+          "r2Key": "blobs/modules/e0f5bbefd9db0912a166959ce65bf15d62ab79f7b90942be03d3b97a9e6a27fb",
+          "sha256": "e0f5bbefd9db0912a166959ce65bf15d62ab79f7b90942be03d3b97a9e6a27fb",
+          "size": 62,
+          "type": "esm"
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "invocation_logs": false
+        }
+      },
+      "shortName": "microsoft",
+      "vars": {
+        "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/microsoft"
+      }
+    },
     "gatekeeper-notion": {
       "bindings": [
         {

@@ -12,6 +12,7 @@ const packageDirs = {
   backend: join(root, "packages/workshop-backend"),
   context: join(root, "packages/gatekeeper-context"),
   scheduler: join(root, "packages/gatekeeper-scheduler"),
+  microsoft: join(root, "packages/gatekeeper-microsoft"),
 };
 const generatedPaths = Object.fromEntries(
     Object.entries(packageDirs).map(([name, directory]) => [name, join(directory, generatedName)]),
@@ -27,6 +28,7 @@ const checkResources = {
   blueprintsKvNamespaceId: "00000000000000000000000000000001",
   avatarsKvNamespaceId: "00000000000000000000000000000002",
   contextKvNamespaceId: "00000000000000000000000000000003",
+  workersSubdomain: "example",
 };
 
 /** Validate the repository-owned workers.dev deployment contract. */
@@ -35,7 +37,7 @@ export function validateConfig(config) {
     throw new Error("Deployment configuration must be an object.");
   }
 
-  const workerNames = ["router", "backend", "context", "scheduler"]
+  const workerNames = ["router", "backend", "context", "scheduler", "microsoft"]
       .map((key) => config.workers?.[key]);
   if (!workerNames.every((name) =>
     typeof name === "string" && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name)
@@ -116,10 +118,22 @@ export function generateConfigs(config, accountId, bases, resources) {
 
   const scheduler = setCommon(bases.scheduler, accountId, config.workers.scheduler);
 
+  const microsoft = setCommon(bases.microsoft, accountId, config.workers.microsoft);
+  microsoft.vars = {
+    ...microsoft.vars,
+    // The public origin is the router's workers.dev URL; the router proxies
+    // /gatekeeper/microsoft/* to this Worker.
+    BASE_URL: `https://${config.workers.router}.${resources.workersSubdomain}.workers.dev` +
+        "/gatekeeper/microsoft",
+  };
+
   const backend = setCommon(bases.backend, accountId, config.workers.backend);
   backend.vars = {
     ...backend.vars,
     ADMINS: config.auth.admins,
+    // Microsoft Entra is the only sign-in method: allowlist it and disable password auth.
+    AUTH_GATEKEEPERS: "microsoft",
+    DISABLE_PASSWORD_AUTH: "true",
     ...(config.ai ? {
       DEPLOYMENT_AI_PROVIDERS: config.ai.providers.join(","),
       DEPLOYMENT_AI_DEFAULT_MODEL: config.ai.defaultModel,
@@ -136,6 +150,11 @@ export function generateConfigs(config, accountId, bases, resources) {
     {
       binding: "GATEKEEPER_SCHEDULER",
       service: config.workers.scheduler,
+      entrypoint: "GatekeeperVendor",
+    },
+    {
+      binding: "GATEKEEPER_MICROSOFT",
+      service: config.workers.microsoft,
       entrypoint: "GatekeeperVendor",
     },
   ];
@@ -168,22 +187,62 @@ export function generateConfigs(config, accountId, bases, resources) {
       binding: "GATEKEEPER_SCHEDULER",
       service: config.workers.scheduler,
     },
+    {
+      binding: "GATEKEEPER_MICROSOFT",
+      service: config.workers.microsoft,
+    },
   ];
 
-  return { context, scheduler, backend, router };
+  return { context, scheduler, backend, router, microsoft };
 }
 
-/** Resolve the backend Worker secrets required by the deployment contract. */
+/** Resolve the per-Worker secrets required by the deployment contract. */
 export function getDeploymentSecrets(config, environment = process.env) {
-  const secrets = {};
+  const backend = {};
   if (config.ai?.providers.includes("openrouter")) {
     if (!environment.OPENROUTER_API_TOKEN) {
       throw new Error(
           "OPENROUTER_API_TOKEN is required when the deployment enables OpenRouter.");
     }
-    secrets.OPENROUTER_API_TOKEN = environment.OPENROUTER_API_TOKEN;
+    backend.OPENROUTER_API_TOKEN = environment.OPENROUTER_API_TOKEN;
   }
-  return secrets;
+
+  // Microsoft Entra is the deployment's only sign-in method. Its app-registration credentials are
+  // deploy-time secrets (MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET / MICROSOFT_TENANT_ID);
+  // until all three are configured the gatekeeper deploys unconfigured and sign-in shows its
+  // "not configured" page — adding the secrets and re-deploying requires no code change.
+  const microsoftNames =
+      ["MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET", "MICROSOFT_TENANT_ID"];
+  const present = microsoftNames.filter((name) => environment[name]);
+  const microsoft = {};
+  if (present.length === microsoftNames.length) {
+    for (const name of microsoftNames) {
+      microsoft[name.slice("MICROSOFT_".length)] = environment[name];
+    }
+  } else if (present.length > 0) {
+    throw new Error(
+        `Partial Microsoft Entra configuration: set all of ${microsoftNames.join(", ")} or none.`);
+  } else {
+    console.warn(
+        "MICROSOFT_* secrets are not configured; deploying with Microsoft sign-in unconfigured.");
+  }
+
+  return { backend, microsoft };
+}
+
+/**
+ * The deployment's admin principals: the literal entries from the config plus, when the
+ * MICROSOFT_TENANT_ID and MICROSOFT_ADMIN_OID secrets are set, the Entra principal
+ * "https://login.microsoftonline.com/<tenant>/v2.0:<oid>". Keeps the admin grant with the other
+ * Entra secrets instead of committing tenant/oid GUIDs to the repo.
+ */
+export function resolveAdmins(config, environment = process.env) {
+  const admins = [...config.auth.admins];
+  if (environment.MICROSOFT_TENANT_ID && environment.MICROSOFT_ADMIN_OID) {
+    admins.push(`https://login.microsoftonline.com/${environment.MICROSOFT_TENANT_ID}/v2.0` +
+        `:${environment.MICROSOFT_ADMIN_OID}`);
+  }
+  return admins;
 }
 
 class CloudflareApiError extends Error {
@@ -270,6 +329,12 @@ export async function ensureRemoteResources(config, accountId, apiToken, fetchIm
     resolved[key] = id;
   }
 
+  // The account's workers.dev subdomain determines the deployment's public origin (the router
+  // runs with workers_dev), which the Microsoft gatekeeper needs for its OAuth redirect URI.
+  const subdomainPayload = await cloudflareRequest(
+      `/accounts/${accountId}/workers/subdomain`, apiToken, {}, fetchImpl);
+  resolved.workersSubdomain = subdomainPayload.result.subdomain;
+
   const bucketName = config.resources.blueprintContentBucket;
   const bucketPath = `/accounts/${accountId}/r2/buckets/${encodeURIComponent(bucketName)}`;
   try {
@@ -313,6 +378,7 @@ function build() {
   for (const packageName of [
     "@gadgets/gatekeeper-context",
     "@gadgets/gatekeeper-scheduler",
+    "@gadgets/microsoft-gatekeeper",
     "@gadgets/workshop-frontend",
     "@gadgets/workshop-backend",
     "@gadgets/router",
@@ -323,6 +389,8 @@ function build() {
 
 async function main() {
   const config = validateConfig(await readJsonc(join(root, "deployment/workers-dev.jsonc")));
+  // Fold in the secret-configured Entra admin principal (if provided) before generating configs.
+  config.auth = { ...config.auth, admins: resolveAdmins(config) };
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
   const check = process.argv.includes("--check");
   // Fail before changing remote state if a required application secret is unavailable.
@@ -335,6 +403,7 @@ async function main() {
     backend: await readJsonc(join(packageDirs.backend, "wrangler.jsonc")),
     context: await readJsonc(join(packageDirs.context, "wrangler.jsonc")),
     scheduler: await readJsonc(join(packageDirs.scheduler, "wrangler.jsonc")),
+    microsoft: await readJsonc(join(packageDirs.microsoft, "wrangler.jsonc")),
   }, resources);
 
   let secretsDirectory;
@@ -342,19 +411,21 @@ async function main() {
     await Promise.all(Object.entries(generated).map(([name, value]) =>
       writeFile(generatedPaths[name], `${JSON.stringify(value, null, 2)}\n`)
     ));
-    let backendSecretsFile;
-    if (!check && Object.keys(deploymentSecrets).length > 0) {
+    const secretsFiles = {};
+    if (!check) {
       secretsDirectory = await mkdtemp(join(tmpdir(), "cloudflare-os-deploy-"));
-      backendSecretsFile = join(secretsDirectory, "backend-secrets.json");
-      await writeFile(backendSecretsFile, JSON.stringify(deploymentSecrets), { mode: 0o600 });
+      for (const [name, secrets] of Object.entries(deploymentSecrets)) {
+        if (Object.keys(secrets).length === 0) continue;
+        const file = join(secretsDirectory, `${name}-secrets.json`);
+        await writeFile(file, JSON.stringify(secrets), { mode: 0o600 });
+        secretsFiles[name] = file;
+      }
     }
     build();
 
-    for (const name of ["context", "scheduler", "backend", "router"]) {
+    for (const name of ["context", "scheduler", "microsoft", "backend", "router"]) {
       const deployArgs = check ? ["--dry-run"] :
-          name === "backend" && backendSecretsFile
-            ? ["--secrets-file", backendSecretsFile]
-            : [];
+          secretsFiles[name] ? ["--secrets-file", secretsFiles[name]] : [];
       run(
           ["exec", "wrangler", "deploy", "--config", generatedName, ...deployArgs],
           packageDirs[name],

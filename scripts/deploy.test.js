@@ -6,6 +6,7 @@ import {
   ensureRemoteResources,
   generateConfigs,
   getDeploymentSecrets,
+  resolveAdmins,
   validateConfig,
 } from "./deploy.mjs";
 
@@ -16,6 +17,7 @@ const validConfig = {
     backend: "acme-os-backend",
     context: "acme-os-context",
     scheduler: "acme-os-scheduler",
+    microsoft: "acme-os-microsoft",
   },
   auth: { admins: ["password:admin"] },
   context: { sharingDomain: "acme-workers-dev" },
@@ -34,6 +36,7 @@ const resolvedResources = {
   blueprintsKvNamespaceId: "11111111111111111111111111111111",
   avatarsKvNamespaceId: "22222222222222222222222222222222",
   contextKvNamespaceId: "33333333333333333333333333333333",
+  workersSubdomain: "acme",
 };
 
 async function baseConfig(path) {
@@ -46,6 +49,7 @@ async function baseConfigs() {
     backend: await baseConfig("../packages/workshop-backend/wrangler.jsonc"),
     context: await baseConfig("../packages/gatekeeper-context/wrangler.jsonc"),
     scheduler: await baseConfig("../packages/gatekeeper-scheduler/wrangler.jsonc"),
+    microsoft: await baseConfig("../packages/gatekeeper-microsoft/wrangler.jsonc"),
   };
 }
 
@@ -81,11 +85,24 @@ test("generates the workers.dev composition", async () => {
     { binding: "WORKSHOP_BACKEND", service: "acme-os-backend" },
     { binding: "GATEKEEPER_CONTEXT", service: "acme-os-context" },
     { binding: "GATEKEEPER_SCHEDULER", service: "acme-os-scheduler" },
+    { binding: "GATEKEEPER_MICROSOFT", service: "acme-os-microsoft" },
   ]);
   assert.equal(generated.router.assets.directory, "../workshop-frontend/dist");
 
   assert.equal(generated.backend.workers_dev, false);
   assert.deepEqual(generated.backend.vars.ADMINS, ["password:admin"]);
+  // Microsoft Entra is the only sign-in method.
+  assert.equal(generated.backend.vars.AUTH_GATEKEEPERS, "microsoft");
+  assert.equal(generated.backend.vars.DISABLE_PASSWORD_AUTH, "true");
+  assert.deepEqual(
+      generated.backend.services.map(({ binding, service }) => ({ binding, service })), [
+    { binding: "GATEKEEPER_CONTEXT", service: "acme-os-context" },
+    { binding: "GATEKEEPER_SCHEDULER", service: "acme-os-scheduler" },
+    { binding: "GATEKEEPER_MICROSOFT", service: "acme-os-microsoft" },
+  ]);
+  assert.equal(generated.microsoft.workers_dev, false);
+  assert.equal(generated.microsoft.vars.BASE_URL,
+      "https://acme-os.acme.workers.dev/gatekeeper/microsoft");
   assert.equal(generated.backend.vars.DEPLOYMENT_AI_PROVIDERS, "openrouter");
   assert.equal(generated.backend.vars.DEPLOYMENT_AI_DEFAULT_MODEL, "openai/gpt-5.6-luna");
   assert.deepEqual(generated.backend.ai, { binding: "WORKERS_AI" });
@@ -112,18 +129,50 @@ test("generates the workers.dev composition", async () => {
 });
 
 test("requires and resolves deployment-managed provider secrets", () => {
+  const entraEnv = {
+    MICROSOFT_CLIENT_ID: "client-id",
+    MICROSOFT_CLIENT_SECRET: "client-secret",
+    MICROSOFT_TENANT_ID: "tenant-id",
+  };
   assert.deepEqual(
-      getDeploymentSecrets(validConfig, { OPENROUTER_API_TOKEN: "openrouter-token" }),
-      { OPENROUTER_API_TOKEN: "openrouter-token" },
+      getDeploymentSecrets(validConfig, { OPENROUTER_API_TOKEN: "openrouter-token", ...entraEnv }),
+      {
+        backend: { OPENROUTER_API_TOKEN: "openrouter-token" },
+        microsoft: {
+          CLIENT_ID: "client-id",
+          CLIENT_SECRET: "client-secret",
+          TENANT_ID: "tenant-id",
+        },
+      },
   );
   assert.throws(
       () => getDeploymentSecrets(validConfig, {}),
       /OPENROUTER_API_TOKEN is required/,
   );
-
+  // A partial Entra configuration is a mistake, not a downgrade.
+  assert.throws(
+      () => getDeploymentSecrets(validConfig,
+          { OPENROUTER_API_TOKEN: "t", MICROSOFT_CLIENT_ID: "only-one" }),
+      /Partial Microsoft Entra configuration/,
+  );
+  // No Entra secrets at all deploys unconfigured (sign-in shows the not-configured page).
   const withoutAi = structuredClone(validConfig);
   delete withoutAi.ai;
-  assert.deepEqual(getDeploymentSecrets(withoutAi, {}), {});
+  assert.deepEqual(getDeploymentSecrets(withoutAi, {}), { backend: {}, microsoft: {} });
+});
+
+test("folds the secret-configured Entra admin principal into ADMINS", () => {
+  assert.deepEqual(resolveAdmins(validConfig, {}), ["password:admin"]);
+  assert.deepEqual(
+      resolveAdmins(validConfig, {
+        MICROSOFT_TENANT_ID: "tenant-id",
+        MICROSOFT_ADMIN_OID: "oid-123",
+      }),
+      [
+        "password:admin",
+        "https://login.microsoftonline.com/tenant-id/v2.0:oid-123",
+      ],
+  );
 });
 
 test("reuses storage created by a partial deployment and creates only missing resources", async () => {
@@ -152,6 +201,9 @@ test("reuses storage created by a partial deployment and creates only missing re
         result_info: { total_pages: 1 },
       });
     }
+    if (url.pathname.endsWith("/workers/subdomain")) {
+      return Response.json({ success: true, result: { subdomain: "acme" } });
+    }
     if (url.pathname.endsWith(`/${validConfig.resources.blueprintContentBucket}`) &&
         (init.method ?? "GET") === "GET") {
       return Response.json(
@@ -171,6 +223,10 @@ test("reuses storage created by a partial deployment and creates only missing re
   assert.deepEqual(requests, [
     {
       path: `/client/v4/accounts/${accountId}/storage/kv/namespaces`,
+      method: "GET",
+    },
+    {
+      path: `/client/v4/accounts/${accountId}/workers/subdomain`,
       method: "GET",
     },
     {

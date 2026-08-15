@@ -4,12 +4,17 @@
     "router": "intimetec-cloudflare-os",
     "backend": "intimetec-cloudflare-os-backend",
     "context": "intimetec-cloudflare-os-context",
-    "scheduler": "intimetec-cloudflare-os-scheduler"
+    "scheduler": "intimetec-cloudflare-os-scheduler",
+    "microsoft": "intimetec-cloudflare-os-microsoft"
   },
 
-  // Temporary built-in password authentication. Entra ID will replace this in Phase 1.
+  // Microsoft Entra ID is the ONLY sign-in method (deploy.mjs sets AUTH_GATEKEEPERS=microsoft and
+  // DISABLE_PASSWORD_AUTH=true). Admins are verified principals "<issuer>:<subject>". The literal
+  // entry below is inert (password auth is disabled); the real admin comes from the
+  // MICROSOFT_TENANT_ID + MICROSOFT_ADMIN_OID secrets (see resolveAdmins in scripts/deploy.mjs),
+  // which map to "https://login.microsoftonline.com/<tenant>/v2.0:<oid>".
   "auth": {
-    "admins": ["dallenpyrah"]
+    "admins": ["password:dallenpyrah"]
   },
 
   "context": {

@@ -34,6 +34,14 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       OPENROUTER_API_TOKEN: ${{ secrets.OPENROUTER_API_TOKEN }}
+      # Microsoft Entra sign-in (the only login method). Until all three are configured the
+      # gatekeeper deploys unconfigured and sign-in shows its "not configured" page.
+      MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+      MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+      MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
+      # Optional: the deployment admin's Entra object id; folded into ADMINS as
+      # "https://login.microsoftonline.com/<tenant>/v2.0:<oid>".
+      MICROSOFT_ADMIN_OID: ${{ secrets.MICROSOFT_ADMIN_OID }}
       CI: "true"
       NO_COLOR: "1"
     steps:
