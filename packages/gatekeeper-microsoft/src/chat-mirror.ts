@@ -528,14 +528,39 @@ export class ChatMirror extends DurableObject<Env> {
 
   // ── Subscription lifecycle ────────────────────────────────────────────────
 
+  /** How many most-recently-active chats keep live subscriptions (Graph per-chat model). */
+  static SUBSCRIBED_CHAT_LIMIT = 15;
+
   async ensureSubscriptions(notificationBaseUrl: string): Promise<void> {
     const selfUserId = this.#meta("selfUserId");
     if (!selfUserId) return;
-    const wanted = [`/users/${selfUserId}/chats/getAllMessages`];
+    // Per-chat delegated subscriptions: the aggregate /users/{id}/chats/getAllMessages feed
+    // requires the app-only Chat.Read.All role, which an Application Administrator cannot consent
+    // to for Microsoft Graph — so we subscribe the most recently active chats individually
+    // (delegated Chat.ReadWrite) and let the alarm sweep pick up newly active ones.
+    const chatRows = this.#sql.exec(
+        `SELECT ref_key FROM conversations WHERE kind = 'chat'
+         ORDER BY last_activity DESC NULLS LAST LIMIT ?`,
+        ChatMirror.SUBSCRIBED_CHAT_LIMIT).toArray();
+    const wanted = chatRows.flatMap(row => {
+      const ref = parseRefKey(row.ref_key as string);
+      return ref.kind === "chat" ? [`/chats/${ref.chatId}/messages`] : [];
+    });
     const existing = new Map(this.#sql.exec("SELECT sub_id, resource, expires FROM graph_subs")
         .toArray().map(row => [row.resource as string, row]));
 
     const transport = this.#transport();
+    // Drop subscriptions for chats no longer in the subscribed set.
+    const wantedSet = new Set(wanted);
+    for (const [resource, row] of existing) {
+      if (wantedSet.has(resource)) continue;
+      try {
+        await this.#run(subscriptions.deleteSubscription(transport, row.sub_id as string));
+      } catch {
+        // expired or already gone
+      }
+      this.#sql.exec("DELETE FROM graph_subs WHERE sub_id = ?", row.sub_id);
+    }
     for (const resource of wanted) {
       const current = existing.get(resource);
       if (current) {
@@ -579,19 +604,18 @@ export class ChatMirror extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
-    const baseUrl = stripBase(this.env.BASE_URL);
-    try {
-      await this.ensureSubscriptions(baseUrl);
-    } catch (err) {
-      logger.warn("subscription sweep failed", {
-        event: "chatmirror.subscription.sweep.failed", error: err,
-      });
-    }
-    // Reconcile: refresh the list; open-tab conversations heal on next read.
+    // Reconcile first so newly active chats are known, then subscribe them in the same sweep.
     try {
       await this.hydrate();
     } catch {
       // transient; next alarm retries
+    }
+    try {
+      await this.ensureSubscriptions(stripBase(this.env.BASE_URL));
+    } catch (err) {
+      logger.warn("subscription sweep failed", {
+        event: "chatmirror.subscription.sweep.failed", error: err,
+      });
     }
     await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
   }

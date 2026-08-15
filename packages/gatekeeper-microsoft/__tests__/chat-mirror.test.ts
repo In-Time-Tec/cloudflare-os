@@ -157,16 +157,19 @@ describe("ChatMirror", () => {
     expect(conversations[0].lastMessage?.preview).toBe("ding");
   });
 
-  it("registers subscriptions with clientState carrying the mirror id and verifies it", async () => {
+  it("subscribes active chats per-chat with clientState carrying the mirror id", async () => {
     const requests = stubGraph({
-      "subscriptions": { id: "sub-1", resource: "/users/self-oid/chats/getAllMessages",
-                         expirationDateTime: "2026-08-18T00:00:00Z" },
+      "me/chats": { value: [CHAT] },
+      "me/teamwork/associatedTeams": { value: [] },
+      "POST /subscriptions": { id: "sub-1", resource: "/chats/19:chat1/messages",
+                               expirationDateTime: "2026-08-18T00:00:00Z" },
     });
     const mirror = await seededMirror("mirror-subs");
+    await mirror.listConversations();  // hydrate so the chat is known
     await mirror.ensureSubscriptions("https://example.test/gatekeeper/microsoft");
-    const post = requests.find(r => r.method === "POST");
+    const post = requests.find(r => r.method === "POST" && r.url.pathname === "/v1.0/subscriptions");
     expect(post!.body).toMatchObject({
-      resource: "/users/self-oid/chats/getAllMessages",
+      resource: "/chats/19:chat1/messages",
       notificationUrl: "https://example.test/gatekeeper/microsoft/notifications",
       includeResourceData: false,
     });
