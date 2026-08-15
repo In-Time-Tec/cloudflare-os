@@ -113,26 +113,40 @@ function toMessagePage(dto: typeof ChatMessagePageDto.Type): TeamsMessagePage {
   };
 }
 
+/** One page of chats plus the continuation, if more exist. */
+export interface ChatPage {
+  chats: ChatSummary[];
+  next?: PageCursor;
+}
+
+function toChatPage(dto: typeof ChatPageDto.Type): ChatPage {
+  const nextLink = dto["@odata.nextLink"];
+  return {
+    chats: dto.value.map(chat => ({
+      id: chat.id,
+      topic: chat.topic ?? "",
+      chatType: chat.chatType ?? "unknown",
+      lastUpdated: chat.lastUpdatedDateTime
+          ? new Date(chat.lastUpdatedDateTime) : undefined,
+    })),
+    next: nextLink ? validateNextLink(nextLink) ?? undefined : undefined,
+  };
+}
+
 /** The signed-in user's chats, most recently active first. */
 export function listChats(transport: GraphTransport, options?: { top?: number })
-    : Effect.Effect<{ chats: ChatSummary[]; next?: PageCursor }, GraphError> {
+    : Effect.Effect<ChatPage, GraphError> {
   return Effect.map(
       transport.get(["me", "chats"], ChatPageDto, {
         query: { top: options?.top ?? 25, orderby: "lastUpdatedDateTime desc" },
       }),
-      dto => {
-        const nextLink = dto["@odata.nextLink"];
-        return {
-          chats: dto.value.map(chat => ({
-            id: chat.id,
-            topic: chat.topic ?? "",
-            chatType: chat.chatType ?? "unknown",
-            lastUpdated: chat.lastUpdatedDateTime
-                ? new Date(chat.lastUpdatedDateTime) : undefined,
-          })),
-          next: nextLink ? validateNextLink(nextLink) ?? undefined : undefined,
-        };
-      });
+      toChatPage);
+}
+
+/** Fetch the continuation of a previous chat listing. */
+export function nextChatPage(transport: GraphTransport, cursor: PageCursor)
+    : Effect.Effect<ChatPage, GraphError> {
+  return Effect.map(transport.getPage(cursor, ChatPageDto), toChatPage);
 }
 
 /** Teams the signed-in user is a member of. */
@@ -192,4 +206,27 @@ export function sendMessage(transport: GraphTransport, ref: ConversationRef, tex
     : Effect.Effect<{ id: string }, GraphError> {
   return transport.post(conversationSegments(ref),
       { body: { contentType: "text", content: text } }, MessageSentDto);
+}
+
+const ChatCreatedDto = Schema.Struct({ id: Schema.String });
+
+/**
+ * Create a chat with other people, identified by SMTP address or Entra object id. Two members
+ * (the signed-in user + one other) makes a oneOnOne chat; more makes a group chat. Creating a
+ * chat that already exists (same 1:1 pair) returns the existing chat's id.
+ */
+export function createChat(transport: GraphTransport, selfId: string,
+                           memberIdsOrAddresses: string[], topic?: string)
+    : Effect.Effect<{ id: string }, GraphError> {
+  const allMembers = [selfId, ...memberIdsOrAddresses];
+  const chatType = allMembers.length > 2 ? "group" : "oneOnOne";
+  return transport.post(["chats"], {
+    chatType,
+    ...(chatType === "group" && topic ? { topic } : {}),
+    members: allMembers.map(member => ({
+      "@odata.type": "#microsoft.graph.aadUserConversationMember",
+      roles: ["owner"],
+      "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${member.replaceAll("'", "''")}')`,
+    })),
+  }, ChatCreatedDto);
 }

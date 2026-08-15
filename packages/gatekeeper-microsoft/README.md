@@ -17,10 +17,10 @@ resource types the user enables (incremental consent; see `resources.ts`):
 
 | Resource | Delegated scopes |
 |---|---|
-| Outlook Mailbox | `Mail.ReadWrite` |
+| Outlook Mailbox | `Mail.ReadWrite`, `Mail.Send` |
 | Outlook Calendar | `Calendars.ReadWrite`, `Calendars.Read.Shared` |
-| OneDrive & SharePoint Files | `Files.Read.All`, `Sites.Read.All` |
-| Microsoft Teams | `Chat.ReadWrite`, `Team.ReadBasic.All`, `Channel.ReadBasic.All`, `ChannelMessage.Read.All`, `ChannelMessage.Send` |
+| OneDrive & SharePoint Files | `Files.ReadWrite.All`, `Sites.ReadWrite.All` |
+| Microsoft Teams | `Chat.ReadWrite`, `Chat.Create`, `Team.ReadBasic.All`, `Channel.ReadBasic.All`, `ChannelMessage.Read.All`, `ChannelMessage.Send` |
 
 The refresh token lives only in the `UserAccount` Durable Object. Sessions borrow short-lived
 access tokens; no token, raw Graph request, or continuation URL ever reaches a gadget, agent,
@@ -29,24 +29,37 @@ or browser.
 ## Security model
 
 - Every read is authorized through `authorizeObservation()` before data is returned.
-- Every write (`createDraft`, `createReplyDraft`, `createEvent`, `postToChat`,
-  `postToChannel`) is staged in DO storage and submitted through the approval queue; the Graph
-  call happens only in `applyAction()`. Writes are not simulated, so their descriptions set
-  `awaitDecision` and the agent pauses until the user decides.
-- Draft creation is the only auto-approvable action kind (additive, invisible to recipients).
-  Event creation (sends invitations) and Teams posting (immediately visible) always require
-  review.
+- Every write is staged in DO storage and submitted through the approval queue; the Graph call
+  happens only in `applyAction()`. Writes are not simulated, so their descriptions set
+  `awaitDecision` and the agent pauses until the user decides. Write action kinds:
+
+  | Kind | Covers |
+  |---|---|
+  | `microsoft.mail.draft.create` | createDraft, createReplyDraft |
+  | `microsoft.mail.send` | sendMail, sendDraft, reply, replyAll, forward |
+  | `microsoft.calendar.event.create` | createEvent |
+  | `microsoft.calendar.event.modify` | updateEvent, cancelEvent |
+  | `microsoft.calendar.event.respond` | accept / decline / tentative |
+  | `microsoft.files.write` | createFolder, uploadFile, replaceFileContent |
+  | `microsoft.files.delete` | deleteFile |
+  | `microsoft.teams.message.post` | postToChat, postToChannel |
+  | `microsoft.teams.chat.create` | createChat |
+
+  Every kind is offered for **opt-in** auto-approval through the deployment's existing
+  approvals UI; all default to manual review. Deletes are a separate kind so users can allow
+  edits without allowing deletion.
 - All four capabilities expose broad personal data, so `addObserver` always throws: a
   workspace bound to a Microsoft resource cannot be shared.
-- The files capability is read-only in this version.
+- Bounded content: attachments and binary downloads ≤ 3 MB, text reads ≤ 512 KB, uploads
+  ≤ 4 MB (single-request PUT).
 
 ## Entra app registration
 
 Single-tenant app (see the identity model below), plus these **delegated** Graph permissions
-for capability connections: `User.Read`, `Mail.ReadWrite`, `Calendars.ReadWrite`,
-`Calendars.Read.Shared`, `Files.Read.All`, `Sites.Read.All`, `Chat.ReadWrite`,
-`Team.ReadBasic.All`, `Channel.ReadBasic.All`, `ChannelMessage.Read.All`,
-`ChannelMessage.Send`, `offline_access`. Users consent per connection; grant admin consent in
+for capability connections: `User.Read`, `Mail.ReadWrite`, `Mail.Send`,
+`Calendars.ReadWrite`, `Calendars.Read.Shared`, `Files.ReadWrite.All`, `Sites.ReadWrite.All`,
+`Chat.ReadWrite`, `Chat.Create`, `Team.ReadBasic.All`, `Channel.ReadBasic.All`,
+`ChannelMessage.Read.All`, `ChannelMessage.Send`, `offline_access`. Users consent per connection; grant admin consent in
 the tenant if your policy requires it.
 
 1. App registrations → New registration → "Accounts in this organizational directory only".

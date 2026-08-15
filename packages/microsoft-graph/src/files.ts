@@ -199,3 +199,113 @@ export function downloadTextContent(transport: GraphTransport, ref: DriveRef, it
   return transport.getText([...driveSegments(ref), "items", itemId, "content"],
       MAX_TEXT_CONTENT_BYTES);
 }
+
+/** Files and folders other people have shared with the signed-in user. */
+export function listSharedWithMe(transport: GraphTransport)
+    : Effect.Effect<DriveEntry[], GraphError> {
+  // sharedWithMe returns remoteItem wrappers; the useful identity (the item in its OWNER's
+  // drive) lives inside remoteItem, so decode a dedicated DTO and flatten.
+  const SharedItemDto = Schema.Struct({
+    id: Schema.String,
+    name: Schema.optional(Schema.String),
+    remoteItem: Schema.optional(Schema.Struct({
+      id: Schema.String,
+      name: Schema.optional(Schema.String),
+      size: Schema.optional(Schema.Number),
+      webUrl: Schema.optional(Schema.String),
+      lastModifiedDateTime: Schema.optional(Schema.String),
+      folder: Schema.optional(Schema.NullOr(Schema.Struct({
+        childCount: Schema.optional(Schema.Number),
+      }))),
+      file: Schema.optional(Schema.NullOr(Schema.Struct({
+        mimeType: Schema.optional(Schema.NullOr(Schema.String)),
+      }))),
+      parentReference: Schema.optional(Schema.Struct({
+        driveId: Schema.optional(Schema.String),
+      })),
+      shared: Schema.optional(Schema.Struct({
+        sharedBy: Schema.optional(Schema.Struct({
+          user: Schema.optional(Schema.NullOr(Schema.Struct({
+            displayName: Schema.optional(Schema.String),
+          }))),
+        })),
+      })),
+    })),
+  });
+  const SharedPageDto = Schema.Struct({ value: Schema.Array(SharedItemDto) });
+  return Effect.map(
+      transport.get(["me", "drive", "sharedWithMe"], SharedPageDto),
+      dto => dto.value.flatMap(item => {
+        const remote = item.remoteItem;
+        if (!remote) return [];
+        return [{
+          id: remote.id,
+          name: remote.name ?? item.name ?? "",
+          kind: remote.folder ? "folder" as const : "file" as const,
+          size: remote.size,
+          mimeType: remote.file?.mimeType ?? undefined,
+          childCount: remote.folder?.childCount,
+          modified: remote.lastModifiedDateTime
+              ? new Date(remote.lastModifiedDateTime) : undefined,
+          modifiedBy: remote.shared?.sharedBy?.user?.displayName,
+          driveId: remote.parentReference?.driveId,
+          webUrl: remote.webUrl,
+        }];
+      }));
+}
+
+/** Create a folder inside a parent folder ("root" for the drive root). */
+export function createFolder(transport: GraphTransport, ref: DriveRef,
+                             parentFolderId: string, name: string)
+    : Effect.Effect<DriveEntry, GraphError> {
+  return Effect.map(
+      transport.post([...driveSegments(ref), "items", parentFolderId, "children"], {
+        name,
+        folder: {},
+        "@microsoft.graph.conflictBehavior": "fail",
+      }, DriveItemDto),
+      toEntry);
+}
+
+/** Cap for simple (single-request) uploads, matching Graph's ~4 MB simple-upload limit. */
+export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Create a new file inside a folder ("root" for the drive root) with the given content.
+ * Fails on name conflict rather than overwriting; use replaceFileContent to overwrite.
+ */
+export function uploadFile(transport: GraphTransport, ref: DriveRef, parentFolderId: string,
+                           name: string, content: Uint8Array | string, contentType: string)
+    : Effect.Effect<DriveEntry, GraphError> {
+  return Effect.map(
+      transport.putContent(
+          [...driveSegments(ref), "items", `${parentFolderId}:`, `${name}:`, "content"],
+          content, contentType, DriveItemDto),
+      toEntry);
+}
+
+/** Replace an existing file's content. The response carries the new eTag. */
+export function replaceFileContent(transport: GraphTransport, ref: DriveRef, itemId: string,
+                                   content: Uint8Array | string, contentType: string)
+    : Effect.Effect<DriveEntry, GraphError> {
+  return Effect.map(
+      transport.putContent([...driveSegments(ref), "items", itemId, "content"],
+          content, contentType, DriveItemDto),
+      toEntry);
+}
+
+/** Delete a file or folder (moves to the drive's recycle bin). */
+export function deleteItem(transport: GraphTransport, ref: DriveRef, itemId: string)
+    : Effect.Effect<void, GraphError> {
+  return transport.del([...driveSegments(ref), "items", itemId]);
+}
+
+/** Cap for binary content downloads. */
+export const MAX_BINARY_CONTENT_BYTES = 3 * 1024 * 1024;
+
+/** Download a file's raw content (any format), bounded by MAX_BINARY_CONTENT_BYTES. */
+export function downloadContent(transport: GraphTransport, ref: DriveRef, itemId: string)
+    : Effect.Effect<Uint8Array, GraphError> {
+  return transport.getBytes([...driveSegments(ref), "items", itemId, "content"],
+      MAX_BINARY_CONTENT_BYTES);
+}

@@ -75,6 +75,9 @@ export interface GraphTransport {
   getPage<A>(cursor: PageCursor, schema: Schema.Codec<A, any>): Effect.Effect<A, GraphError>;
   post<A>(segments: readonly string[], body: unknown, schema: Schema.Codec<A, any>,
           options?: RequestOptions): Effect.Effect<A, GraphError>;
+  /** POST whose success response carries no body (Graph 202s). Never auto-retried. */
+  postVoid(segments: readonly string[], body: unknown,
+           options?: RequestOptions): Effect.Effect<void, GraphError>;
   patch<A>(segments: readonly string[], body: unknown, schema: Schema.Codec<A, any>,
            options?: RequestOptions): Effect.Effect<A, GraphError>;
   /** DELETE; Graph returns 204 with no body, so there is nothing to decode. */
@@ -84,11 +87,26 @@ export interface GraphTransport {
    * than `maxBytes`. For text-y file content only.
    */
   getText(segments: readonly string[], maxBytes: number): Effect.Effect<string, GraphError>;
+  /**
+   * GET a raw body as bytes, following Graph's content redirect, refusing bodies larger than
+   * `maxBytes`. For bounded binary downloads.
+   */
+  getBytes(segments: readonly string[], maxBytes: number)
+      : Effect.Effect<Uint8Array, GraphError>;
+  /**
+   * PUT a raw body (file content upload/replace). Never auto-retried: the outcome of a failed
+   * upload may be unknown.
+   */
+  putContent<A>(segments: readonly string[], content: Uint8Array | string,
+                contentType: string, schema: Schema.Codec<A, any>)
+      : Effect.Effect<A, GraphError>;
 }
 
 /** Build the request URL from path segments (each encoded) and constrained query options. */
 export function buildUrl(segments: readonly string[], query?: ODataQuery): string {
-  const path = segments.map(encodeURIComponent).join("/");
+  // Colons are legal in URL path segments (RFC 3986) and Graph's path-based addressing
+  // ("items/{parent}:/{name}:/content") requires them literal, so un-escape just those.
+  const path = segments.map(s => encodeURIComponent(s).replaceAll("%3A", ":")).join("/");
   const url = new URL(`${GRAPH_BASE}/${path}`);
   if (query?.select?.length) url.searchParams.set("$select", query.select.join(","));
   if (query?.top !== undefined) url.searchParams.set("$top", String(Math.floor(query.top)));
@@ -241,6 +259,10 @@ export function makeTransport(
       return request("POST", buildUrl(segments, options?.query), segments.join("/"),
           schema, body, options, 0);
     },
+    postVoid(segments, body, options) {
+      return request("POST", buildUrl(segments, options?.query), segments.join("/"),
+          null, body, options, 0) as Effect.Effect<void, GraphError>;
+    },
     patch(segments, body, schema, options) {
       return request("PATCH", buildUrl(segments, options?.query), segments.join("/"),
           schema, body, options, 0);
@@ -250,6 +272,15 @@ export function makeTransport(
           null, undefined, options, 0) as Effect.Effect<void, GraphError>;
     },
     getText(segments, maxBytes) {
+      return rawGet(segments, maxBytes, response => response.text(),
+          text => text.length) as Effect.Effect<string, GraphError>;
+    },
+    getBytes(segments, maxBytes) {
+      return rawGet(segments, maxBytes,
+          async response => new Uint8Array(await response.arrayBuffer()),
+          bytes => bytes.byteLength) as Effect.Effect<Uint8Array, GraphError>;
+    },
+    putContent(segments, content, contentType, schema) {
       const url = buildUrl(segments);
       const resource = segments.join("/");
       return Effect.gen(function* () {
@@ -260,37 +291,76 @@ export function makeTransport(
         if (token === null) {
           return yield* Effect.fail(new GraphAuthError({ reason: "reauthenticate" }));
         }
-        // fetch follows the 302 to the pre-authenticated download URL automatically; the redirect
-        // target carries its own short-lived token, so the Authorization header going with it is
-        // harmless and expected.
         const response = yield* Effect.tryPromise({
-          try: () => fetchImpl(url, { headers: { "Authorization": `Bearer ${token}` } }),
+          try: () => fetchImpl(url, {
+            method: "PUT",
+            headers: { "Authorization": `Bearer ${token}`, "Content-Type": contentType },
+            body: content as BodyInit,
+          }),
           catch: () => new GraphUnavailableError({ status: 0 }),
         });
         if (!response.ok) {
-          return yield* Effect.tryPromise({
+          const failure = yield* Effect.tryPromise({
             try: () => mapFailure(response, resource),
             catch: () => new GraphUnavailableError({ status: response.status }),
-          }).pipe(Effect.flatMap(Effect.fail));
+          });
+          return yield* Effect.fail(failure);
         }
-        const length = Number(response.headers.get("Content-Length") ?? "0");
-        if (length > maxBytes) {
-          response.body?.cancel();
-          return yield* Effect.fail(new GraphDecodeError({
-            detail: `content is ${length} bytes; limit is ${maxBytes}`,
-          }));
-        }
-        const text = yield* Effect.tryPromise({
-          try: () => response.text(),
-          catch: () => new GraphDecodeError({ detail: "content read failed" }),
+        const requestId = requestIdOf(response);
+        const json = yield* Effect.tryPromise({
+          try: () => response.json(),
+          catch: () => new GraphDecodeError({ detail: "response body was not JSON", requestId }),
         });
-        if (text.length > maxBytes) {
-          return yield* Effect.fail(new GraphDecodeError({
-            detail: `content exceeds the ${maxBytes}-byte limit`,
-          }));
-        }
-        return text;
+        return yield* decodeBody(schema, json, requestId);
       });
     },
   };
+
+  /** Shared bounded raw-content GET used by getText/getBytes. */
+  function rawGet<Body>(segments: readonly string[], maxBytes: number,
+                        read: (response: Response) => Promise<Body>,
+                        sizeOf: (body: Body) => number): Effect.Effect<Body, GraphError> {
+    const url = buildUrl(segments);
+    const resource = segments.join("/");
+    return Effect.gen(function* () {
+      const token = yield* Effect.tryPromise({
+        try: () => tokenProvider(),
+        catch: () => new GraphAuthError({ reason: "reauthenticate" }),
+      });
+      if (token === null) {
+        return yield* Effect.fail(new GraphAuthError({ reason: "reauthenticate" }));
+      }
+      // fetch follows the 302 to the pre-authenticated download URL automatically; the redirect
+      // target carries its own short-lived token, so the Authorization header going with it is
+      // harmless and expected.
+      const response = yield* Effect.tryPromise({
+        try: () => fetchImpl(url, { headers: { "Authorization": `Bearer ${token}` } }),
+        catch: () => new GraphUnavailableError({ status: 0 }),
+      });
+      if (!response.ok) {
+        const failure = yield* Effect.tryPromise({
+          try: () => mapFailure(response, resource),
+          catch: () => new GraphUnavailableError({ status: response.status }),
+        });
+        return yield* Effect.fail(failure);
+      }
+      const length = Number(response.headers.get("Content-Length") ?? "0");
+      if (length > maxBytes) {
+        response.body?.cancel();
+        return yield* Effect.fail(new GraphDecodeError({
+          detail: `content is ${length} bytes; limit is ${maxBytes}`,
+        }));
+      }
+      const body = yield* Effect.tryPromise({
+        try: () => read(response),
+        catch: () => new GraphDecodeError({ detail: "content read failed" }),
+      });
+      if (sizeOf(body) > maxBytes) {
+        return yield* Effect.fail(new GraphDecodeError({
+          detail: `content exceeds the ${maxBytes}-byte limit`,
+        }));
+      }
+      return body;
+    });
+  }
 }

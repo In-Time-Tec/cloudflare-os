@@ -8,7 +8,7 @@ export const MAILBOX_RESOURCE: SupportedResource = {
   urlPattern: "https://outlook.office.com/mail/*",
   title: "Outlook Mailbox",
   description:
-      "Read and search the connected mailbox, and create drafts for the user to review and send.",
+      "Read and search the connected mailbox, create drafts, and send email as the user.",
   grantable: true,
 };
 
@@ -24,7 +24,7 @@ export const FILES_RESOURCE: SupportedResource = {
   urlPattern: "https://onedrive.office.com/*",
   title: "OneDrive & SharePoint Files",
   description:
-      "Browse and search OneDrive and SharePoint document libraries and read text file content.",
+      "Browse, search, read, upload, and organize OneDrive and SharePoint files.",
   grantable: true,
 };
 
@@ -32,7 +32,7 @@ export const TEAMS_RESOURCE: SupportedResource = {
   urlPattern: "https://teams.microsoft.com/*",
   title: "Microsoft Teams",
   description:
-      "Read chats and channels the user participates in, and post messages on their behalf.",
+      "Read chats and channels the user participates in, start chats, and post messages on their behalf.",
   grantable: true,
 };
 
@@ -42,11 +42,11 @@ export const SUPPORTED_RESOURCES: SupportedResource[] = [
 
 /** The delegated Graph scopes each resource type needs. */
 const RESOURCE_SCOPES: Record<string, string[]> = {
-  [MAILBOX_RESOURCE.urlPattern]: ["Mail.ReadWrite"],
+  [MAILBOX_RESOURCE.urlPattern]: ["Mail.ReadWrite", "Mail.Send"],
   [CALENDAR_RESOURCE.urlPattern]: ["Calendars.ReadWrite", "Calendars.Read.Shared"],
-  [FILES_RESOURCE.urlPattern]: ["Files.Read.All", "Sites.Read.All"],
+  [FILES_RESOURCE.urlPattern]: ["Files.ReadWrite.All", "Sites.ReadWrite.All"],
   [TEAMS_RESOURCE.urlPattern]: [
-    "Chat.ReadWrite", "Team.ReadBasic.All", "Channel.ReadBasic.All",
+    "Chat.ReadWrite", "Chat.Create", "Team.ReadBasic.All", "Channel.ReadBasic.All",
     "ChannelMessage.Read.All", "ChannelMessage.Send",
   ],
 };

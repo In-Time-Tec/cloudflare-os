@@ -30,6 +30,26 @@ export type OutlookMessageDetail = OutlookMessageInfo & {
   bodyHtml?: string;
 };
 
+/** One mail folder. Well-known names ("inbox", "sentitems", "archive",
+ *  "drafts", "deleteditems") also work anywhere a folder id is accepted. */
+export type MailFolderInfo = {
+  id: string;
+  name: string;
+  totalCount: number;
+  unreadCount: number;
+  hasChildren: boolean;
+};
+
+/** One attachment on a message (metadata). */
+export type AttachmentInfo = {
+  id: string;
+  name: string;
+  contentType?: string;
+  size?: number;
+  /** False for calendar-item or link attachments, which cannot be downloaded. */
+  isFile: boolean;
+};
+
 export interface OutlookMailSession {
   /** List inbox messages, newest first. Returns a cursor that lazily fetches
    *  pages as consumed. */
@@ -39,8 +59,22 @@ export interface OutlookMailSession {
    *  cursor that lazily fetches pages as consumed. */
   search(query: string): Promise<Cursor<OutlookMessageInfo>>;
 
+  /** The mailbox's folders (Inbox, Sent Items, Archive, custom, ...). */
+  listFolders(): Promise<MailFolderInfo[]>;
+
+  /** List one folder's messages, newest first (folder id or well-known name).
+   *  Returns a cursor that lazily fetches pages as consumed. */
+  listFolder(folderId: string): Promise<Cursor<OutlookMessageInfo>>;
+
   /** Fetch one message including its body, by id from a listing or search. */
   getMessage(id: string): Promise<OutlookMessageDetail>;
+
+  /** List a message's attachments (metadata only). */
+  listAttachments(messageId: string): Promise<AttachmentInfo[]>;
+
+  /** Download one file attachment's content as base64 (up to 3 MB). */
+  getAttachment(messageId: string, attachmentId: string)
+      : Promise<{ name: string; contentType?: string; base64: string }>;
 
   /** Create a draft in the user's Drafts folder for them to review and send.
    *  Never sends mail. Returns the new draft's id. */
@@ -50,6 +84,23 @@ export interface OutlookMailSession {
   /** Create a reply draft to an existing message (recipients and history are
    *  prefilled by Outlook). Never sends mail. Returns the new draft's id. */
   createReplyDraft(messageId: string, comment: string): Promise<{ id: string }>;
+
+  /** Send an email from the user's address. It lands in their Sent Items. */
+  sendMail(to: string[], subject: string, body: string,
+           options?: { cc?: string[]; bcc?: string[] }): Promise<void>;
+
+  /** Send an existing draft (by real draft id, e.g. after the user edited it
+   *  in Outlook). */
+  sendDraft(draftId: string): Promise<void>;
+
+  /** Reply to a message's sender, sending immediately. */
+  reply(messageId: string, body: string): Promise<void>;
+
+  /** Reply to all recipients of a message, sending immediately. */
+  replyAll(messageId: string, body: string): Promise<void>;
+
+  /** Forward a message to new recipients, sending immediately. */
+  forward(messageId: string, to: string[], comment?: string): Promise<void>;
 }
 
 // ── Outlook Calendar ────────────────────────────────────────────────
@@ -91,6 +142,21 @@ export interface OutlookCalendarSession {
     subject: string; start: Date; end: Date; body?: string; location?: string;
     attendees?: string[]; onlineMeeting?: boolean;
   }): Promise<{ id: string }>;
+
+  /** Update an event the user organizes (only the provided fields change;
+   *  `attendees` replaces the whole list). Outlook sends updates to attendees. */
+  updateEvent(eventId: string, update: {
+    subject?: string; start?: Date; end?: Date; body?: string; location?: string;
+    attendees?: string[];
+  }): Promise<void>;
+
+  /** Cancel (delete) an event. For events the user organizes, Outlook sends
+   *  cancellations to attendees. */
+  cancelEvent(eventId: string): Promise<void>;
+
+  /** Respond to a meeting invitation. The organizer is notified. */
+  respondToEvent(eventId: string, response: "accept" | "decline" | "tentativelyAccept",
+                 comment?: string): Promise<void>;
 }
 
 // ── OneDrive / SharePoint files ─────────────────────────────────────
@@ -143,6 +209,31 @@ export interface MicrosoftFilesSession {
    *  files over 512 KB and garbles binary formats — check mimeType first and
    *  use webUrl for Office documents. */
   readTextContent(driveId: string | null, itemId: string): Promise<string>;
+
+  /** Download any file's raw content as base64 (up to 3 MB). */
+  readContent(driveId: string | null, itemId: string)
+      : Promise<{ name: string; base64: string }>;
+
+  /** Files and folders other people have shared with the user. */
+  listSharedWithMe(): Promise<FileEntry[]>;
+
+  /** Create a folder inside a parent folder ("root" for the top level).
+   *  Fails if a sibling with the same name exists. */
+  createFolder(driveId: string | null, parentFolderId: string, name: string)
+      : Promise<FileEntry>;
+
+  /** Create a new text file inside a folder ("root" for the top level).
+   *  Fails if a file with the same name exists — use replaceFileContent to
+   *  overwrite. Content is UTF-8 text, up to 4 MB. */
+  uploadFile(driveId: string | null, parentFolderId: string, name: string,
+             content: string, contentType?: string): Promise<FileEntry>;
+
+  /** Replace an existing file's content with UTF-8 text, up to 4 MB. */
+  replaceFileContent(driveId: string | null, itemId: string, content: string,
+                     contentType?: string): Promise<FileEntry>;
+
+  /** Delete a file or folder (it moves to the drive's recycle bin). */
+  deleteFile(driveId: string | null, itemId: string): Promise<void>;
 }
 
 // ── Microsoft Teams ─────────────────────────────────────────────────
@@ -172,8 +263,9 @@ export type TeamsMessageInfo = {
 };
 
 export interface TeamsSession {
-  /** The user's chats, most recently active first. */
-  listChats(): Promise<TeamsChatInfo[]>;
+  /** The user's chats, most recently active first. Returns a cursor that
+   *  lazily fetches pages as consumed. */
+  listChats(): Promise<Cursor<TeamsChatInfo>>;
 
   /** Teams the user is a member of. */
   listTeams(): Promise<TeamInfo[]>;
@@ -181,11 +273,18 @@ export interface TeamsSession {
   /** The channels of a team. */
   listChannels(teamId: string): Promise<ChannelInfo[]>;
 
-  /** Recent messages in a chat, newest first. */
-  readChat(chatId: string): Promise<TeamsMessageInfo[]>;
+  /** Messages in a chat, newest first. Returns a cursor that lazily fetches
+   *  pages as consumed (keep consuming to go further back in history). */
+  readChat(chatId: string): Promise<Cursor<TeamsMessageInfo>>;
 
-  /** Recent messages in a team channel, newest first. */
-  readChannel(teamId: string, channelId: string): Promise<TeamsMessageInfo[]>;
+  /** Messages in a team channel, newest first. Returns a cursor that lazily
+   *  fetches pages as consumed. */
+  readChannel(teamId: string, channelId: string): Promise<Cursor<TeamsMessageInfo>>;
+
+  /** Start a chat with other people (by email address). One other person makes
+   *  a 1:1 chat (returns the existing chat if you already have one); more make
+   *  a group chat with the given topic. Returns the chat id to post to. */
+  createChat(memberAddresses: string[], topic?: string): Promise<{ id: string }>;
 
   /** Post a plain-text message to a chat. Returns the message id. */
   postToChat(chatId: string, text: string): Promise<{ id: string }>;

@@ -220,3 +220,50 @@ export function deleteEvent(transport: GraphTransport, eventId: string)
     : Effect.Effect<void, GraphError> {
   return transport.del(["me", "events", eventId]);
 }
+
+/** Fields of an event that can be updated. Times are UTC instants. */
+export interface EventUpdate {
+  subject?: string;
+  start?: Date;
+  end?: Date;
+  body?: string;
+  location?: string;
+  /** Full replacement attendee list, when present. */
+  attendees?: string[];
+}
+
+/** Update an event the user organizes. Outlook sends updated invitations to attendees. */
+export function updateEvent(transport: GraphTransport, eventId: string, update: EventUpdate)
+    : Effect.Effect<{ id: string }, GraphError> {
+  const UpdatedDto = Schema.Struct({ id: Schema.String });
+  return transport.patch(["me", "events", eventId], {
+    ...(update.subject !== undefined ? { subject: update.subject } : {}),
+    ...(update.start ? { start: { dateTime: update.start.toISOString(), timeZone: "UTC" } } : {}),
+    ...(update.end ? { end: { dateTime: update.end.toISOString(), timeZone: "UTC" } } : {}),
+    ...(update.body !== undefined
+        ? { body: { contentType: "Text", content: update.body } } : {}),
+    ...(update.location !== undefined
+        ? { location: { displayName: update.location } } : {}),
+    ...(update.attendees ? {
+      attendees: update.attendees.map(address => ({
+        emailAddress: { address }, type: "required",
+      })),
+    } : {}),
+  }, UpdatedDto);
+}
+
+/** How to respond to a meeting invitation. */
+export type EventResponse = "accept" | "decline" | "tentativelyAccept";
+
+/**
+ * Respond to a meeting invitation on the user's calendar. `sendResponse` controls whether the
+ * organizer is notified (Graph's default is true).
+ */
+export function respondToEvent(transport: GraphTransport, eventId: string,
+                               response: EventResponse, comment?: string)
+    : Effect.Effect<void, GraphError> {
+  return transport.postVoid(["me", "events", eventId, response], {
+    sendResponse: true,
+    ...(comment ? { comment } : {}),
+  });
+}

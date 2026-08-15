@@ -223,9 +223,10 @@ describe("CalendarGatekeeperImpl", () => {
     expect(posts[0].body).toMatchObject({ subject: "Review" });
   });
 
-  it("never offers auto-approval for event creation", async () => {
+  it("offers calendar action kinds for opt-in auto-approval", async () => {
     const gk = env.TEST_CALENDAR.getByName("cal-kinds");
-    expect(await runInDurableObject(gk, i => i.getAutoApprovableActions())).toEqual([]);
+    const kinds = await runInDurableObject(gk, i => i.getAutoApprovableActions());
+    expect(kinds.map(k => k.tag)).toContain("microsoft.calendar.event.create");
   });
 });
 
@@ -252,10 +253,10 @@ describe("FilesGatekeeperImpl", () => {
     expect(observations[0].description).toContain("notes.md");
   });
 
-  it("is read-only: applyAction always fails", async () => {
+  it("rejects unknown action ids", async () => {
     const gk = env.TEST_FILES.getByName("files-readonly");
-    await expect(runInDurableObject(gk, i => i.applyAction(1)))
-        .rejects.toThrow(/read-only/);
+    await expect(runInDurableObject(gk, i => i.applyAction(999)))
+        .rejects.toThrow(/Unknown pending/);
   });
 });
 
@@ -277,10 +278,11 @@ describe("TeamsGatekeeperImpl", () => {
 
     const messages = await runInDurableObject(gk, async instance => {
       const session = await instance.startSession(queue);
-      return session.readChat("c1");
+      const cursor = await session.readChat("c1");
+      return cursor.next();
     });
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({ from: "Bob", content: "hello" });
+    expect(messages![0]).toMatchObject({ from: "Bob", content: "hello" });
     expect(observations[0].title).toContain("1 Teams messages");
   });
 
@@ -303,8 +305,11 @@ describe("TeamsGatekeeperImpl", () => {
     expect(posts[0].body).toEqual({ body: { contentType: "text", content: "ship it" } });
   });
 
-  it("never offers auto-approval for posting", async () => {
+  it("offers post and chat-create kinds for opt-in auto-approval", async () => {
     const gk = env.TEST_TEAMS.getByName("teams-kinds");
-    expect(await runInDurableObject(gk, i => i.getAutoApprovableActions())).toEqual([]);
+    const kinds = await runInDurableObject(gk, i => i.getAutoApprovableActions());
+    expect(kinds.map(k => k.tag)).toEqual([
+      "microsoft.teams.message.post", "microsoft.teams.chat.create",
+    ]);
   });
 });
