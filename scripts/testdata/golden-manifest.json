@@ -649,6 +649,15 @@
             "UserAccount"
           ],
           "tag": "v0"
+        },
+        {
+          "new_sqlite_classes": [
+            "MailboxGatekeeperImpl",
+            "CalendarGatekeeperImpl",
+            "FilesGatekeeperImpl",
+            "TeamsGatekeeperImpl"
+          ],
+          "tag": "v1"
         }
       ],
       "modules": [

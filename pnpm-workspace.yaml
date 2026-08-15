@@ -6,6 +6,10 @@ packages:
 catalog:
   '@cloudflare/vitest-pool-workers': ^0.20.2
   capnweb: ^0.11.1
+  # Exact: Effect v4 release candidate (v4 GA not shipped yet). Used only by
+  # @gadgets/microsoft-graph and inside gatekeeper-microsoft; Effect values never
+  # cross a Worker/RPC boundary.
+  effect: 4.0.0-rc.109
   # Exact: pinned in lockstep with capnweb (declared as a >=0.7.0 peer)
   capnweb-validate: 0.2.4
   # Exact: TypeScript 7 (tsgo). Type-checking runs on the native compiler. Build-time
@@ -44,6 +48,9 @@ minimumReleaseAgeExclude:
 
 allowBuilds:
   '@google/genai': true
+  # Optional native acceleration pulled in transitively by effect's platform deps; the pure-JS
+  # fallback is fine and we don't run its postinstall.
+  msgpackr-extract: false
   core-js-pure: true
   esbuild: true
   protobufjs: true

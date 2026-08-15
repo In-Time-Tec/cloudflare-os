@@ -40,6 +40,14 @@ function authorityBase(tenantId: string): string {
  */
 export const AUTH_SCOPES = ["openid", "profile", "email"];
 
+/**
+ * Base scopes every persistent capability connection needs: OIDC identity (to bind the account to
+ * a validated (tenant, oid)), a refresh token, and the basic profile read for describe().
+ */
+export const CONNECT_BASE_SCOPES = [
+  "openid", "profile", "email", "offline_access", "User.Read",
+];
+
 function b64urlEncode(bytes: ArrayBuffer | Uint8Array): string {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   return btoa(String.fromCharCode(...arr)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -54,13 +62,14 @@ export async function generatePkce(): Promise<{ verifier: string; challenge: str
 
 export function buildAuthorizeUrl(
   config: EntraOAuthConfig, state: string, challenge: string, oidcNonce: string,
+  scopes: readonly string[] = AUTH_SCOPES,
 ): string {
   const url = new URL(`${authorityBase(config.tenantId)}/oauth2/v2.0/authorize`);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("response_mode", "query");
   url.searchParams.set("client_id", config.clientId);
   url.searchParams.set("redirect_uri", config.redirectUri);
-  url.searchParams.set("scope", AUTH_SCOPES.join(" "));
+  url.searchParams.set("scope", scopes.join(" "));
   url.searchParams.set("state", state);
   url.searchParams.set("nonce", oidcNonce);
   url.searchParams.set("code_challenge", challenge);
@@ -68,28 +77,66 @@ export function buildAuthorizeUrl(
   return url.toString();
 }
 
-/** Exchange an authorization code (with its PKCE verifier) for the ID token. */
-export async function exchangeCode(
-  config: EntraOAuthConfig, code: string, verifier: string,
-): Promise<string | null> {
+/** The full token response for a persistent capability connection. */
+export interface TokenGrant {
+  idToken?: string;
+  accessToken: string;
+  refreshToken?: string;
+  /** Seconds until the access token expires. */
+  expiresIn: number;
+  /** The delegated scopes actually granted, as reported by the token endpoint. */
+  scopes: string[];
+}
+
+async function redeem(config: EntraOAuthConfig, body: URLSearchParams)
+    : Promise<TokenGrant | null> {
   const resp = await fetch(`${authorityBase(config.tenantId)}/oauth2/v2.0/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      code,
-      redirect_uri: config.redirectUri,
-      code_verifier: verifier,
-    }),
+    body,
   });
   if (!resp.ok) {
     resp.body?.cancel();
     return null;
   }
-  const data = await resp.json() as { id_token?: string };
-  return data.id_token ?? null;
+  const data = await resp.json() as {
+    id_token?: string; access_token?: string; refresh_token?: string;
+    expires_in?: number; scope?: string;
+  };
+  if (!data.access_token) return null;
+  return {
+    idToken: data.id_token,
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresIn: data.expires_in ?? 3600,
+    scopes: data.scope?.split(" ").filter(Boolean) ?? [],
+  };
+}
+
+/** Exchange an authorization code (with its PKCE verifier) for tokens. */
+export async function exchangeCode(
+  config: EntraOAuthConfig, code: string, verifier: string,
+): Promise<TokenGrant | null> {
+  return redeem(config, new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    code,
+    redirect_uri: config.redirectUri,
+    code_verifier: verifier,
+  }));
+}
+
+/** Refresh an access token. Entra rotates refresh tokens; the caller must store the new one. */
+export async function refreshTokens(
+  config: EntraOAuthConfig, refreshToken: string,
+): Promise<TokenGrant | null> {
+  return redeem(config, new URLSearchParams({
+    grant_type: "refresh_token",
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    refresh_token: refreshToken,
+  }));
 }
 
 // One remote JWK set per tenant, cached across requests (jose refreshes it on unknown kid).

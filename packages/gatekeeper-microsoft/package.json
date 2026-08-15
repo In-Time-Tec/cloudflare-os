@@ -12,12 +12,15 @@
   },
   "dependencies": {
     "@gadgets/backend-utils": "workspace:*",
+    "@gadgets/microsoft-graph": "workspace:*",
     "@gadgets/workshop-shared": "workspace:*",
     "capnweb": "catalog:",
     "capnweb-validate": "catalog:",
+    "effect": "catalog:",
     "jose": "^6.2.5"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "wrangler": "catalog:"

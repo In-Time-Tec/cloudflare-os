@@ -1,12 +1,18 @@
-// The Microsoft gatekeeper: sign-in with Microsoft Entra ID.
+// The Microsoft gatekeeper: sign-in with Microsoft Entra ID plus delegated Microsoft 365
+// capabilities (Outlook Mail, Calendar, OneDrive/SharePoint files, Teams).
 //
-// This vendor currently provides authentication only (`providesAuth`), through the Workshop's
-// standard gatekeeper connect flow: connectAccount() returns the OAuth popup URL, the UserAccount
-// DO runs the single-tenant Entra OIDC flow (auth code + PKCE + state + OIDC nonce), and
-// getAuthenticatedIdentity() returns the validated (tenant issuer, oid) identity. Sign-in grants
-// are transient: only the validated identity is kept, briefly, and the DO self-destructs — no
-// Microsoft credential (ID token, access token, Graph token) is ever stored or exposed. Graph
-// capabilities will be a separate, explicit consent flow with its own token storage.
+// Two account modes share one UserAccount Durable Object class:
+//
+//   - "signin": the Workshop's login flow (connectAccount with scopes:"auth"). Only OIDC identity
+//     scopes are requested, only the validated identity is kept (briefly), and the DO
+//     self-destructs — no Microsoft credential is ever stored.
+//   - "full": a persistent connected account (the Connectors page / scopes:"full"). The DO stores
+//     the refresh token and validated (tenant, oid) identity; capability sessions borrow
+//     short-lived access tokens from it. The refresh token never leaves the DO.
+//
+// Every capability session lives behind the Workshop approval-queue model (see sessions.ts):
+// reads are authorized observations, writes are queued actions applied only after approval.
+// Graph requests happen in @gadgets/microsoft-graph; Effect stays inside the Worker.
 
 import { WorkerEntrypoint, DurableObject } from "cloudflare:workers";
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
@@ -17,11 +23,20 @@ import {
   SupportedResource, ResourceConfiguratorFrame, stripTrailingSlashes,
 } from "@gadgets/workshop-shared/gatekeeper";
 import {
-  getOAuthConfig, buildAuthorizeUrl, generatePkce, exchangeCode, validateIdToken,
-  ValidatedEntraIdentity,
+  getOAuthConfig, buildAuthorizeUrl, generatePkce, exchangeCode, refreshTokens, validateIdToken,
+  ValidatedEntraIdentity, AUTH_SCOPES, CONNECT_BASE_SCOPES, TokenGrant,
 } from "./oauth.js";
+import {
+  MAILBOX_RESOURCE, CALENDAR_RESOURCE, FILES_RESOURCE, TEAMS_RESOURCE, SUPPORTED_RESOURCES,
+  scopesForResources, resourceForUrl,
+} from "./resources.js";
 import { VENDOR_ID } from "./vendor.js";
 import { obsContext } from "./observability.js";
+import TYPES_CODE from "./types.txt";
+
+export {
+  MailboxGatekeeperImpl, CalendarGatekeeperImpl, FilesGatekeeperImpl, TeamsGatekeeperImpl,
+} from "./sessions.js";
 
 const logger = obsContext.createLogger({
   component: "gatekeeper.microsoft", vendorId: VENDOR_ID,
@@ -38,11 +53,15 @@ type StoredNonce = {
   oidcNonce?: string;
 };
 
+/** A cached access token plus its absolute expiry (unix ms). */
+type StoredAccessToken = { token: string; expires: number };
+
 const NONCE_BYTES = 32;
 const INITIATION_NONCE_LIFETIME_MS = 10 * 60 * 1000;
 const OAUTH_NONCE_LIFETIME_MS = 10 * 60 * 1000;
-// How long the validated identity stays readable after complete() before self-destruct.
+// How long the validated identity stays readable after a sign-in completes before self-destruct.
 const IDENTITY_LIFETIME_MS = 2 * 60 * 1000;
+const ACCESS_TOKEN_EXPIRY_SAFETY_MS = 60 * 1000;
 
 // Official Microsoft four-square logomark, as a data URI for the vendor/account avatar.
 const MICROSOFT_LOGO_URL = "data:image/svg+xml," + encodeURIComponent(
@@ -111,7 +130,7 @@ const NOT_CONFIGURED_HTML = `<!DOCTYPE html>
 <p>Please see the README.md for instructions on configuring the Entra app registration.</p>
 </body></html>`;
 
-/** Main HTTP entrypoint — used only to initiate and complete the OAuth flow. */
+/** Main HTTP entrypoint — used only to initiate and complete OAuth flows. */
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(req.url);
@@ -135,7 +154,7 @@ export default {
         return new Response(INVALID_LINK_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } });
       }
       const authUrl = buildAuthorizeUrl(
-          config, `${doId}:${begun.oauthNonce}`, begun.challenge, begun.oidcNonce);
+          config, `${doId}:${begun.oauthNonce}`, begun.challenge, begun.oidcNonce, begun.scopes);
       return Response.redirect(authUrl, 302);
     } else if (relPath === "/oauth") {
       const error = url.searchParams.get("error");
@@ -171,46 +190,67 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
       url: "https://microsoft.com",
       logo: { url: MICROSOFT_LOGO_URL },
       color: "#f3f2f1",
-      tagline: "Sign in with Microsoft",
+      tagline: "Mail, calendar, files, and Teams",
       description:
-          "Sign in with your organization's Microsoft Entra ID account. Access to Microsoft 365 " +
-          "data is granted separately, when you explicitly connect Microsoft capabilities.",
+          "Connect your organization's Microsoft 365 account to give gadgets access to Outlook " +
+          "mail and calendar, OneDrive and SharePoint files, and Teams. Build agents that triage " +
+          "email, schedule meetings, find documents, or post updates to a channel.",
       providesAuth: true,
     };
   }
 
   async connectAccount(callback: Fetcher<GatekeeperConnectCallback>,
-                       _options?: GatekeeperConnectOptions): Promise<{ url: string }> {
-    // Sign-in is the only flow, and its grant is always transient — `options.scopes` cannot widen
-    // it. Graph capability scopes will be a separate consent flow with separate storage.
+                       options?: GatekeeperConnectOptions): Promise<{ url: string }> {
     const userObjectId = this.ctx.exports.UserAccount.newUniqueId();
     const initiationNonce = generateNonce();
-    await this.ctx.exports.UserAccount.get(userObjectId).setCallback(callback, initiationNonce);
+    const authOnly = options?.scopes === "auth";
+    const scopes = authOnly
+        ? [...AUTH_SCOPES]
+        : [...new Set([...CONNECT_BASE_SCOPES,
+            ...scopesForResources(options?.resourceUrlPatterns)])];
+    await this.ctx.exports.UserAccount.get(userObjectId)
+        .setCallback(callback, initiationNonce, authOnly ? "signin" : "full", scopes);
     return { url: `${getBaseUrl(this.env)}/${userObjectId.toString()}/${initiationNonce}` };
   }
 
-  /** No gadget/agent resource types yet — the Microsoft gatekeeper currently provides auth only. */
   async getSupportedResources(): Promise<SupportedResource[]> {
-    return [];
+    return SUPPORTED_RESOURCES;
   }
 
   async getTypeScriptTypes(): Promise<string> {
-    return "// The Microsoft gatekeeper provides authentication only; no session types yet.\n";
+    return TYPES_CODE;
   }
 }
 
 export class UserAccount extends DurableObject<Env> {
+  // Dedupes concurrent refreshes within one isolate lifetime.
+  #refreshing: Promise<string | null> | undefined;
+
   #config() {
     const config = getConfig(this.env);
     if (!config) throw new Error("The Microsoft Gatekeeper is not configured.");
     return config;
   }
 
-  async setCallback(callback: Fetcher<GatekeeperConnectCallback>, initiationNonce: string) {
-    // Every sign-in account is transient; the alarm guarantees cleanup whether or not the flow
-    // completes.
+  async setCallback(callback: Fetcher<GatekeeperConnectCallback>, initiationNonce: string,
+                    mode: "signin" | "full", scopes: string[]) {
+    // The alarm guarantees cleanup when a flow never completes; a completed full-mode flow
+    // cancels it (see acceptAuthCode), a sign-in re-arms it for prompt self-destruct.
     this.ctx.storage.setAlarm(Date.now() + 3600 * 1000);
     this.ctx.storage.kv.put("callback", callback);
+    this.ctx.storage.kv.put("mode", mode);
+    this.ctx.storage.kv.put("requestedScopes", scopes);
+    this.ctx.storage.kv.put<StoredNonce>("nonce", {
+      value: initiationNonce,
+      expiresAt: Date.now() + INITIATION_NONCE_LIFETIME_MS,
+      stage: "initiation",
+    });
+  }
+
+  /** Re-arm the flow to refresh credentials or expand scopes on an existing full account. */
+  async prepareReconnect(initiationNonce: string, scopes?: string[]) {
+    this.ctx.storage.kv.put("reconnecting", true);
+    if (scopes) this.ctx.storage.kv.put("requestedScopes", scopes);
     this.ctx.storage.kv.put<StoredNonce>("nonce", {
       value: initiationNonce,
       expiresAt: Date.now() + INITIATION_NONCE_LIFETIME_MS,
@@ -223,7 +263,8 @@ export class UserAccount extends DurableObject<Env> {
    * nonce that must return inside the ID token. Returns null if invalid.
    */
   async beginOAuthFlow(initiationNonce: string)
-      : Promise<{ oauthNonce: string; challenge: string; oidcNonce: string } | null> {
+      : Promise<{ oauthNonce: string; challenge: string; oidcNonce: string;
+                  scopes: string[] } | null> {
     const stored = this.ctx.storage.kv.get<StoredNonce>("nonce");
     if (!stored || stored.stage !== "initiation" ||
         Date.now() >= stored.expiresAt || !constantTimeEqual(stored.value, initiationNonce)) {
@@ -239,7 +280,10 @@ export class UserAccount extends DurableObject<Env> {
       verifier,
       oidcNonce,
     });
-    return { oauthNonce, challenge, oidcNonce };
+    return {
+      oauthNonce, challenge, oidcNonce,
+      scopes: this.ctx.storage.kv.get<string[]>("requestedScopes") ?? [...AUTH_SCOPES],
+    };
   }
 
   async acceptAuthCode(code: string, oauthNonce: string): Promise<boolean> {
@@ -256,16 +300,16 @@ export class UserAccount extends DurableObject<Env> {
     }
 
     const config = this.#config();
-    const idToken = await exchangeCode(config, code, stored.verifier);
-    if (!idToken) {
+    const grant = await exchangeCode(config, code, stored.verifier);
+    if (!grant || !grant.idToken) {
       throw new Error("Microsoft OAuth exchange failed or returned no ID token.");
     }
 
     // Full validation: signature, issuer, audience, expiry (jose) + nonce, tid, oid (extract).
-    // Only the validated identity is stored — the ID token itself is dropped here.
+    // The identity binds the account; the raw ID token is dropped here.
     let identity: ValidatedEntraIdentity;
     try {
-      identity = await validateIdToken(config, idToken, stored.oidcNonce);
+      identity = await validateIdToken(config, grant.idToken, stored.oidcNonce);
     } catch (err) {
       logger.warn("Entra ID token validation failed", {
         event: "microsoft.idtoken.invalid", error: err,
@@ -274,23 +318,94 @@ export class UserAccount extends DurableObject<Env> {
     }
     this.ctx.storage.kv.put<ValidatedEntraIdentity>("identity", identity);
 
+    const mode = this.ctx.storage.kv.get<"signin" | "full">("mode") ?? "signin";
+    const reconnecting = this.ctx.storage.kv.get<boolean>("reconnecting");
+
+    if (mode === "full") {
+      if (!grant.refreshToken) {
+        throw new Error("Microsoft OAuth exchange returned no refresh token.");
+      }
+      this.#storeGrant(grant);
+      this.ctx.storage.deleteAlarm();
+      if (reconnecting) {
+        this.ctx.storage.kv.delete("reconnecting");
+        await callback.credentialsRestored();
+        return true;
+      }
+      try {
+        await callback.complete(this.ctx.exports.GatekeeperUserImpl(
+            { props: { userObjectId: this.ctx.id.toString() } }));
+      } catch (err) {
+        this.ctx.storage.kv.delete("refreshToken");
+        throw err;
+      }
+      return true;
+    }
+
+    // Sign-in: transient. The caller reads the identity via complete(); self-destruct after.
     try {
       await callback.complete(this.ctx.exports.GatekeeperUserImpl(
           { props: { userObjectId: this.ctx.id.toString() } }));
     } finally {
-      // Sign-in grants are transient: the caller read the identity via complete(); schedule a
-      // prompt self-destruct either way.
       this.ctx.storage.setAlarm(Date.now() + IDENTITY_LIFETIME_MS);
     }
     return true;
   }
 
-  /** The validated identity, readable briefly after the flow completes (see complete()). */
+  #storeGrant(grant: TokenGrant): void {
+    if (grant.refreshToken) this.ctx.storage.kv.put("refreshToken", grant.refreshToken);
+    this.ctx.storage.kv.put<StoredAccessToken>("accessToken", {
+      token: grant.accessToken,
+      expires: Date.now() + grant.expiresIn * 1000,
+    });
+    if (grant.scopes.length > 0) this.ctx.storage.kv.put("grantedScopes", grant.scopes);
+  }
+
+  /** The validated identity (sign-in reads it briefly; full accounts keep it). */
   getIdentity(): ValidatedEntraIdentity | undefined {
     return this.ctx.storage.kv.get<ValidatedEntraIdentity>("identity");
   }
 
+  /** The delegated scopes the token endpoint reported for this grant. */
+  getGrantedScopes(): string[] {
+    return this.ctx.storage.kv.get<string[]>("grantedScopes") ?? [];
+  }
+
+  /**
+   * A usable delegated access token (refreshing if needed), or null when the credentials are gone
+   * or can no longer be refreshed — in which case the Workshop is notified via
+   * credentialsExpired() and the account needs a reconnect.
+   */
+  async getAccessToken(): Promise<string | null> {
+    const cached = this.ctx.storage.kv.get<StoredAccessToken>("accessToken");
+    if (cached && cached.expires > Date.now() + ACCESS_TOKEN_EXPIRY_SAFETY_MS) {
+      return cached.token;
+    }
+    if (!this.#refreshing) {
+      this.#refreshing = this.#refresh().finally(() => { this.#refreshing = undefined; });
+    }
+    return this.#refreshing;
+  }
+
+  async #refresh(): Promise<string | null> {
+    const refreshToken = this.ctx.storage.kv.get<string>("refreshToken");
+    if (!refreshToken) return null;
+
+    const grant = await refreshTokens(this.#config(), refreshToken);
+    if (!grant) {
+      const callback = this.ctx.storage.kv.get<Fetcher<GatekeeperConnectCallback>>("callback");
+      callback?.credentialsExpired().catch(err =>
+        logger.warn("failed to notify credential expiry", {
+          event: "credentials.expiry.notify.failed", error: err,
+        }));
+      return null;
+    }
+    this.#storeGrant(grant);
+    return grant.accessToken;
+  }
+
   async alarm(): Promise<void> {
+    // Fires only for sign-in accounts and abandoned flows; completed full accounts cancel it.
     this.ctx.storage.deleteAll();
   }
 
@@ -311,11 +426,18 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
   }
 
   async describe(): Promise<AccountDescription> {
-    const identity = await this.#account().getIdentity();
+    const account = this.#account();
+    const [identity, scopes] = await Promise.all([
+      account.getIdentity(), account.getGrantedScopes(),
+    ]);
     return {
       displayName: identity?.displayName,
       uniqueName: identity?.email,
       avatar: { url: MICROSOFT_LOGO_URL },
+      grantedResourceUrlPatterns: SUPPORTED_RESOURCES
+          .filter(resource => scopesForResources([resource.urlPattern])
+              .every(scope => scopes.includes(scope)))
+          .map(resource => resource.urlPattern),
     };
   }
 
@@ -331,23 +453,45 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     };
   }
 
-  async ensureResources(_resourceUrlPatterns: string[]): Promise<{ url?: string }> {
-    return {};
+  async ensureResources(resourceUrlPatterns: string[]): Promise<{ url?: string }> {
+    const granted = await this.#account().getGrantedScopes();
+    const needed = scopesForResources(resourceUrlPatterns);
+    if (needed.every(scope => granted.includes(scope))) return {};
+    // Expand the grant: re-run the flow with the union of scopes (incremental consent).
+    const scopes = [...new Set([...CONNECT_BASE_SCOPES, ...granted, ...needed])];
+    const initiationNonce = generateNonce();
+    await this.#account().prepareReconnect(initiationNonce, scopes);
+    return { url: `${getBaseUrl(this.env)}/${this.ctx.props.userObjectId}/${initiationNonce}` };
   }
 
   async getSupportedResources(): Promise<SupportedResource[]> {
-    return [];
+    return SUPPORTED_RESOURCES;
   }
 
-  async getGatekeeperClassFor(_url: string): Promise<{
+  async getGatekeeperClassFor(url: string): Promise<{
     class: DurableObjectClass<Gatekeeper<any>>;
     resource: SupportedResource;
   }> {
-    throw new Error("The Microsoft gatekeeper does not provide any resources yet.");
+    const resource = resourceForUrl(url);
+    const props = { userObjectId: this.ctx.props.userObjectId };
+    switch (resource) {
+      case MAILBOX_RESOURCE:
+        return { class: this.ctx.exports.MailboxGatekeeperImpl({ props }), resource };
+      case CALENDAR_RESOURCE:
+        return { class: this.ctx.exports.CalendarGatekeeperImpl({ props }), resource };
+      case FILES_RESOURCE:
+        return { class: this.ctx.exports.FilesGatekeeperImpl({ props }), resource };
+      case TEAMS_RESOURCE:
+        return { class: this.ctx.exports.TeamsGatekeeperImpl({ props }), resource };
+      default:
+        throw new Error(`Not a supported Microsoft resource URL: ${url}`);
+    }
   }
 
   async startResourceConfigurator(_resourceUrlPattern: string): Promise<ResourceConfiguratorFrame> {
-    throw new Error("The Microsoft gatekeeper does not provide any resources yet.");
+    throw new Error(
+        "Microsoft resources connect at whole-capability granularity; bind a resource URL " +
+        "directly (e.g. https://outlook.office.com/mail/).");
   }
 
   async revoke(): Promise<void> {
@@ -355,15 +499,15 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
   }
 
   async reconnect(): Promise<{ url: string }> {
-    throw new Error(
-        "Microsoft sign-in grants are transient; sign in again instead of reconnecting.");
+    const initiationNonce = generateNonce();
+    await this.#account().prepareReconnect(initiationNonce);
+    return { url: `${getBaseUrl(this.env)}/${this.ctx.props.userObjectId}/${initiationNonce}` };
   }
 
   /**
-   * Mint a verifier representing this account. The Microsoft gatekeeper exposes no resource
-   * bindings (getGatekeeperClassFor always throws), so this verifier is never consulted by the
-   * observer flow — but getVerifier is part of the GatekeeperUser contract. Trivial verifier, no
-   * identity.
+   * Mint a verifier representing this account. All four Microsoft capabilities expose broad
+   * personal data, so their gatekeepers use the private-only observer policy (addObserver always
+   * throws) and the verifier is never consulted — but getVerifier is part of the contract.
    */
   @skipRpcValidation()
   async getVerifier(): Promise<Fetcher<GatekeeperUserVerifier>> {
@@ -371,7 +515,7 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
   }
 }
 
-// The Microsoft gatekeeper provides no resources, so no observer verification is performed.
+// Personal Microsoft data is never shared with observers, so no verification is ever performed.
 @validateRpc()
 export class MicrosoftVerifier extends WorkerEntrypoint<Env> implements GatekeeperUserVerifier {
   verify(): void {}

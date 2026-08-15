@@ -14,6 +14,14 @@
     {
       "tag": "v0",
       "new_sqlite_classes": [ "UserAccount" ]
+    },
+    {
+      // Microsoft 365 capability gatekeepers: one DO class per resource type.
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "MailboxGatekeeperImpl", "CalendarGatekeeperImpl",
+        "FilesGatekeeperImpl", "TeamsGatekeeperImpl"
+      ]
     }
   ],
   "observability": {
