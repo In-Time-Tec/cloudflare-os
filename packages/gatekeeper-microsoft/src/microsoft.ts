@@ -226,7 +226,8 @@ export default {
       } catch {
         return new Response("Not Found", { status: 404 });
       }
-      return mirror.acceptSocket(token);
+      // Forward the raw upgrade request: WebSocket responses only survive the fetch path.
+      return mirror.fetch(req);
     } else if (relPath === "/oauth") {
       const error = url.searchParams.get("error");
       if (error) {

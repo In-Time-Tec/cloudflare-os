@@ -387,7 +387,12 @@ export class ChatMirror extends DurableObject<Env> {
     return true;
   }
 
-  async acceptSocket(token: string): Promise<Response> {
+  /**
+   * WebSocket upgrades must be produced by a fetch handler (a WebSocket-bearing Response cannot
+   * cross an RPC method boundary), so the Worker forwards the raw upgrade request here.
+   */
+  async fetch(request: Request): Promise<Response> {
+    const token = new URL(request.url).searchParams.get("token") ?? "";
     if (!await this.consumeSocketToken(token)) {
       return new Response("Invalid or expired socket token", { status: 403 });
     }
