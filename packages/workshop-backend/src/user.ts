@@ -1,6 +1,6 @@
 import { RpcStub } from "capnweb";
 import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, BlueprintMetadata, BlueprintLibrarySummary, BlueprintSource, BlueprintUserSummary, BLUEPRINT_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, BlueprintOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
-import { AuthenticatedIdentity, Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
+import { AuthenticatedIdentity, ConversationsApi, Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
 import { shouldAutoProvisionAccount, ambientGatekeeperMode } from "./provisioning-policy.js";
 import { CloudflareGatekeeperUser } from "@gadgets/workshop-shared/cloudflare-gatekeeper";
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
@@ -1587,6 +1587,31 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let record = this.storage.connectedAccounts.get(accountId);
     if (!record) throw new Error("No such account.");
     return record.account.reconnect();
+  }
+
+  /**
+   * The conversations capability from the first connected account whose gatekeeper provides one
+   * (see ConversationsApi). Accounts are probed in id order; non-providers return null/undefined
+   * and failures are skipped so one broken account can't break the surface.
+   */
+  async getConversationsApi(): Promise<RpcStub<ConversationsApi> | null> {
+    for (const record of this.#connectedAccountRecords()) {
+      if (!areCredentialsValid(record)) continue;
+      try {
+        // Optional methods can't be invoked through the mapped stub type directly; view the stub
+        // through a plain shape marking the method present (same pattern as SingletonAccountStub).
+        const account = record.account as unknown as
+            { getConversationsApi?: () => Promise<RpcStub<ConversationsApi> | null> };
+        if (!account.getConversationsApi) continue;
+        const api = await account.getConversationsApi();
+        if (api) return api;
+      } catch (err) {
+        logger.warn("conversations probe failed for account", {
+          event: "conversations.probe.failed", accountId: record.id, error: err,
+        });
+      }
+    }
+    return null;
   }
 
   async startResourceConfigurator(

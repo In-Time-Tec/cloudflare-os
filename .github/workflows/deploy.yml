@@ -42,6 +42,10 @@ jobs:
       # Optional: the deployment admin's Entra object id; folded into ADMINS as
       # "https://login.microsoftonline.com/<tenant>/v2.0:<oid>".
       MICROSOFT_ADMIN_OID: ${{ secrets.MICROSOFT_ADMIN_OID }}
+      # Web Push (conversations). Optional; without them push is disabled.
+      VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
       CI: "true"
       NO_COLOR: "1"
     steps:

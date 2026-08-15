@@ -468,6 +468,13 @@ export interface AuthenticatedApi extends RpcTarget {
   getAvatar(userId: string): Promise<Uint8Array | null>;
 
   /**
+   * The human-to-human conversations capability from the first connected account that provides
+   * one (see `ConversationsApi` in gatekeeper.ts), or null when no connected account hosts
+   * conversations. The stub acts as the signed-in user directly.
+   */
+  getConversationsApi(): Promise<RpcStub<import("./gatekeeper.js").ConversationsApi> | null>;
+
+  /**
    * Open an existing gadget.
    *
    * If `shareKey` is provided, the server redeems it before opening, adding the caller as a

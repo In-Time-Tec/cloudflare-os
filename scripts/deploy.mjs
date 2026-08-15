@@ -215,6 +215,10 @@ export function getDeploymentSecrets(config, environment = process.env) {
       ["MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET", "MICROSOFT_TENANT_ID"];
   const present = microsoftNames.filter((name) => environment[name]);
   const microsoft = {};
+  // Web Push credentials for the conversations feature; optional (no push until configured).
+  for (const name of ["VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT"]) {
+    if (environment[name]) microsoft[name] = environment[name];
+  }
   if (present.length === microsoftNames.length) {
     for (const name of microsoftNames) {
       microsoft[name.slice("MICROSOFT_".length)] = environment[name];

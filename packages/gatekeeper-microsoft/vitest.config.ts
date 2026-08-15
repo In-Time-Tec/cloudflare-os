@@ -21,6 +21,7 @@ export default defineConfig({
           TEST_CALENDAR: { className: "CalendarGatekeeperImpl", useSQLite: true },
           TEST_FILES: { className: "FilesGatekeeperImpl", useSQLite: true },
           TEST_TEAMS: { className: "TeamsGatekeeperImpl", useSQLite: true },
+          TEST_CHAT_MIRROR: { className: "ChatMirror", useSQLite: true },
         },
       },
     }),

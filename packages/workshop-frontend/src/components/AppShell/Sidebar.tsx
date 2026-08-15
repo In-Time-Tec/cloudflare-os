@@ -19,6 +19,7 @@ import {
   SidebarWorkspacesProvider,
   SidebarWorkspacesLists,
 } from './SidebarWorkspaces'
+import SidebarConversations from '../../conversations/SidebarConversations'
 import SidebarUtilityStrip from './SidebarUtilityStrip'
 
 /**
@@ -210,6 +211,7 @@ export default function Sidebar({
         {/* Scrolling middle: only the Favorites / Recent workspaces / Recent blueprints lists.
             min-h-0 lets flex children compute scroll height correctly. */}
         <div className="sidebar-scroll mt-1 min-h-0 flex-1 overflow-y-auto">
+          <SidebarConversations collapsed={collapsed} />
           <SidebarWorkspacesLists collapsed={collapsed} />
         </div>
       </SidebarWorkspacesProvider>

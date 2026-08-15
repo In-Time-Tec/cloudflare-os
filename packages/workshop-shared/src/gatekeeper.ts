@@ -128,6 +128,91 @@ export type AppUiContext = {
   isAdmin: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Conversations: provider-neutral human-to-human messaging surface.
+//
+// A gatekeeper account whose external service hosts the user's real conversations (e.g. Microsoft
+// Teams) may expose them to the Workshop UI through this contract. The provider stays the source
+// of truth for all messages; the Workshop renders and relays. This surface is for the HUMAN
+// signed-in user acting directly — it is separate from agent sessions and does not use the
+// approval queue.
+
+/** Addresses one conversation within the providing account. */
+export type ConversationRef =
+  | { kind: "chat"; chatId: string }
+  | { kind: "channel"; teamId: string; channelId: string };
+
+/** One conversation for the sidebar/list UI. */
+export type ConversationSummary = {
+  ref: ConversationRef;
+  /** Display title: the other person's name (1:1), group topic, or channel name. */
+  title: string;
+  /** For channels, the containing team's name. */
+  subtitle?: string;
+  /** Participants (bounded); used for avatars and 1:1 naming. */
+  members: { name: string; userId?: string }[];
+  lastMessage?: { from?: string; preview: string; created?: Date };
+  lastActivity?: Date;
+};
+
+/** One rendered message. `html` is provider HTML already sanitized by the gatekeeper. */
+export type ConversationMessage = {
+  id: string;
+  from: string;
+  fromUserId?: string;
+  /** True when the signed-in user sent it. */
+  fromSelf: boolean;
+  created?: Date;
+  html: string;
+};
+
+/** A live event pushed to subscribed Workshop tabs over the conversations socket. */
+export type ConversationEvent = {
+  kind: "message";
+  ref: ConversationRef;
+  message: ConversationMessage;
+};
+
+/**
+ * The human-facing conversations capability of one connected account. Obtained via
+ * `GatekeeperUser.getConversationsApi()`; all methods act as the signed-in user directly.
+ */
+export interface ConversationsApi extends RpcTarget {
+  /** People conversations (1:1 and group chats), most recently active first. */
+  listConversations(): Promise<ConversationSummary[]>;
+
+  /** Channel conversations the user can post to, grouped by team via `subtitle`. */
+  listChannels(): Promise<ConversationSummary[]>;
+
+  /** Recent messages, newest LAST (display order). `before` pages further back. */
+  getMessages(ref: ConversationRef, options?: { before?: string })
+      : Promise<{ messages: ConversationMessage[]; hasMore: boolean }>;
+
+  /** Send a plain-text message as the user. Returns the provider's message id. */
+  sendMessage(ref: ConversationRef, text: string): Promise<{ id: string }>;
+
+  /** Reply in a channel thread as the user. */
+  replyToMessage(ref: ConversationRef & { kind: "channel" }, messageId: string, text: string)
+      : Promise<{ id: string }>;
+
+  /** A participant's avatar image bytes (small), or null when none exists. */
+  getAvatar(userId: string): Promise<Uint8Array | null>;
+
+  /**
+   * The WebSocket URL for live ConversationEvents, carrying a short-lived capability token.
+   * Also returns the push public key so the client can register Web Push subscriptions.
+   */
+  getLiveEndpoint(): Promise<{ webSocketUrl: string; pushPublicKey?: string }>;
+
+  /** Register/refresh this browser's Web Push subscription for message notifications. */
+  registerPush(subscription: { endpoint: string; keys: { p256dh: string; auth: string } })
+      : Promise<void>;
+
+  /** Remove this browser's Web Push subscription. */
+  unregisterPush(endpoint: string): Promise<void>;
+}
+
+
 // The agent catalog is bounded discovery metadata a gatekeeper exposes via
 // Gatekeeper.getAgentCatalog() so the agent can see *what* is reachable through a session (e.g. the
 // titles of the Context Library collections it can search) without first reading everything. It is
@@ -665,6 +750,12 @@ export interface GatekeeperUser extends WorkerEntrypoint {
    * support auth or no verified identity is available.
    */
   getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null>;
+
+  /**
+   * For accounts whose provider hosts the user's human conversations, returns the live
+   * conversations capability (see `ConversationsApi`). Absent/null for other gatekeepers.
+   */
+  getConversationsApi?(): Promise<RpcStub<ConversationsApi> | null>;
 
   /** Get a `GatekeeperUserVerifier` representing this user. */
   getVerifier(): Promise<Fetcher<GatekeeperUserVerifier>>;

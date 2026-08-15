@@ -16,3 +16,4 @@ export * as calendar from "./calendar.js";
 export * as files from "./files.js";
 export * as teams from "./teams.js";
 export * as profile from "./profile.js";
+export * as subscriptions from "./subscriptions.js";

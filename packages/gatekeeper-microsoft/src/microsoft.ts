@@ -17,7 +17,8 @@
 import { WorkerEntrypoint, DurableObject, RpcStub, RpcTarget } from "cloudflare:workers";
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
 import {
-  AuthenticatedIdentity, GatekeeperVendor as GatekeeperVendorIface, Gatekeeper,
+  AuthenticatedIdentity, ConversationMessage, ConversationRef, ConversationsApi,
+  ConversationSummary, GatekeeperVendor as GatekeeperVendorIface, Gatekeeper,
   GatekeeperUser as GatekeeperUserIface, GatekeeperUserVerifier, VendorDescription,
   GatekeeperConnectCallback, GatekeeperConnectOptions, AccountDescription,
   SupportedResource, ResourceConfiguratorFrame, stripTrailingSlashes,
@@ -41,6 +42,7 @@ import TEAMS_CONFIGURATOR_HTML from "./generated/teams-configurator-ui.txt";
 export {
   MailboxGatekeeperImpl, CalendarGatekeeperImpl, FilesGatekeeperImpl, TeamsGatekeeperImpl,
 } from "./sessions.js";
+export { ChatMirror } from "./chat-mirror.js";
 
 const logger = obsContext.createLogger({
   component: "gatekeeper.microsoft", vendorId: VENDOR_ID,
@@ -99,6 +101,9 @@ type Env = Cloudflare.Env & {
   CLIENT_ID?: string;
   CLIENT_SECRET?: string;
   TENANT_ID?: string;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  VAPID_SUBJECT?: string;
 };
 
 function getBaseUrl(env: Env) {
@@ -160,6 +165,68 @@ export default {
       const authUrl = buildAuthorizeUrl(
           config, `${doId}:${begun.oauthNonce}`, begun.challenge, begun.oidcNonce, begun.scopes);
       return Response.redirect(authUrl, 302);
+    } else if (relPath === "/notifications") {
+      // Graph webhook. Validation handshake first: echo validationToken as text/plain.
+      const validationToken = url.searchParams.get("validationToken");
+      if (validationToken !== null) {
+        return new Response(validationToken, {
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        });
+      }
+      if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+      let body: {
+        value?: {
+          subscriptionId?: string; clientState?: string; resource?: string;
+          lifecycleEvent?: string; changeType?: string;
+        }[];
+      };
+      try {
+        body = await req.json();
+      } catch {
+        return new Response("Bad Request", { status: 400 });
+      }
+      // Ack fast; process each notification against its mirror (clientState carries the DO id).
+      ctx.waitUntil((async () => {
+        for (const notification of body.value ?? []) {
+          const clientState = notification.clientState ?? "";
+          const dotIdx = clientState.indexOf(".");
+          if (dotIdx <= 0) continue;
+          const mirrorId = clientState.slice(0, dotIdx);
+          let mirror;
+          try {
+            mirror = ctx.exports.ChatMirror.get(ctx.exports.ChatMirror.idFromString(mirrorId));
+          } catch {
+            continue;
+          }
+          if (!await mirror.verifyClientState(clientState)) continue;
+          if (notification.lifecycleEvent) {
+            if (notification.lifecycleEvent === "subscriptionRemoved"
+                || notification.lifecycleEvent === "reauthorizationRequired") {
+              await mirror.dropSubscription(notification.subscriptionId ?? "");
+            }
+            continue;
+          }
+          if (notification.resource) {
+            await mirror.ingest(notification.resource);
+          }
+        }
+      })());
+      return new Response("Accepted", { status: 202 });
+    } else if (relPath === "/ws") {
+      // Live conversations socket: ?mirror=<id>&token=<one-time token from getLiveEndpoint()>.
+      const mirrorId = url.searchParams.get("mirror");
+      const token = url.searchParams.get("token");
+      if (!mirrorId || !token) return new Response("Bad Request", { status: 400 });
+      if (req.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        return new Response("Expected WebSocket", { status: 426 });
+      }
+      let mirror;
+      try {
+        mirror = ctx.exports.ChatMirror.get(ctx.exports.ChatMirror.idFromString(mirrorId));
+      } catch {
+        return new Response("Not Found", { status: 404 });
+      }
+      return mirror.acceptSocket(token);
     } else if (relPath === "/oauth") {
       const error = url.searchParams.get("error");
       if (error) {
@@ -508,6 +575,13 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
   }
 
   async revoke(): Promise<void> {
+    try {
+      const mirror = this.ctx.exports.ChatMirror.get(
+          this.ctx.exports.ChatMirror.idFromName(this.ctx.props.userObjectId));
+      await mirror.destroy();
+    } catch {
+      // best-effort; the mirror is rebuildable state
+    }
     await this.#account().revoke();
   }
 
@@ -515,6 +589,26 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     const initiationNonce = generateNonce();
     await this.#account().prepareReconnect(initiationNonce);
     return { url: `${getBaseUrl(this.env)}/${this.ctx.props.userObjectId}/${initiationNonce}` };
+  }
+
+  /**
+   * The human conversations capability. Available once the account has a Teams grant; the mirror
+   * DO is named by this account's UserAccount id so reconnects find the same mirror.
+   */
+  @skipRpcValidation()
+  async getConversationsApi(): Promise<RpcStub<ConversationsApi> | null> {
+    const account = this.#account();
+    const [identity, scopes] = await Promise.all([
+      account.getIdentity(), account.getGrantedScopes(),
+    ]);
+    if (!identity || !scopes.includes("Chat.ReadWrite")) return null;
+    const mirrorDoId = this.ctx.exports.ChatMirror.idFromName(this.ctx.props.userObjectId);
+    const mirror = this.ctx.exports.ChatMirror.get(mirrorDoId);
+    await mirror.configure(this.ctx.props.userObjectId, identity.oid);
+    // @ts-expect-error Cap'n Web RPC stubs and native RPC targets are compatible but the type
+    //     system doesn't know this.
+    return new ConversationsApiImpl(mirror, mirrorDoId.toString(), getBaseUrl(this.env),
+        (this.env as Env).VAPID_PUBLIC_KEY);
   }
 
   /**
@@ -530,6 +624,64 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
 
 /** The configurator UIs need no gatekeeper RPCs; this empty capability satisfies the frame contract. */
 class MicrosoftConfiguratorUI extends RpcTarget {}
+
+/**
+ * The human conversations capability for one connected account: a thin RpcTarget over the
+ * account's ChatMirror DO. All operations act as the signed-in user; nothing here touches the
+ * agent approval queue.
+ */
+class ConversationsApiImpl extends RpcTarget implements ConversationsApi {
+  constructor(private mirror: DurableObjectStub<import("./chat-mirror.js").ChatMirror>,
+              private mirrorId: string,
+              private baseUrl: string,
+              private pushPublicKey: string | undefined) {
+    super();
+  }
+
+  listConversations(): Promise<ConversationSummary[]> {
+    return this.mirror.listConversations();
+  }
+
+  listChannels(): Promise<ConversationSummary[]> {
+    return this.mirror.listChannels();
+  }
+
+  getMessages(ref: ConversationRef, options?: { before?: string })
+      : Promise<{ messages: ConversationMessage[]; hasMore: boolean }> {
+    return this.mirror.getMessages(ref, options);
+  }
+
+  sendMessage(ref: ConversationRef, text: string): Promise<{ id: string }> {
+    return this.mirror.sendMessage(ref, text);
+  }
+
+  replyToMessage(ref: ConversationRef & { kind: "channel" }, messageId: string, text: string)
+      : Promise<{ id: string }> {
+    return this.mirror.replyToMessage(ref, messageId, text);
+  }
+
+  getAvatar(userId: string): Promise<Uint8Array | null> {
+    return this.mirror.getAvatar(userId);
+  }
+
+  async getLiveEndpoint(): Promise<{ webSocketUrl: string; pushPublicKey?: string }> {
+    const token = await this.mirror.mintSocketToken();
+    const wsBase = this.baseUrl.replace(/^http/, "ws");
+    return {
+      webSocketUrl: `${wsBase}/ws?mirror=${this.mirrorId}&token=${token}`,
+      pushPublicKey: this.pushPublicKey,
+    };
+  }
+
+  registerPush(subscription: { endpoint: string; keys: { p256dh: string; auth: string } })
+      : Promise<void> {
+    return this.mirror.registerPush(subscription);
+  }
+
+  unregisterPush(endpoint: string): Promise<void> {
+    return this.mirror.unregisterPush(endpoint);
+  }
+}
 
 // Personal Microsoft data is never shared with observers, so no verification is ever performed.
 @validateRpc()

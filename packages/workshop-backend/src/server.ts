@@ -15,7 +15,7 @@ import { deploymentOutputForBlueprint, listFormatOffers, readAdminConfig } from 
 // Re-export the optional-feature Durable Objects + entrypoints so they can be bound in wrangler.
 export { PendingLogin, LoginConnectCallbackImpl };
 export { IdentityDirectory };
-import { GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
+import { ConversationsApi, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
 import { LanguageModelGatekeeper } from "./ai-models";
 import { getManagedAiConfig } from "./ai-gateway.js";
 import { AdminSettings, AdminApiImpl } from "./admin-settings.js";
@@ -211,6 +211,9 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     } else {
       await this.env.AVATARS.delete(userId);
     }
+  }
+  async getConversationsApi(): Promise<RpcStub<ConversationsApi> | null> {
+    return this.#user.getConversationsApi() as unknown as Promise<RpcStub<ConversationsApi> | null>;
   }
   async getAvatar(userId: string): Promise<Uint8Array | null> {
     let result = await this.env.AVATARS.get(userId, "arrayBuffer");

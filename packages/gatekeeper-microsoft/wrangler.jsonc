@@ -22,6 +22,11 @@
         "MailboxGatekeeperImpl", "CalendarGatekeeperImpl",
         "FilesGatekeeperImpl", "TeamsGatekeeperImpl"
       ]
+    },
+    {
+      // Teams-backed human conversations: one mirror DO per connected account.
+      "tag": "v2",
+      "new_sqlite_classes": [ "ChatMirror" ]
     }
   ],
   "observability": {

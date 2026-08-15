@@ -658,6 +658,12 @@
             "TeamsGatekeeperImpl"
           ],
           "tag": "v1"
+        },
+        {
+          "new_sqlite_classes": [
+            "ChatMirror"
+          ],
+          "tag": "v2"
         }
       ],
       "modules": [

@@ -35,3 +35,17 @@ export function getProfile(transport: GraphTransport)
         jobTitle: dto.jobTitle ?? undefined,
       }));
 }
+
+/** Cap for profile photos; Graph's 48x48 variant is a few KB. */
+export const MAX_PHOTO_BYTES = 128 * 1024;
+
+/**
+ * Fetch a user's 48x48 profile photo as raw bytes, or null when the user has none (404).
+ * Requires User.ReadBasic.All for other users.
+ */
+export function getUserPhoto(transport: GraphTransport, userId: string)
+    : Effect.Effect<Uint8Array | null, GraphError> {
+  return transport.getBytes(["users", userId, "photos", "48x48", "$value"], MAX_PHOTO_BYTES).pipe(
+      Effect.map((bytes): Uint8Array | null => bytes),
+      Effect.catchTag("GraphNotFoundError", () => Effect.succeed(null)));
+}
