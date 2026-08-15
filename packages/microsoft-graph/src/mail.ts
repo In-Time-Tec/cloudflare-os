@@ -29,8 +29,8 @@ const MessageDto = Schema.Struct({
 const MessageWithBodyDto = Schema.Struct({
   ...MessageDto.fields,
   body: Schema.optional(Schema.NullOr(Schema.Struct({
-    contentType: Schema.optional(Schema.String),
-    content: Schema.optional(Schema.String),
+    contentType: Schema.optional(Schema.NullOr(Schema.String)),
+    content: Schema.optional(Schema.NullOr(Schema.String)),
   }))),
 });
 

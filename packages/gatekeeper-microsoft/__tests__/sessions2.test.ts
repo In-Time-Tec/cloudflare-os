@@ -168,6 +168,71 @@ describe("mail sending via approval queue", () => {
   });
 });
 
+describe("placeholder-id chaining", () => {
+  it("resolves a pending draft id to the real id created by the earlier action", async () => {
+    const requests = stubGraph({
+      "me/messages": { id: "real-draft-42" },
+      "me/messages/real-draft-42/send": null,
+    });
+    const accountId = await seedAccount("mail2-chain");
+    const gk = env.TEST_MAILBOX.getByName("mail2-chain");
+    await primeGatekeeper(gk, accountId);
+    const { queue, actions } = fakeApprovalQueue();
+
+    await runInDurableObject(gk, async instance => {
+      const session = await instance.startSession(queue);
+      const pending = await session.createDraft(["a@x.example"], "Chained", "B");
+      // The agent chains sendDraft on the placeholder id before anything is approved.
+      await session.sendDraft(pending.id);
+      // Approve in submission order: create first, then send.
+      await instance.applyAction(actions[0].id);
+      await instance.applyAction(actions[1].id);
+    });
+    const posts = requests.filter(r => r.method === "POST").map(r => r.url.pathname);
+    expect(posts).toEqual(["/v1.0/me/messages", "/v1.0/me/messages/real-draft-42/send"]);
+  });
+
+  it("fails with a clear message when the referenced action was never applied", async () => {
+    stubGraph({});
+    const accountId = await seedAccount("mail2-chain-missing");
+    const gk = env.TEST_MAILBOX.getByName("mail2-chain-missing");
+    await primeGatekeeper(gk, accountId);
+    const { queue, actions } = fakeApprovalQueue();
+
+    await runInDurableObject(gk, async instance => {
+      const session = await instance.startSession(queue);
+      await session.sendDraft("pending-draft-999");
+      await expect(instance.applyAction(actions[0].id))
+          .rejects.toThrow(/has not been created yet/);
+    });
+  });
+
+  it("resolves a pending folder id for a chained upload", async () => {
+    const requests = stubGraph({
+      "me/drive/items/root/children": { id: "real-folder-7", name: "Reports", folder: {} },
+      "me/drive/items/real-folder-7:/notes.md:/content":
+          { id: "up1", name: "notes.md", file: {} },
+    });
+    const accountId = await seedAccount("files2-chain");
+    const gk = env.TEST_FILES.getByName("files2-chain");
+    await primeGatekeeper(gk, accountId);
+    const { queue, actions } = fakeApprovalQueue();
+
+    await runInDurableObject(gk, async instance => {
+      const session = await instance.startSession(queue);
+      const folder = await session.createFolder(null, "root", "Reports");
+      await session.uploadFile(null, folder.id, "notes.md", "# hi");
+      await instance.applyAction(actions[0].id);
+      await instance.applyAction(actions[1].id);
+    });
+    const writes = requests.filter(r => r.method !== "GET").map(r => r.url.pathname);
+    expect(writes).toEqual([
+      "/v1.0/me/drive/items/root/children",
+      "/v1.0/me/drive/items/real-folder-7:/notes.md:/content",
+    ]);
+  });
+});
+
 describe("calendar management via approval queue", () => {
   it("stages update, cancel, and respond; applies each through Graph", async () => {
     const requests = stubGraph({

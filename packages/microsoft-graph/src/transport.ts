@@ -168,6 +168,10 @@ async function mapFailure(response: Response, resource: string): Promise<GraphEr
     case 429:
     case 503:
       return new GraphThrottledError({ retryAfterMs: retryAfterMs(response), requestId });
+    case 400:
+      // A rejected request shape is contract drift on our side, not provider downtime; surfacing
+      // it as a decode-class failure keeps callers from retrying it forever.
+      return new GraphDecodeError({ detail: "Graph rejected the request (400)", requestId });
     default:
       return new GraphUnavailableError({ status: response.status, requestId });
   }

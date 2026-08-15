@@ -43,16 +43,17 @@ const ChannelPageDto = Schema.Struct({
 const ChatMessageDto = Schema.Struct({
   id: Schema.String,
   messageType: Schema.optional(Schema.String),
-  createdDateTime: Schema.optional(Schema.String),
+  createdDateTime: Schema.optional(Schema.NullOr(Schema.String)),
   from: Schema.optional(Schema.NullOr(Schema.Struct({
     user: Schema.optional(Schema.NullOr(Schema.Struct({
       displayName: Schema.optional(Schema.NullOr(Schema.String)),
     }))),
   }))),
-  body: Schema.optional(Schema.Struct({
-    contentType: Schema.optional(Schema.String),
-    content: Schema.optional(Schema.String),
-  })),
+  // System and deleted messages carry explicit nulls here.
+  body: Schema.optional(Schema.NullOr(Schema.Struct({
+    contentType: Schema.optional(Schema.NullOr(Schema.String)),
+    content: Schema.optional(Schema.NullOr(Schema.String)),
+  }))),
 });
 
 const ChatMessagePageDto = Schema.Struct({
@@ -138,7 +139,8 @@ export function listChats(transport: GraphTransport, options?: { top?: number })
     : Effect.Effect<ChatPage, GraphError> {
   return Effect.map(
       transport.get(["me", "chats"], ChatPageDto, {
-        query: { top: options?.top ?? 25, orderby: "lastUpdatedDateTime desc" },
+        // The only $orderby the list-chats API supports (400 otherwise).
+        query: { top: options?.top ?? 25, orderby: "lastMessagePreview/createdDateTime desc" },
       }),
       toChatPage);
 }

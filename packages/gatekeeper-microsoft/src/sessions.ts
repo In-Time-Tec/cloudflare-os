@@ -107,6 +107,28 @@ abstract class MicrosoftGatekeeperBase<Action>
     return new PendingActionStore<Action>(this.ctx.storage.kv);
   }
 
+  /**
+   * Resolve an id that may be a placeholder from an earlier staged action ("pending-draft-3",
+   * "pending-event-1", ...) to the real provider id recorded when that action was applied.
+   * Sessions hand agents placeholder ids at submit time (writes are not simulated); an agent that
+   * chains a follow-up action on one still works because the follow-up is itself staged, and by
+   * the time it is applied the referenced action has been applied and its real id recorded.
+   * Throws if the referenced action was denied or not yet applied.
+   */
+  protected resolveId(idOrPlaceholder: string, resultKey: string): string {
+    const match = /^pending-[a-z]+-(\d+)$/.exec(idOrPlaceholder);
+    if (!match) return idOrPlaceholder;
+    const applied = this.ctx.storage.kv.get<Record<string, string>>(
+        `applied:action:${match[1]}`);
+    const real = applied?.[resultKey];
+    if (!real) {
+      throw new Error(
+          `The referenced item (${idOrPlaceholder}) has not been created yet - its approval is ` +
+          `still pending or was denied. Approve it first, then retry.`);
+    }
+    return real;
+  }
+
   async getTypeScriptTypes(): Promise<string> {
     return TYPES_CODE;
   }
@@ -211,7 +233,8 @@ export class MailboxGatekeeperImpl extends MicrosoftGatekeeperBase<MailAction>
         }));
         break;
       case "sendDraft":
-        await runGraph(mail.sendDraft(transport, action.draftId));
+        await runGraph(mail.sendDraft(transport,
+            this.resolveId(action.draftId, "draftId")));
         break;
       case "reply":
         await runGraph(mail.replyToMessage(transport, action.messageId, action.body));
@@ -521,7 +544,8 @@ export class CalendarGatekeeperImpl
         break;
       }
       case "updateEvent":
-        await runGraph(calendar.updateEvent(transport, action.eventId, {
+        await runGraph(calendar.updateEvent(transport,
+            this.resolveId(action.eventId, "eventId"), {
           subject: action.subject,
           start: action.startIso ? new Date(action.startIso) : undefined,
           end: action.endIso ? new Date(action.endIso) : undefined,
@@ -529,14 +553,15 @@ export class CalendarGatekeeperImpl
           location: action.location,
           attendees: action.attendees,
         }));
-        result = { eventId: action.eventId };
+        result = { eventId: this.resolveId(action.eventId, "eventId") };
         break;
       case "cancelEvent":
-        await runGraph(calendar.deleteEvent(transport, action.eventId));
+        await runGraph(calendar.deleteEvent(transport,
+            this.resolveId(action.eventId, "eventId")));
         break;
       case "respondToEvent":
-        await runGraph(calendar.respondToEvent(transport, action.eventId,
-            action.response, action.comment));
+        await runGraph(calendar.respondToEvent(transport,
+            this.resolveId(action.eventId, "eventId"), action.response, action.comment));
         break;
     }
     this.ctx.storage.kv.put(`applied:action:${actionId}`, { type: action.type, ...result });
@@ -724,19 +749,21 @@ export class FilesGatekeeperImpl extends MicrosoftGatekeeperBase<FilesAction>
       }
       case "uploadFile": {
         const created = await runGraph(files.uploadFile(transport,
-            fileRef(action.driveId), action.parentFolderId, action.name,
-            action.content, action.contentType));
+            fileRef(action.driveId), this.resolveId(action.parentFolderId, "itemId"),
+            action.name, action.content, action.contentType));
         result = { itemId: created.id };
         break;
       }
       case "replaceFileContent": {
         const updated = await runGraph(files.replaceFileContent(transport,
-            fileRef(action.driveId), action.itemId, action.content, action.contentType));
+            fileRef(action.driveId), this.resolveId(action.itemId, "itemId"),
+            action.content, action.contentType));
         result = { itemId: updated.id };
         break;
       }
       case "deleteFile":
-        await runGraph(files.deleteItem(transport, fileRef(action.driveId), action.itemId));
+        await runGraph(files.deleteItem(transport, fileRef(action.driveId),
+            this.resolveId(action.itemId, "itemId")));
         break;
     }
     this.ctx.storage.kv.put(`applied:action:${actionId}`, { type: action.type, ...result });
@@ -893,7 +920,10 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
   async replaceFileContent(driveId: string | null, itemId: string, content: string,
                            contentType?: string): Promise<FileEntry> {
     // Name the file in the approval so the user reviews "replace notes.md", not an opaque id.
-    const entry = await runGraph(files.getItem(this.transport, fileRef(driveId), itemId));
+    // A placeholder id (pending upload) can't be looked up yet; fall back to the id itself.
+    const entry = itemId.startsWith("pending-")
+        ? { id: itemId, name: itemId, kind: "file" as const, driveId: driveId ?? undefined }
+        : await runGraph(files.getItem(this.transport, fileRef(driveId), itemId));
     const actionId = this.actions.submit({
       type: "replaceFileContent", driveId, itemId, content,
       contentType: contentType ?? "text/plain",
@@ -912,7 +942,9 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
   }
 
   async deleteFile(driveId: string | null, itemId: string): Promise<void> {
-    const entry = await runGraph(files.getItem(this.transport, fileRef(driveId), itemId));
+    const entry = itemId.startsWith("pending-")
+        ? { name: itemId }
+        : await runGraph(files.getItem(this.transport, fileRef(driveId), itemId));
     const actionId = this.actions.submit({ type: "deleteFile", driveId, itemId });
     await this.approvalQueue.submitAction(actionId, {
       title: `Delete: ${entry.name}`,
@@ -975,7 +1007,7 @@ export class TeamsGatekeeperImpl extends MicrosoftGatekeeperBase<TeamsAction>
       result = { chatId: created.id };
     } else {
       const ref = action.type === "postToChat"
-          ? { kind: "chat" as const, chatId: action.chatId }
+          ? { kind: "chat" as const, chatId: this.resolveId(action.chatId, "chatId") }
           : { kind: "channel" as const, teamId: action.teamId, channelId: action.channelId };
       const sent = await runGraph(teams.sendMessage(transport, ref, action.text));
       result = { messageId: sent.id };

@@ -205,8 +205,8 @@ describe("files writes and sharing", () => {
 });
 
 describe("teams chats", () => {
-  it("pages chats through the validated continuation", async () => {
-    const { transport } = canned({
+  it("pages chats using the only $orderby the API supports", async () => {
+    const { transport, requests } = canned({
       "me/chats": {
         value: [{ id: "c1", chatType: "oneOnOne" }],
         "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/chats?$skip=25",
@@ -215,6 +215,26 @@ describe("teams chats", () => {
     const page = await Effect.runPromise(teams.listChats(transport));
     expect(page.chats).toHaveLength(1);
     expect(page.next).toBeDefined();
+    // lastUpdatedDateTime is NOT a supported orderby and 400s in production.
+    expect(new URL(requests[0].url).searchParams.get("$orderby"))
+        .toBe("lastMessagePreview/createdDateTime desc");
+  });
+
+  it("decodes system and deleted messages carrying explicit nulls", async () => {
+    const { transport } = canned({
+      "me/chats/c1/messages": { value: [
+        { id: "m1", messageType: "message", from: null,
+          body: { contentType: "text", content: null } },
+        { id: "m2", messageType: "message", createdDateTime: null, body: null },
+        { id: "m3", messageType: "message", from: { user: { displayName: "Bob" } },
+          body: { contentType: "html", content: "<p>hi</p>" } },
+      ] },
+    });
+    const page = await Effect.runPromise(
+        teams.listMessages(transport, { kind: "chat", chatId: "c1" }));
+    expect(page.messages).toHaveLength(3);
+    expect(page.messages[0]).toMatchObject({ from: "unknown", content: "" });
+    expect(page.messages[2]).toMatchObject({ from: "Bob", content: "<p>hi</p>" });
   });
 
   it("creates 1:1 and group chats with bound members", async () => {
