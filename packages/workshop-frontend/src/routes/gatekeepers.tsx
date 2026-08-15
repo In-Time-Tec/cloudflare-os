@@ -1,6 +1,8 @@
 import { logRpcFailure } from '../rpcErrors'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useAddableGatekeepers, useGatekeeperVendors, addableGatekeepersKey } from '../query/hooks'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import {
   MagnifyingGlass,
@@ -19,7 +21,6 @@ import {
   SupportedResource,
   VendorDescription,
 } from '@gadgets/workshop-shared/gatekeeper'
-import { GatekeeperVendorInfo } from '@gadgets/workshop-shared/api'
 import { useDocumentTitle } from '../useDocumentTitle'
 import { AccountsSubscriberAdapter } from '../accountsSubscriber'
 import PageChrome from '../components/AppShell/PageChrome'
@@ -266,15 +267,17 @@ function ConnectorsPage() {
     if (typeof window === 'undefined') return 'grid'
     return localStorage.getItem('gatekeepers-view') === 'list' ? 'list' : 'grid'
   })
+  const queryClient = useQueryClient()
+  const { data: addable = [] } = useAddableGatekeepers()
+  const { data: rawVendors, isError: vendorsError } = useGatekeeperVendors()
+  const vendors = useMemo(() =>
+    (rawVendors ?? []).filter((v) => !v.unavailable).map((v) => ({
+      id: v.id, description: v.description, supportedResources: v.supportedResources,
+    })), [rawVendors])
+  const vendorsLoaded = rawVendors !== undefined
+  const loadError = vendorsError
   const [accounts, setAccounts] = useState<AccountEntry[]>([])
-  const [vendors, setVendors] = useState<VendorEntry[]>([])
   const [accountsLoaded, setAccountsLoaded] = useState(false)
-  const [vendorsLoaded, setVendorsLoaded] = useState(false)
-  // Auto-provisioning ("ambient") gatekeepers set to "optional" that the user can opt into. They're
-  // shown in the same "Available" section and opened through the same modal as OAuth vendors; the
-  // only difference is that confirming adds the account directly (no OAuth redirect).
-  const [addable, setAddable] = useState<GatekeeperVendorInfo[]>([])
-  const [loadError, setLoadError] = useState(false)
 
   const [modalTarget, setModalTarget] = useState<ModalTarget>(null)
   const [connecting, setConnecting] = useState(false)
@@ -292,41 +295,6 @@ function ConnectorsPage() {
     const accountMap = new Map<number, AccountEntry>()
 
     setAccountsLoaded(false)
-    setVendorsLoaded(false)
-
-    authenticatedApi.listAddableGatekeepers()
-      .then((list) => {
-        if (!cancelled) setAddable(list)
-      })
-      .catch((err) => {
-        logRpcFailure('Failed to load addable gatekeepers:', err)
-      })
-
-    authenticatedApi.listGatekeeperVendors()
-      .then((vendorList) => {
-        if (cancelled) return
-        const unavailable = vendorList.filter((v) => v.unavailable)
-        if (unavailable.length > 0) {
-          toasts.add({
-            title: `Some services are temporarily unavailable: ${unavailable.map((v) => v.id).join(', ')}`,
-            variant: 'warning',
-          })
-        }
-        setVendors(
-          vendorList
-            .filter((v) => !v.unavailable)
-            .map((v) => ({
-              id: v.id,
-              description: v.description,
-              supportedResources: v.supportedResources,
-            })),
-        )
-        setVendorsLoaded(true)
-      })
-      .catch((err) => {
-        logRpcFailure('Failed to load available services:', err)
-        if (!cancelled) setLoadError(true)
-      })
 
     const subscriber = new AccountsSubscriberAdapter({
       add({ id, description, vendor, supportedResources, credentialsValid, vendorId }) {
@@ -354,7 +322,7 @@ function ConnectorsPage() {
     subscription.catch((err) => {
       if (cancelled) return
       logRpcFailure('Failed to subscribe to connected accounts:', err)
-      setLoadError(true)
+      /* accounts subscribe failed */
     })
 
     return () => {
@@ -385,7 +353,7 @@ function ConnectorsPage() {
         // Ambient gatekeeper: mint the account directly, no OAuth redirect. It then appears under
         // "Connected" via the subscription and drops out of "Available".
         await authenticatedApi.provisionAmbientAccount(vendorId)
-        setAddable((prev) => prev.filter((g) => g.id !== vendorId))
+        void queryClient.invalidateQueries({ queryKey: addableGatekeepersKey })
         // If the gatekeeper provides a management UI, its nav entry should appear without a reload.
         refreshGatekeeperApps(authenticatedApi)
       } else {
@@ -431,7 +399,7 @@ function ConnectorsPage() {
       await authenticatedApi.disconnectAccount(modalTarget.accountId)
       // If this was an opt-in ambient account, it's now removable and should return to "Available";
       // re-fetch the addable list so it reappears there immediately (no refresh needed).
-      authenticatedApi.listAddableGatekeepers().then(setAddable).catch(() => {})
+      void queryClient.invalidateQueries({ queryKey: addableGatekeepersKey })
       // Drop its nav entry too, if it provided a management UI.
       refreshGatekeeperApps(authenticatedApi)
       handleCloseModal()

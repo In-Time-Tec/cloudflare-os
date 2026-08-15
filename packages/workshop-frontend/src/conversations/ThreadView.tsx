@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PaperPlaneRight, ChatsCircle } from '@phosphor-icons/react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { ConversationMessage, ConversationSummary } from '@gadgets/workshop-shared/gatekeeper'
 import { parseRefKey, refKey, useConversations } from './ConversationsContext'
+import { useMessagesQuery, messagesKey } from '../query/conversations'
 import { Avatar, PaneHeader, formatTime } from './primitives'
 import { registerConversationsPush } from './push'
 
@@ -13,9 +15,11 @@ type PendingSend = { key: string; text: string; status: 'sending' | 'failed' | '
 
 export default function ThreadView({ conversation }: { conversation: ConversationSummary | null }) {
   const { api, avatarFor, onEvent, setViewing } = useConversations()
+  const queryClient = useQueryClient()
   const selectedKey = conversation ? refKey(conversation.ref) : null
-  const [messages, setMessages] = useState<ConversationMessage[]>([])
-  const [messagesLoading, setMessagesLoading] = useState(false)
+  const ref = conversation?.ref ?? null
+  const { data, isLoading: messagesLoading } = useMessagesQuery(ref)
+  const messages = data?.messages ?? []
   const [pending, setPending] = useState<PendingSend[]>([])
   const [draft, setDraft] = useState('')
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -29,28 +33,15 @@ export default function ThreadView({ conversation }: { conversation: Conversatio
     return () => setViewing(null)
   }, [selectedKey, setViewing])
 
-  const loadMessages = useCallback(() => {
-    const stub = api?.stub
-    if (!stub || !selectedKey) return
-    setMessagesLoading(true)
-    stub.getMessages(parseRefKey(selectedKey))
-      .then(result => setMessages(result.messages))
-      .catch(err => console.debug('load messages failed', err))
-      .finally(() => setMessagesLoading(false))
-  }, [api, selectedKey])
-
-  useEffect(() => {
-    setMessages([])
-    setPending([])
-    loadMessages()
-  }, [loadMessages])
-
   useEffect(() => onEvent(event => {
     if (!selectedKey || refKey(event.ref) !== selectedKey) return
-    setMessages(prev => prev.some(m => m.id === event.message.id)
-      ? prev : [...prev, event.message])
+    queryClient.setQueryData(messagesKey(parseRefKey(selectedKey)), (prev: { messages: ConversationMessage[]; hasMore: boolean } | undefined) => {
+      const list = prev?.messages ?? []
+      return { messages: list.some(m => m.id === event.message.id) ? list : [...list, event.message],
+               hasMore: prev?.hasMore ?? false }
+    })
     setPending(prev => prev.filter(p => p.status !== 'sending'))
-  }), [onEvent, selectedKey])
+  }), [onEvent, selectedKey, queryClient])
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight })
@@ -66,15 +57,16 @@ export default function ThreadView({ conversation }: { conversation: Conversatio
     stub.sendMessage(parseRefKey(selectedKey), text)
       .then(() => {
         setPending(prev => prev.filter(p => p.key !== key))
-        loadMessages()
+        queryClient.invalidateQueries({ queryKey: messagesKey(parseRefKey(selectedKey)) })
       })
       .catch(() => {
         // The send may or may not have reached the provider (no idempotency key): mark unknown,
         // reconcile by refetching, never blind-resend.
         setPending(prev => prev.map(p => p.key === key ? { ...p, status: 'unknown' } : p))
-        setTimeout(loadMessages, 2000)
+        setTimeout(() =>
+          queryClient.invalidateQueries({ queryKey: messagesKey(parseRefKey(selectedKey)) }), 2000)
       })
-  }, [api, selectedKey, draft, loadMessages])
+  }, [api, selectedKey, draft, queryClient])
 
   if (!conversation) {
     return (

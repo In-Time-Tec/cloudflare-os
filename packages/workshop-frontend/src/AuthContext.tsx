@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useContext, ReactNode } from 'react'
 import { RpcStub } from 'capnweb'
 import { AuthenticatedApi, AiChatAuthorInfo } from '@gadgets/workshop-shared/api'
+import { useAmIAdmin, useWhoami } from './query/hooks'
 
 interface AuthContextType {
   authenticatedApi: RpcStub<AuthenticatedApi>
@@ -20,24 +21,10 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children, authenticatedApi, onLogout }: AuthProviderProps) {
-  const [currentUser, setCurrentUser] = useState<AiChatAuthorInfo | null>(null)
-  const [isAdmin, setIsAdmin] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    authenticatedApi.whoami().then((info) => {
-      if (!cancelled) setCurrentUser(info)
-    }).catch(() => {})
-    return () => { cancelled = true }
-  }, [authenticatedApi])
-
-  useEffect(() => {
-    let cancelled = false
-    authenticatedApi.amIAdmin().then((admin) => {
-      if (!cancelled) setIsAdmin(admin)
-    }).catch(() => {})
-    return () => { cancelled = true }
-  }, [authenticatedApi])
+  // Current user + admin status live in the shared query cache: one RPC each, instant on reload
+  // (persisted), revalidated in the background.
+  const { data: currentUser = null } = useWhoami()
+  const { data: isAdmin = false } = useAmIAdmin()
 
   return (
     <AuthContext.Provider value={{ authenticatedApi, logout: onLogout, currentUser, isAdmin }}>

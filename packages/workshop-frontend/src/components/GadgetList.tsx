@@ -1,10 +1,12 @@
 import { Link } from '@tanstack/react-router'
 import { Clock, MagnifyingGlass, Hexagon, DotsThreeVertical, ShareNetwork, Trash, Info, Star, Pencil, ArrowRight } from '@phosphor-icons/react'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { DropdownMenu, Dialog, Button, useKumoToastManager } from '@cloudflare/kumo'
 import { RpcStub } from 'capnweb'
 import { useAuthenticatedApi } from '../AuthContext'
-import { GadgetMetadataWithTimestamps, BlueprintPublicInfo, Overseer, AiChatAuthorInfo } from '@gadgets/workshop-shared/api'
+import { useQueryClient } from '@tanstack/react-query'
+import { gadgetsKey, useGadgets, useWhoami } from '../query/hooks'
+import { GadgetMetadataWithTimestamps, BlueprintPublicInfo, Overseer } from '@gadgets/workshop-shared/api'
 import ShareModal from '../ShareModal'
 import { BindingBadge, getGradient as getBlueprintGradient, uniqueBindingBadges } from './BlueprintCard'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './menuStyles'
@@ -169,10 +171,15 @@ function AppRow({
 export default function GadgetList({ showHeader = true }: { showHeader?: boolean } = {}) {
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
-  const [gadgets, setGadgets] = useState<GadgetMetadataWithTimestamps[]>([])
+  const queryClient = useQueryClient()
+  const { data: rawGadgets = [], isLoading: loading, isError: loadError } = useGadgets()
+  const { data: userInfo = null } = useWhoami()
+  const gadgets = useMemo(() => [...rawGadgets].toSorted((a, b) => {
+    if (a.pinned && !b.pinned) return -1
+    if (!a.pinned && b.pinned) return 1
+    return b.lastActive.getTime() - a.lastActive.getTime()
+  }), [rawGadgets])
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
 
   // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
@@ -184,33 +191,11 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
   // Share modal state
   const [shareTarget, setShareTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
   const [shareOverseer, setShareOverseer] = useState<{ stub: RpcStub<Overseer> } | null>(null)
-  const [userInfo, setUserInfo] = useState<AiChatAuthorInfo | null>(null)
 
-  useEffect(() => {
-    authenticatedApi.whoami().then(setUserInfo).catch(() => {})
-  }, [authenticatedApi])
-
+  // Cache-level retry: refetch the gadgets query (the error UI's "Try again").
   const loadGadgets = () => {
-    setLoading(true)
-    setLoadError(false)
-    let cancelled = false
-    authenticatedApi.listGadgets().then((list) => {
-      if (cancelled) return
-      const sorted = [...list].toSorted((a, b) => {
-        if (a.pinned && !b.pinned) return -1
-        if (!a.pinned && b.pinned) return 1
-        return b.lastActive.getTime() - a.lastActive.getTime()
-      })
-      setGadgets(sorted)
-      setLoading(false)
-    }).catch((err) => {
-      console.error('Failed to load gadgets:', err)
-      if (!cancelled) { setLoading(false); setLoadError(true) }
-    })
-    return () => { cancelled = true }
+    void queryClient.invalidateQueries({ queryKey: gadgetsKey })
   }
-
-  useEffect(() => loadGadgets(), [authenticatedApi])
 
   // Clean up share overseer when modal closes
   useEffect(() => {
@@ -247,7 +232,8 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
         }
         toasts.add({ title: 'Workspace deleted', variant: 'success' })
       }
-      setGadgets(prev => prev.filter(g => g.id !== deleteTarget.id))
+      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
+      (prev ?? []).filter(g => g.id !== deleteTarget.id))
     } catch (err) {
       console.error('Failed to delete workspace:', err)
       toasts.add({ title: 'Failed to delete workspace', variant: 'error' })
@@ -275,28 +261,16 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
   const handleTogglePin = async (gadget: GadgetMetadataWithTimestamps) => {
     const newPinned = !gadget.pinned
     // Optimistically update the list
-    setGadgets(prev => {
-      const updated = prev.map(g => g.id === gadget.id ? { ...g, pinned: newPinned } : g)
-      return updated.toSorted((a, b) => {
-        if (a.pinned && !b.pinned) return -1
-        if (!a.pinned && b.pinned) return 1
-        return b.lastActive.getTime() - a.lastActive.getTime()
-      })
-    })
+    queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
+      (prev ?? []).map(g => g.id === gadget.id ? { ...g, pinned: newPinned } : g))
     // Use promise pipelining — call setPinned without awaiting openGadget first
     const overseer = authenticatedApi.openGadget(gadget.id)
     try {
       await overseer.setPinned(newPinned)
     } catch (err) {
       console.error('Failed to pin workspace:', err)
-      setGadgets(prev => {
-        const reverted = prev.map(g => g.id === gadget.id ? { ...g, pinned: gadget.pinned } : g)
-        return reverted.toSorted((a, b) => {
-          if (a.pinned && !b.pinned) return -1
-          if (!a.pinned && b.pinned) return 1
-          return b.lastActive.getTime() - a.lastActive.getTime()
-        })
-      })
+      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
+        (prev ?? []).map(g => g.id === gadget.id ? { ...g, pinned: gadget.pinned } : g))
       toasts.add({ title: 'Failed to update favorite status', variant: 'error' })
     } finally {
       (await overseer)[Symbol.dispose]()
@@ -305,14 +279,16 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
 
   const handleRename = async (gadget: GadgetMetadataWithTimestamps, newTitle: string) => {
     // Optimistically update
-    setGadgets(prev => prev.map(g => g.id === gadget.id ? { ...g, title: newTitle } : g))
+    queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
+      (prev ?? []).map(g => g.id === gadget.id ? { ...g, title: newTitle } : g))
     // Use promise pipelining — call setTitle without awaiting openGadget first
     const overseer = authenticatedApi.openGadget(gadget.id)
     try {
       await overseer.setTitle(newTitle)
     } catch (err) {
       console.error('Failed to rename workspace:', err)
-      setGadgets(prev => prev.map(g => g.id === gadget.id ? { ...g, title: gadget.title } : g))
+      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
+        (prev ?? []).map(g => g.id === gadget.id ? { ...g, title: gadget.title } : g))
       toasts.add({ title: 'Failed to rename workspace', variant: 'error' })
     } finally {
       (await overseer)[Symbol.dispose]()

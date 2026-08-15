@@ -18,6 +18,8 @@ import {
 } from '@phosphor-icons/react'
 import { OutputSummary } from '@gadgets/workshop-shared/api'
 import { useAuthenticatedApi } from '../AuthContext'
+import { useQueryClient } from '@tanstack/react-query'
+import { useOutputs, outputsKey } from '../query/hooks'
 import { useDocumentTitle } from '../useDocumentTitle'
 import PageChrome from '../components/AppShell/PageChrome'
 import ViewToggle from '../components/ViewToggle'
@@ -391,6 +393,7 @@ type TypeFilter = 'all' | string
 function OutputsPage() {
   useDocumentTitle('Outputs')
   const { authenticatedApi } = useAuthenticatedApi()
+  const queryClient = useQueryClient()
   const navigate = useNavigate()
   const toasts = useKumoToastManager()
   const { formats } = useOutputFormats()
@@ -406,11 +409,7 @@ function OutputsPage() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('all')
   const [search, setSearch] = useState('')
-  const [outputs, setOutputs] = useState<OutputSummary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
-  const [reloadToken, setReloadToken] = useState(0)
-  const loadedOnce = useRef(false)
+  const { data: outputs = [], isLoading: loading, isError: loadError, refetch } = useOutputs()
   const [renameOutput, setRenameOutput] = useState<OutputSummary | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [removeOutput, setRemoveOutput] = useState<OutputSummary | null>(null)
@@ -420,44 +419,12 @@ function OutputsPage() {
     localStorage.setItem('outputs-view', view)
   }, [view])
 
-  useEffect(() => {
-    let cancelled = false
-    // Keep the current list visible during background refreshes; skeletons are only for the first
-    // visit.
-    if (!loadedOnce.current) setLoading(true)
-    setLoadError(false)
-    // Workspaces predating the outputs index are swept in a bounded batch per call, so keep asking
-    // until the server says it is done. Each round shows what has arrived so far, which is what
-    // makes a large account fill in visibly while the page is open rather than over several
-    // visits.
-    void (async () => {
-      for (;;) {
-        const { outputs: list, catchingUp } = await authenticatedApi.listOutputs()
-        if (cancelled) return
-        setOutputs(list)
-        setLoading(false)
-        loadedOnce.current = true
-        if (!catchingUp) return
-      }
-    })().catch((err) => {
-      console.error('Failed to load outputs:', err)
-      if (cancelled) return
-      setLoading(false)
-      // A failed *refresh* must not discard a page already showing something: it is still the last
-      // good answer, and the next focus retries. The error state is for having nothing to show.
-      if (loadedOnce.current) {
-        toastsRef.current.add({ title: "Couldn't refresh outputs", variant: 'error' })
-      } else {
-        setLoadError(true)
-      }
-    })
-    return () => { cancelled = true }
-  }, [authenticatedApi, reloadToken])
+
 
   // A cheap snapshot rather than another live subscription, so refetch when the user returns to
   // the window.
   useEffect(() => {
-    const refresh = () => setReloadToken((n) => n + 1)
+    const refresh = () => refetch()
     window.addEventListener('focus', refresh)
     return () => window.removeEventListener('focus', refresh)
   }, [])
@@ -490,7 +457,7 @@ function OutputsPage() {
       gadget = overseer.getGadget(current.workpieceId)
       const title = renameValue.trim()
       await gadget.setTitle(title)
-      setOutputs((list) => list.map((output) =>
+      queryClient.setQueryData(outputsKey, (list: OutputSummary[] | undefined) => (list ?? []).map((output) =>
         outputKey(output) === outputKey(current) ? { ...output, title } : output))
       setRenameOutput(null)
     } catch (err) {
@@ -513,7 +480,7 @@ function OutputsPage() {
       overseer = await authenticatedApi.openGadget(current.workspaceId)
       gadget = overseer.getGadget(current.workpieceId)
       await gadget.remove()
-      setOutputs((list) => list.filter((output) => outputKey(output) !== outputKey(current)))
+      queryClient.setQueryData(outputsKey, (list: OutputSummary[] | undefined) => (list ?? []).filter((output) => outputKey(output) !== outputKey(current)))
       setRemoveOutput(null)
     } catch (err) {
       console.error('Failed to remove output:', err)
@@ -635,7 +602,7 @@ function OutputsPage() {
         ) : loadError ? (
           <div className="py-12 text-center text-sm">
             <p className="text-kumo-danger">Something went wrong loading your outputs.</p>
-            <button onClick={() => setReloadToken((n) => n + 1)} className="mt-1 text-kumo-brand underline">
+            <button onClick={() => refetch()} className="mt-1 text-kumo-brand underline">
               Try again
             </button>
           </div>

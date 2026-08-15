@@ -1,7 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { DropdownMenu, useKumoToastManager } from '@cloudflare/kumo'
 import { useAuthenticatedApi } from '../AuthContext'
+import { useQueryClient } from '@tanstack/react-query'
+import { useAiConfig, useModels, useQuickModel, quickModelKey } from '../query/hooks'
 import {
   AiChatAuthorInfo,
   AiGatewayInfo,
@@ -150,36 +152,20 @@ function ProvidersPage() {
   useDocumentTitle('AI Providers')
 
   const { authenticatedApi } = useAuthenticatedApi()
+  const queryClient = useQueryClient()
   const toasts = useKumoToastManager()
-  const [models, setModels] = useState<AiChatAuthorInfo[]>([])
-  const [quickModel, setQuickModel] = useState<string | null>(null)
-  const [aiConfig, setAiConfig] = useState<AiGatewayInfo | null>(null)
+  const { data: models = [], isLoading: loading, isError: loadError } = useModels()
+  const { data: quickModel = null } = useQuickModel()
+  const { data: aiConfig = null } = useAiConfig()
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  const fetchAll = async () => {
-    setLoadError(false)
-    try {
-      const [modelList, qm, cfg] = await Promise.all([
-        authenticatedApi.listModels(),
-        authenticatedApi.getQuickModel(),
-        authenticatedApi.getAiConfig(),
-      ])
-      setModels(modelList)
-      setQuickModel(qm)
-      setAiConfig(cfg)
-    } catch (err) {
-      console.error('Failed to load providers:', err)
-      setLoadError(true)
-    } finally {
-      setLoading(false)
-    }
+  const fetchAll = () => {
+    void queryClient.invalidateQueries({ queryKey: ['models'] })
+    void queryClient.invalidateQueries({ queryKey: ['quickModel'] })
+    void queryClient.invalidateQueries({ queryKey: ['aiConfig'] })
   }
-
-  useEffect(() => { fetchAll() }, [authenticatedApi])
 
   const gatewayMode = aiConfig?.enabled === true
   const canAddModels = aiConfig?.enabled !== true || aiConfig.allowsUserModels
@@ -212,12 +198,12 @@ function ProvidersPage() {
     if (quickInFlight.current) return
     quickInFlight.current = true
     const next = quickModel === modelId ? null : modelId
-    setQuickModel(next)
+    queryClient.setQueryData(quickModelKey, next)
     try {
       await authenticatedApi.setQuickModel(next)
     } catch (err) {
       console.error('Failed to set quick model:', err)
-      setQuickModel(quickModel) // revert
+      queryClient.setQueryData(quickModelKey, quickModel) // revert
       toasts.add({ title: 'Failed to update default model', variant: 'error' })
     } finally {
       quickInFlight.current = false

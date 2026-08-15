@@ -1,8 +1,11 @@
 import { StrictMode, useState, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RouterProvider } from '@tanstack/react-router'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
 import { RpcStub, newWebSocketRpcSession } from 'capnweb'
 import { PublicApi, ServerConfig } from '@gadgets/workshop-shared/api'
+import { asyncPersister, queryClient } from './query/client'
 import { RpcContext } from './RpcContext'
 import { ServerConfigContext, ServerConfigErrorContext } from './ServerConfigContext'
 import { ThemeProvider } from './ThemeContext'
@@ -191,7 +194,15 @@ devAutoLogin(currentStub).catch(() => {})
 root.render(
   <StrictMode>
     <FrontendErrorBoundary>
-      <AppWithConnection />
+      <QueryClientProvider client={queryClient}>
+        <PersistQueryClientProvider
+          client={queryClient}
+          persistOptions={{ persister: asyncPersister, maxAge: 24 * 60 * 60 * 1000 }}
+          onSuccess={() => console.debug('query cache restored')}
+        >
+          <AppWithConnection />
+        </PersistQueryClientProvider>
+      </QueryClientProvider>
     </FrontendErrorBoundary>
   </StrictMode>
 )

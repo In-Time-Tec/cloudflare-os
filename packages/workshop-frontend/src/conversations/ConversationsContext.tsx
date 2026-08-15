@@ -8,6 +8,11 @@ import type {
   EmailSummary,
 } from '@gadgets/workshop-shared/gatekeeper'
 import { useAuthenticatedApi } from '../AuthContext'
+import { useQueryClient } from '@tanstack/react-query'
+import { setActiveConversationsApi } from '../query/api'
+import {
+  useAgendaQuery, useChannelsQuery, useConversationsQuery, useEmailsQuery,
+} from '../query/conversations'
 
 // Shared conversations state: the ConversationsApi stub (from the first connected account that
 // provides one), the conversation/channel lists, avatar cache, and the live WebSocket. One
@@ -63,22 +68,16 @@ export function useConversations(): ConversationsState {
 
 export function ConversationsProvider({ children }: { children: ReactNode }) {
   const { authenticatedApi } = useAuthenticatedApi()
+  const queryClient = useQueryClient()
   const [api, setApi] = useState<{ stub: RpcStub<ConversationsApi> } | null>(null)
   const [available, setAvailable] = useState<boolean | null>(null)
-  const [conversations, setConversations] = useState<ConversationSummary[]>([])
-  const [channels, setChannels] = useState<ConversationSummary[]>([])
-  const [loading, setLoading] = useState(true)
   const [avatars, setAvatars] = useState<Map<string, string>>(new Map())
-  const [emails, setEmails] = useState<EmailSummary[]>([])
-  const [emailsLoading, setEmailsLoading] = useState(false)
-  const [agenda, setAgenda] = useState<CalendarEntry[]>([])
-  const [agendaLoading, setAgendaLoading] = useState(false)
   const avatarPending = useRef(new Set<string>())
   const listeners = useRef(new Set<(event: LiveEvent) => void>())
   const socketRef = useRef<WebSocket | null>(null)
   const viewingRef = useRef<string | null>(null)
 
-  // Acquire the capability once per authenticated connection.
+  // Acquire the capability once per authenticated connection; register it for the query layer.
   useEffect(() => {
     let cancelled = false
     let acquired: RpcStub<ConversationsApi> | null = null
@@ -89,39 +88,51 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
           return
         }
         acquired = stub
+        setActiveConversationsApi(stub)
         setApi(stub ? { stub } : null)
         setAvailable(stub !== null)
-        if (!stub) setLoading(false)
       })
       .catch(() => {
-        if (!cancelled) {
-          setAvailable(false)
-          setLoading(false)
-        }
+        if (!cancelled) setAvailable(false)
       })
     return () => {
       cancelled = true
       acquired?.[Symbol.dispose]()
+      setActiveConversationsApi(null)
       setApi(null)
     }
   }, [authenticatedApi])
 
-  const refresh = useCallback(() => {
-    const stub = api?.stub
-    if (!stub) return
-    setLoading(true)
-    Promise.all([stub.listConversations(), stub.listChannels()])
-      .then(([chats, channelList]) => {
-        setConversations(chats)
-        setChannels(channelList)
-      })
-      .catch(err => console.debug('conversations refresh failed', err))
-      .finally(() => setLoading(false))
-  }, [api])
+  // Shared list queries (the sidebar and pages read the same cache entries).
+  const { data: conversations = [], isLoading: loading } = useConversationsQuery()
+  const { data: channels = [] } = useChannelsQuery()
+  const { data: emails = [], isLoading: emailsLoading } = useEmailsQuery()
 
-  useEffect(() => {
-    if (api) refresh()
-  }, [api, refresh])
+  // This week's agenda for the sidebar (rolling Sun-Sat window).
+  const weekWindow = useMemo(() => {
+    const now = new Date()
+    const start = new Date(now)
+    start.setDate(now.getDate() - now.getDay())
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 7)
+    return { start, end }
+  }, [])
+  const { data: agenda = [], isLoading: agendaLoading } = useAgendaQuery(
+      weekWindow.start, weekWindow.end)
+
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+    void queryClient.invalidateQueries({ queryKey: ['channels'] })
+  }, [queryClient])
+
+  const refreshEmails = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['emails'] })
+  }, [queryClient])
+
+  const refreshAgenda = useCallback((_from: Date, _to: Date) => {
+    void queryClient.invalidateQueries({ queryKey: ['agenda'] })
+  }, [queryClient])
 
   // Live socket: connect once the API exists; reconnect with backoff on close.
   useEffect(() => {
@@ -161,8 +172,10 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
                 }, lastActivity: new Date() }
                 return [updated, ...list.slice(0, index), ...list.slice(index + 1)]
               }
-              setConversations(bump)
-              setChannels(bump)
+              queryClient.setQueryData(['conversations'], (prev: ConversationSummary[] | undefined) =>
+                bump(prev ?? []))
+              queryClient.setQueryData(['channels'], (prev: ConversationSummary[] | undefined) =>
+                bump(prev ?? []))
             }
           } catch {
             // malformed frame — ignore
@@ -209,39 +222,6 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
     })
     return undefined
   }, [api, avatars])
-
-  const refreshEmails = useCallback(() => {
-    const stub = api?.stub
-    if (!stub) return
-    setEmailsLoading(true)
-    stub.listEmails()
-      .then(setEmails)
-      .catch(err => console.debug('emails refresh failed', err))
-      .finally(() => setEmailsLoading(false))
-  }, [api])
-
-  const refreshAgenda = useCallback((from: Date, to: Date) => {
-    const stub = api?.stub
-    if (!stub) return
-    setAgendaLoading(true)
-    stub.listAgenda(from, to)
-      .then(setAgenda)
-      .catch(err => console.debug('agenda refresh failed', err))
-      .finally(() => setAgendaLoading(false))
-  }, [api])
-
-  // Sidebar previews: load emails + this week's agenda once the capability is live.
-  useEffect(() => {
-    if (!api) return
-    refreshEmails()
-    const now = new Date()
-    const weekStart = new Date(now)
-    weekStart.setDate(now.getDate() - now.getDay())
-    weekStart.setHours(0, 0, 0, 0)
-    const weekEnd = new Date(weekStart)
-    weekEnd.setDate(weekStart.getDate() + 7)
-    refreshAgenda(weekStart, weekEnd)
-  }, [api, refreshEmails, refreshAgenda])
 
   const onEvent = useCallback((listener: (event: LiveEvent) => void) => {
     listeners.current.add(listener)

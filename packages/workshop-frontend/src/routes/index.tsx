@@ -1,14 +1,14 @@
-import { classifyRpcError, logRpcFailure } from "../rpcErrors";
+import { logRpcFailure } from "../rpcErrors";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useKumoToastManager } from "@cloudflare/kumo";
 import { ChatInput } from "../ChatInterface";
 import HomeTaskSuggestions from "../components/AppShell/HomeTaskSuggestions";
 import { useAuthenticatedApi } from "../AuthContext";
+import { useModels } from "../query/hooks";
 import { RpcStub } from "capnweb";
 import {
   Overseer,
-  AiChatAuthorInfo,
   CapsuleSpecifier,
   ChatAttachmentHandle,
   MessageFormatRef,
@@ -45,7 +45,6 @@ export function HomePageContent({ prompt }: HomeSearch) {
   const navigate = useNavigate();
   const toasts = useKumoToastManager();
 
-  const [models, setModels] = useState<AiChatAuthorInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   // Bumped each time a task suggestion is picked; the composer re-seeds its text off the nonce.
   const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null);
@@ -56,26 +55,12 @@ export function HomePageContent({ prompt }: HomeSearch) {
     navigate({ to: "/", search: {}, replace: true });
   }, [navigate, prompt]);
 
+  const { data: models = [] } = useModels()
+
+  // Seed the persisted selected-model preference once models arrive.
   useEffect(() => {
-    let cancelled = false;
-    authenticatedApi.listModels()
-      .then((list) => {
-        if (cancelled) return;
-        setModels(list);
-        setSelectedModel(getStoredSelectedModel(list));
-      })
-      .catch((err) => {
-        logRpcFailure("Failed to fetch models:", err);
-        // Toast unless it's a connection error (reconnect refetches); a do-reset here already
-        // survived the Worker's same-colo retry, so the user should hear about it.
-        if (classifyRpcError(err) !== "connection") {
-          toasts.add({ title: "Couldn't load AI models", variant: "error" });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [authenticatedApi]);
+    if (models.length > 0) setSelectedModel(getStoredSelectedModel(models))
+  }, [models])
 
   const handleModelChange = useCallback((value: string | null) => {
     setSelectedModel(value);

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { RpcStub } from 'capnweb'
 import { PublicApi, AuthenticatedApi } from '@gadgets/workshop-shared/api'
+import { setActiveAuthenticatedApi } from './query/api'
 
 const CF_ACCESS_MODE = import.meta.env.VITE_CF_ACCESS_MODE === 'true'
 
@@ -56,6 +57,7 @@ export function useAuth(publicApi: RpcStub<PublicApi>) {
     // to the request by the browser (injected by the Access service worker/cookie), so
     // the server validates it and returns an authenticated stub immediately.
     const authenticatedApi = publicApi.authenticateFromCfAccess()
+    setActiveAuthenticatedApi(authenticatedApi)
     setAuthState({
       token: null,
       authenticatedApi,
@@ -81,6 +83,7 @@ export function useAuth(publicApi: RpcStub<PublicApi>) {
     // Use promise pipelining - we can use the returned promise as a stub immediately
     // without awaiting. Authentication errors will be handled when the stub is actually used.
     const authenticatedApi = publicApi.authenticate(token)
+    setActiveAuthenticatedApi(authenticatedApi)
     setAuthState({
       token,
       authenticatedApi,
@@ -116,6 +119,7 @@ export function useAuth(publicApi: RpcStub<PublicApi>) {
     })
 
     localStorage.removeItem('authToken')
+    setActiveAuthenticatedApi(null)
   }
 
   return {

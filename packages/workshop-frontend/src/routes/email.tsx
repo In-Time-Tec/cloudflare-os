@@ -1,9 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { EnvelopeSimple, ArrowSquareOut, Paperclip } from '@phosphor-icons/react'
-import type { EmailDetail } from '@gadgets/workshop-shared/gatekeeper'
 import CommsLayout from '../conversations/CommsLayout'
 import { useConversations } from '../conversations/ConversationsContext'
+import { useEmailDetailQuery } from '../query/conversations'
 import { Avatar, ListRow, PaneHeader, formatTime } from '../conversations/primitives'
 import { useDocumentTitle } from '../useDocumentTitle'
 
@@ -20,26 +20,12 @@ function EmailPage() {
   useDocumentTitle('Email')
   const { m: selectedId } = Route.useSearch()
   const navigate = Route.useNavigate()
-  const { emails, emailsLoading, refreshEmails, api, available } = useConversations()
-  const [detail, setDetail] = useState<EmailDetail | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
+  const { emails, emailsLoading, refreshEmails, available } = useConversations()
+  const { data: detail, isLoading: detailLoading } = useEmailDetailQuery(selectedId ?? null)
 
   useEffect(() => {
     refreshEmails()
   }, [refreshEmails])
-
-  useEffect(() => {
-    const stub = api?.stub
-    setDetail(null)
-    if (!stub || !selectedId) return
-    setDetailLoading(true)
-    let cancelled = false
-    stub.getEmail(selectedId)
-      .then(email => { if (!cancelled) setDetail(email) })
-      .catch(err => console.debug('load email failed', err))
-      .finally(() => { if (!cancelled) setDetailLoading(false) })
-    return () => { cancelled = true }
-  }, [api, selectedId])
 
   const selectedSummary = useMemo(() =>
     emails.find(e => e.id === selectedId) ?? null, [emails, selectedId])

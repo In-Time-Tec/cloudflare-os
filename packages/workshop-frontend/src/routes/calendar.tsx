@@ -1,11 +1,12 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   CalendarBlank, CaretLeft, CaretRight, VideoCamera, MapPin, Users, ArrowSquareOut,
 } from '@phosphor-icons/react'
 import CommsLayout from '../conversations/CommsLayout'
 import WeekCalendar, { weekBounds } from '../conversations/WeekCalendar'
 import { useConversations } from '../conversations/ConversationsContext'
+import { useAgendaQuery } from '../query/conversations'
 import { Avatar, PaneHeader } from '../conversations/primitives'
 import { useDocumentTitle } from '../useDocumentTitle'
 
@@ -22,13 +23,10 @@ function CalendarPage() {
   useDocumentTitle('Calendar')
   const { e: selectedId } = Route.useSearch()
   const navigate = Route.useNavigate()
-  const { agenda, agendaLoading, refreshAgenda, avatarFor, available } = useConversations()
+  const { avatarFor, available } = useConversations()
   const [anchor, setAnchor] = useState(() => new Date())
-
-  useEffect(() => {
-    const { start, end } = weekBounds(anchor)
-    refreshAgenda(start, end)
-  }, [anchor, refreshAgenda])
+  const { start: weekStart, end: weekEnd } = weekBounds(anchor)
+  const { data: agenda = [], isLoading: agendaLoading } = useAgendaQuery(weekStart, weekEnd)
 
   const selected = useMemo(() =>
     agenda.find(entry => entry.id === selectedId) ?? null, [agenda, selectedId])

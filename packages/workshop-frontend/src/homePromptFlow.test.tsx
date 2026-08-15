@@ -3,7 +3,10 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const testClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
 const testState = vi.hoisted(() => {
   const listModels = vi.fn<() => Promise<never[]>>(async () => []);
@@ -72,7 +75,11 @@ describe("Home prompt route flow", () => {
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    await act(async () => root!.render(<HomePageContent prompt="Create a daily brief." />));
+    await act(async () => root!.render(
+      <QueryClientProvider client={testClient}>
+        <HomePageContent prompt="Create a daily brief." />
+      </QueryClientProvider>,
+    ));
 
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Prompt"]')?.value).toBe(
       "Create a daily brief.",
