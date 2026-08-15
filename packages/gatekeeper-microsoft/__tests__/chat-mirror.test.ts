@@ -203,8 +203,6 @@ describe("ChatMirror", () => {
       instance.registerPush({ endpoint: 'https://push.example/e1', keys: {
         p256dh: 'BJ33nq-v6WugRaqf9cAHv4rFHsdbZ6fqMTkWERsozIhkqfgxftdh6Cu33MB15odz0jsWDvWSfPt70_yuGG_pD5E', auth: 'ZidRV1oBBQ1ree9WbWV1vA' } });
     });
-    // Attach VAPID env for the push send.
-    const origEnv = (mirror as unknown as { env?: Record<string, string> }).env;
     // ingest a message (not from self) — should push.
     await mirror.ingest("chats('19:chat1')/messages('msg-9')");
     const pushCalls = fetchMock.mock.calls.filter(c => String(c[0]).startsWith('https://push.example/'));
