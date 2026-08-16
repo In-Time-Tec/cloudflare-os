@@ -88,6 +88,15 @@ function CalendarRows({ items }: { items: CalendarEntry[] }) {
   const upcoming = items
     .filter(e => !e.isCancelled && e.end && new Date(e.end) > new Date())
     .slice(0, INITIAL_LIMIT)
+  if (upcoming.length === 0) {
+    return (
+      <button type="button" className={ROW}
+          onClick={() => navigate({ to: '/calendar' })}>
+        <CalendarBlank size={14} className="shrink-0 text-kumo-inactive" />
+        <span className={`${ROW_TEXT} text-kumo-inactive`}>No upcoming meetings</span>
+      </button>
+    )
+  }
   return (
     <>
       {upcoming.map(entry => (
@@ -127,11 +136,9 @@ export default function SidebarConversations({ collapsed }: { collapsed: boolean
           <EmailRows items={emails} />
         </Section>
       )}
-      {agenda.length > 0 && (
-        <Section label="Calendar" count={upcomingCount}>
-          <CalendarRows items={agenda} />
-        </Section>
-      )}
+      <Section label="Calendar" count={upcomingCount}>
+        <CalendarRows items={agenda} />
+      </Section>
     </>
   )
 }

@@ -108,14 +108,13 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   const { data: channels = [] } = useChannelsQuery()
   const { data: emails = [], isLoading: emailsLoading } = useEmailsQuery()
 
-  // This week's agenda for the sidebar (rolling Sun-Sat window).
+  // Upcoming meetings for the sidebar: a rolling window from now through the next 14 days, so the
+  // next meeting always appears regardless of the week boundary.
   const weekWindow = useMemo(() => {
-    const now = new Date()
-    const start = new Date(now)
-    start.setDate(now.getDate() - now.getDay())
+    const start = new Date()
     start.setHours(0, 0, 0, 0)
     const end = new Date(start)
-    end.setDate(start.getDate() + 7)
+    end.setDate(start.getDate() + 14)
     return { start, end }
   }, [])
   const { data: agenda = [], isLoading: agendaLoading } = useAgendaQuery(
