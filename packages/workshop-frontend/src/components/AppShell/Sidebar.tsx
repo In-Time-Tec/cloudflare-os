@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import {
   Blueprint,
   BookOpen,
+  CalendarBlank,
   Compass,
   Hexagon,
   House,
@@ -204,6 +205,12 @@ export default function Sidebar({
               to="/explore"
               label="Explore"
               icon={<Compass size={14} weight="regular" />}
+              collapsed={collapsed}
+            />
+            <SidebarItem
+              to="/calendar"
+              label="Calendar"
+              icon={<CalendarBlank size={14} weight="regular" />}
               collapsed={collapsed}
             />
           </nav>

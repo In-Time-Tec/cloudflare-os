@@ -4,14 +4,14 @@ import {
 } from 'react'
 import type { RpcStub } from 'capnweb'
 import type {
-  CalendarEntry, ConversationMessage, ConversationRef, ConversationsApi, ConversationSummary,
+  ConversationMessage, ConversationRef, ConversationsApi, ConversationSummary,
   EmailSummary,
 } from '@gadgets/workshop-shared/gatekeeper'
 import { useAuthenticatedApi } from '../AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
 import { setActiveConversationsApi } from '../query/api'
 import {
-  useAgendaQuery, useChannelsQuery, useConversationsQuery, useEmailsQuery,
+  useChannelsQuery, useConversationsQuery, useEmailsQuery,
 } from '../query/conversations'
 
 // Shared conversations state: the ConversationsApi stub (from the first connected account that
@@ -33,10 +33,6 @@ type ConversationsState = {
   emails: EmailSummary[]
   emailsLoading: boolean
   refreshEmails(): void
-  /** This week's agenda (rolling window), fetched lazily. */
-  agenda: CalendarEntry[]
-  agendaLoading: boolean
-  refreshAgenda(from: Date, to: Date): void
   /** null = still probing; false = no provider account connected. */
   available: boolean | null
   conversations: ConversationSummary[]
@@ -108,18 +104,6 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   const { data: channels = [] } = useChannelsQuery()
   const { data: emails = [], isLoading: emailsLoading } = useEmailsQuery()
 
-  // Upcoming meetings for the sidebar: a rolling window from now through the next 14 days, so the
-  // next meeting always appears regardless of the week boundary.
-  const weekWindow = useMemo(() => {
-    const start = new Date()
-    start.setHours(0, 0, 0, 0)
-    const end = new Date(start)
-    end.setDate(start.getDate() + 14)
-    return { start, end }
-  }, [])
-  const { data: agenda = [], isLoading: agendaLoading } = useAgendaQuery(
-      weekWindow.start, weekWindow.end)
-
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['conversations'] })
     void queryClient.invalidateQueries({ queryKey: ['channels'] })
@@ -127,10 +111,6 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
 
   const refreshEmails = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['emails'] })
-  }, [queryClient])
-
-  const refreshAgenda = useCallback((_from: Date, _to: Date) => {
-    void queryClient.invalidateQueries({ queryKey: ['agenda'] })
   }, [queryClient])
 
   // Live socket: connect once the API exists; reconnect with backoff on close.
@@ -237,9 +217,9 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(() => ({
     available, conversations, channels, loading, refresh, api, avatarFor, onEvent, setViewing,
-    emails, emailsLoading, refreshEmails, agenda, agendaLoading, refreshAgenda,
+    emails, emailsLoading, refreshEmails,
   }), [available, conversations, channels, loading, refresh, api, avatarFor, onEvent, setViewing,
-       emails, emailsLoading, refreshEmails, agenda, agendaLoading, refreshAgenda])
+       emails, emailsLoading, refreshEmails])
 
   return <Context.Provider value={value}>{children}</Context.Provider>
 }

@@ -1,11 +1,11 @@
 import { useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { EnvelopeSimple, CalendarBlank } from '@phosphor-icons/react'
-import type { CalendarEntry, ConversationSummary, EmailSummary } from '@gadgets/workshop-shared/gatekeeper'
+import { EnvelopeSimple } from '@phosphor-icons/react'
+import type { ConversationSummary, EmailSummary } from '@gadgets/workshop-shared/gatekeeper'
 import { refKey, useConversations } from './ConversationsContext'
-import { Avatar, formatTime } from './primitives'
+import { Avatar } from './primitives'
 
-// Sidebar sections for the communications surfaces — Conversations, Channels, Email, Calendar —
+// Sidebar sections for the communications surfaces — Conversations, Channels, Email —
 // styled to match Favorites / Recent workspaces (label, hairline, count). Each row deep-links
 // into its section-scoped page.
 
@@ -83,42 +83,10 @@ function EmailRows({ items }: { items: EmailSummary[] }) {
   )
 }
 
-function CalendarRows({ items }: { items: CalendarEntry[] }) {
-  const navigate = useNavigate()
-  const upcoming = items
-    .filter(e => !e.isCancelled && e.end && new Date(e.end) > new Date())
-    .slice(0, INITIAL_LIMIT)
-  if (upcoming.length === 0) {
-    return (
-      <button type="button" className={ROW}
-          onClick={() => navigate({ to: '/calendar' })}>
-        <CalendarBlank size={14} className="shrink-0 text-kumo-inactive" />
-        <span className={`${ROW_TEXT} text-kumo-inactive`}>No upcoming meetings</span>
-      </button>
-    )
-  }
-  return (
-    <>
-      {upcoming.map(entry => (
-        <button key={entry.id} type="button" title={entry.subject} className={ROW}
-            onClick={() => navigate({ to: '/calendar', search: { e: entry.id } })}>
-          <CalendarBlank size={14} className="shrink-0 text-kumo-inactive" />
-          <span className={ROW_TEXT}>{entry.subject}</span>
-          <span className="shrink-0 text-[10px] tabular-nums text-kumo-inactive">
-            {formatTime(entry.start)}
-          </span>
-        </button>
-      ))}
-    </>
-  )
-}
-
 /** Sidebar sections; renders nothing when no connected account provides conversations. */
 export default function SidebarConversations({ collapsed }: { collapsed: boolean }) {
-  const { available, conversations, channels, emails, agenda } = useConversations()
+  const { available, conversations, channels, emails } = useConversations()
   if (collapsed || !available) return null
-  const upcomingCount = agenda
-    .filter(e => !e.isCancelled && e.end && new Date(e.end) > new Date()).length
   return (
     <>
       {conversations.length > 0 && (
@@ -136,9 +104,7 @@ export default function SidebarConversations({ collapsed }: { collapsed: boolean
           <EmailRows items={emails} />
         </Section>
       )}
-      <Section label="Calendar" count={upcomingCount}>
-        <CalendarRows items={agenda} />
-      </Section>
+
     </>
   )
 }
