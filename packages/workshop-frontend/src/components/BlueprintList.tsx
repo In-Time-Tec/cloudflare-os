@@ -9,9 +9,11 @@ import {
   Trash,
   UploadSimple,
 } from '@phosphor-icons/react'
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type RefObject } from 'react'
+import { useCallback, useMemo, useRef, useState, type ChangeEvent, type RefObject } from 'react'
 import { DropdownMenu, useKumoToastManager } from '@cloudflare/kumo'
 import { useAuthenticatedApi } from '../AuthContext'
+import { useQueryClient } from '@tanstack/react-query'
+import { useLibraryBlueprints, useOwnBlueprints } from '../query/hooks'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './menuStyles'
 
 // A unified row item, merged from the user's published blueprints (`listOwnBlueprints`) and their
@@ -130,66 +132,47 @@ export default function BlueprintList({
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
 
-  const [items, setItems] = useState<BlueprintItem[]>([])
+  const queryClient = useQueryClient()
+  const { data: own = [], isLoading: loading, isError: loadError } = useOwnBlueprints()
+  const { data: library = [] } = useLibraryBlueprints()
+  const items = useMemo(() => {
+    const map = new Map<string, BlueprintItem>()
+    const ensure = (id: string): BlueprintItem => {
+      let it = map.get(id)
+      if (!it) {
+        it = { id, title: 'Untitled blueprint', description: '', recency: 0, pinned: false, inLibrary: false, isOwn: false }
+        map.set(id, it)
+      }
+      return it
+    }
+    for (const b of library) {
+      const it = ensure(b.id)
+      it.title = b.metadata.title || it.title
+      it.description = b.metadata.description || it.description
+      it.pinned ||= b.pinned === true
+      it.recency = Math.max(it.recency, b.addedAt.getTime())
+      it.inLibrary = true
+    }
+    for (const b of own) {
+      const it = ensure(b.id)
+      it.title = b.title || it.title
+      it.description = b.description || it.description
+      it.pinned ||= b.pinned === true
+      it.recency = Math.max(it.recency, b.lastUpdated.getTime())
+      it.isOwn = true
+    }
+    return sortItems(Array.from(map.values()))
+  }, [own, library])
+
+  const load = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['ownBlueprints'] })
+    void queryClient.invalidateQueries({ queryKey: ['libraryBlueprints'] })
+  }, [queryClient])
+
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
   const [uploading, setUploading] = useState(false)
   const internalUploadRef = useRef<HTMLInputElement>(null)
   const uploadInputRef = uploadInputRefProp ?? internalUploadRef
-
-  // A generation counter so a retry (or unmount) invalidates any in-flight load: only the most
-  // recent request is allowed to write state, avoiding races between concurrent loads.
-  const loadGenRef = useRef(0)
-
-  const load = useCallback(() => {
-    const gen = ++loadGenRef.current
-    setLoading(true)
-    setLoadError(false)
-    Promise.all([authenticatedApi.listOwnBlueprints(), authenticatedApi.listLibraryBlueprints()])
-      .then(([own, library]) => {
-        if (gen !== loadGenRef.current) return
-        const map = new Map<string, BlueprintItem>()
-        const ensure = (id: string): BlueprintItem => {
-          let it = map.get(id)
-          if (!it) {
-            it = { id, title: 'Untitled blueprint', description: '', recency: 0, pinned: false, inLibrary: false, isOwn: false }
-            map.set(id, it)
-          }
-          return it
-        }
-        for (const b of library) {
-          const it = ensure(b.id)
-          it.title = b.metadata.title || it.title
-          it.description = b.metadata.description || it.description
-          it.pinned ||= b.pinned === true
-          it.recency = Math.max(it.recency, b.addedAt.getTime())
-          it.inLibrary = true
-        }
-        for (const b of own) {
-          const it = ensure(b.id)
-          it.title = b.title || it.title
-          it.description = b.description || it.description
-          it.pinned ||= b.pinned === true
-          it.recency = Math.max(it.recency, b.lastUpdated.getTime())
-          it.isOwn = true
-        }
-        setItems(sortItems(Array.from(map.values())))
-        setLoading(false)
-      })
-      .catch((err) => {
-        console.error('Failed to load blueprints:', err)
-        if (gen !== loadGenRef.current) return
-        setLoading(false)
-        setLoadError(true)
-      })
-  }, [authenticatedApi])
-
-  useEffect(() => {
-    load()
-    // Bump the generation on unmount so a late resolve doesn't set state on an unmounted component.
-    return () => { loadGenRef.current++ }
-  }, [load])
 
   // Import a `.gadget` archive exported from another Workshop instance, then refresh the list.
   const handleBlueprintSelected = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
@@ -217,12 +200,12 @@ export default function BlueprintList({
     if (pinsInFlight.current.has(item.id)) return
     pinsInFlight.current.add(item.id)
     const nextPinned = !item.pinned
-    setItems((prev) => sortItems(prev.map((b) => (b.id === item.id ? { ...b, pinned: nextPinned } : b))))
+    void load()
     try {
       await authenticatedApi.setBlueprintPinned(item.id, nextPinned)
     } catch (err) {
       console.error('Failed to update blueprint pin:', err)
-      setItems((prev) => sortItems(prev.map((b) => (b.id === item.id ? { ...b, pinned: item.pinned } : b))))
+      void load()
       toasts.add({ title: 'Failed to update favorite', variant: 'error' })
     } finally {
       pinsInFlight.current.delete(item.id)
@@ -234,11 +217,7 @@ export default function BlueprintList({
       await authenticatedApi.removeBlueprintFromLibrary(item.id)
       // If the user also owns it, it stays in the list (just no longer in the library); otherwise
       // it leaves the list entirely.
-      setItems((prev) =>
-        prev
-          .map((b) => (b.id === item.id ? { ...b, inLibrary: false } : b))
-          .filter((b) => b.inLibrary || b.isOwn),
-      )
+      void load()
       toasts.add({ title: 'Removed from library', variant: 'success' })
     } catch (err) {
       console.error('Failed to remove blueprint from library:', err)
