@@ -4,7 +4,7 @@ import { EnvelopeSimple, EyeSlash } from '@phosphor-icons/react'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import type { ConversationSummary, EmailSummary } from '@gadgets/workshop-shared/gatekeeper'
 import { PendingIcon } from '../components/PendingIcon'
-import { HoverActionBar, HoverFadeLabel, bindRowRef, hoverRowStyle, useRowPreview } from '../components/AppShell/SidebarHoverRow'
+import { HoverActionBar, HoverFadeLabel, HoverRowTrail, bindRowRef, useRowPreview } from '../components/AppShell/SidebarHoverRow'
 import { hoverRowClassName } from '../components/AppShell/sidebarHover'
 import { refKey, useConversations } from './ConversationsContext'
 import { conversationPreview, emailPreview } from './hoverPreviews'
@@ -88,22 +88,23 @@ function ConversationHoverRow({ conversation, section, onHide }: {
           hasActions: true,
           className: 'h-7 gap-1.5 rounded-md px-2.5',
         })}
-        style={hoverRowStyle(1)}
         {...previewBind}
       >
         <PendingIcon pending={pending} size={18}>
           <Avatar photo={photo} title={conversation.title} size="sm" />
         </PendingIcon>
-        <HoverFadeLabel className="text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default">
-          {conversation.title}
-        </HoverFadeLabel>
-        <HoverActionBar
-          actions={[{
-            label: `Hide ${noun}`,
-            icon: <EyeSlash size={12} />,
-            onSelect: onHide,
-          }]}
-        />
+        <HoverRowTrail>
+          <HoverFadeLabel className="text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default">
+            {conversation.title}
+          </HoverFadeLabel>
+          <HoverActionBar
+            actions={[{
+              label: `Hide ${noun}`,
+              icon: <EyeSlash size={12} />,
+              onSelect: onHide,
+            }]}
+          />
+        </HoverRowTrail>
       </Link>
       {previewPortal}
     </>
@@ -130,24 +131,25 @@ function EmailHoverRow({ email, onHide }: {
           hasActions: true,
           className: 'h-7 gap-1.5 rounded-md px-2.5',
         })}
-        style={hoverRowStyle(1)}
         {...previewBind}
       >
         <PendingIcon pending={pending} size={14}>
           <EnvelopeSimple size={14} className="shrink-0 text-kumo-inactive" />
         </PendingIcon>
-        <HoverFadeLabel className={`text-[12.5px] leading-[18px] tracking-[-0.1px] ${
-          email.isRead ? 'text-kumo-default' : 'font-semibold text-kumo-default'
-        }`}>
-          {email.from?.name || email.from?.address || email.subject}
-        </HoverFadeLabel>
-        <HoverActionBar
-          actions={[{
-            label: 'Hide email',
-            icon: <EyeSlash size={12} />,
-            onSelect: onHide,
-          }]}
-        />
+        <HoverRowTrail>
+          <HoverFadeLabel className={`text-[12.5px] leading-[18px] tracking-[-0.1px] ${
+            email.isRead ? 'text-kumo-default' : 'font-semibold text-kumo-default'
+          }`}>
+            {email.from?.name || email.from?.address || email.subject}
+          </HoverFadeLabel>
+          <HoverActionBar
+            actions={[{
+              label: 'Hide email',
+              icon: <EyeSlash size={12} />,
+              onSelect: onHide,
+            }]}
+          />
+        </HoverRowTrail>
       </Link>
       {previewPortal}
     </>

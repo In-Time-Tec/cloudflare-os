@@ -3,7 +3,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type FocusEvent,
   type ReactNode,
   type Ref,
@@ -13,7 +12,6 @@ import { createPortal } from 'react-dom'
 import { Tooltip } from '@cloudflare/kumo'
 import {
   SIDEBAR_PREVIEW_DELAY_MS,
-  hoverFadeWidth,
   type SidebarHoverAction,
   type SidebarHoverPreview,
 } from './sidebarHover'
@@ -29,11 +27,15 @@ export function HoverFadeLabel({ children, className }: {
   )
 }
 
+export function HoverRowTrail({ children }: { children: ReactNode }) {
+  return <span className="flex min-w-0 flex-1 items-center">{children}</span>
+}
+
 export function HoverActionBar({ actions }: { actions: SidebarHoverAction[] }) {
   if (actions.length === 0) return null
   return (
     <div
-      className="sidebar-hover-actions absolute inset-y-0 right-0.5 z-10 flex items-center gap-px"
+      className="sidebar-hover-actions items-center gap-px"
       onClick={(event) => {
         event.preventDefault()
         event.stopPropagation()
@@ -157,10 +159,6 @@ export function useRowPreview(preview: SidebarHoverPreview | undefined): {
       ? createPortal(<PreviewCard preview={preview} top={box.top} left={box.left} />, document.body)
       : null,
   }
-}
-
-export function hoverRowStyle(actionCount: number): CSSProperties {
-  return { ['--sidebar-hover-fade']: hoverFadeWidth(actionCount) } as CSSProperties
 }
 
 export function bindRowRef(ref: RefObject<HTMLElement | null>): Ref<HTMLAnchorElement> {

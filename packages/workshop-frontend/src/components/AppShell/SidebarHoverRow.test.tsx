@@ -4,8 +4,8 @@
 import { act, type ReactNode, type Ref } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { SIDEBAR_PREVIEW_DELAY_MS, hoverFadeWidth, hoverRowClassName } from './sidebarHover'
-import { HoverActionBar, HoverFadeLabel, useRowPreview } from './SidebarHoverRow'
+import { SIDEBAR_PREVIEW_DELAY_MS, hoverRowClassName } from './sidebarHover'
+import { HoverActionBar, HoverFadeLabel, HoverRowTrail, useRowPreview } from './SidebarHoverRow'
 import type { SidebarHoverPreview } from './sidebarHover'
 
 vi.mock('@cloudflare/kumo', () => ({
@@ -36,10 +36,12 @@ function Harness({
         }}
         {...previewBind}
       >
-        <HoverFadeLabel>Simplot Opsys</HoverFadeLabel>
-        <HoverActionBar
-          actions={[{ label: 'Hide channel', icon: <span>H</span>, onSelect: onHide }]}
-        />
+        <HoverRowTrail>
+          <HoverFadeLabel>Simplot Opsys</HoverFadeLabel>
+          <HoverActionBar
+            actions={[{ label: 'Hide channel', icon: <span>H</span>, onSelect: onHide }]}
+          />
+        </HoverRowTrail>
       </a>
       {previewPortal}
     </>
@@ -71,8 +73,6 @@ describe('SidebarHoverRow', () => {
   it('fades the label only when the row has actions', () => {
     expect(hoverRowClassName({ hasActions: true })).toContain('sidebar-hover-has-actions')
     expect(hoverRowClassName({})).not.toContain('sidebar-hover-has-actions')
-    expect(hoverFadeWidth(1)).toBe('1.725rem')
-    expect(hoverFadeWidth(0)).toBe('0rem')
   })
 
   it('lets an action fire without following the row', () => {

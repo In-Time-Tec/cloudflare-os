@@ -27,11 +27,6 @@ export function formatPreviewTime(value: Date | string | number | undefined): st
   return `${Math.floor(hours / 24)}d ago`
 }
 
-export function hoverFadeWidth(actionCount: number): string {
-  if (actionCount <= 0) return '0rem'
-  return `${actionCount * 1.375 + 0.35}rem`
-}
-
 export function hoverRowClassName(options: {
   active?: boolean
   pending?: boolean

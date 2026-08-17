@@ -5,7 +5,7 @@ import type { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
 import { PendingIcon, useLinkPending } from '../PendingIcon'
 import { workspacePreview } from '../../conversations/hoverPreviews'
 import { hoverRowClassName } from './sidebarHover'
-import { HoverActionBar, HoverFadeLabel, bindRowRef, hoverRowStyle, useRowPreview } from './SidebarHoverRow'
+import { HoverActionBar, HoverFadeLabel, HoverRowTrail, bindRowRef, useRowPreview } from './SidebarHoverRow'
 
 function initials(title: string | undefined): string {
   const t = (title || 'Untitled').trim()
@@ -64,7 +64,6 @@ export default function SidebarGadgetRow({
         to="/workspace/$id"
         params={{ id: gadget.id }}
         className={rowClass}
-        style={hoverRowStyle(renaming || collapsed ? 0 : 4)}
         activeProps={{ className: activeClass }}
         onClick={(event) => {
           if (renaming) event.preventDefault()
@@ -99,40 +98,39 @@ export default function SidebarGadgetRow({
                 onDoubleClick={(event) => event.preventDefault()}
               />
             ) : (
-              <HoverFadeLabel className="text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default">
-                {title}
-              </HoverFadeLabel>
-            )}
-
-            {!renaming && (
-              <HoverActionBar
-                actions={[
-                  {
-                    label: gadget.pinned ? 'Unfavorite' : 'Favorite',
-                    icon: <Star size={12} weight={gadget.pinned ? 'fill' : 'regular'} />,
-                    onSelect: () => onTogglePin(gadget),
-                  },
-                  {
-                    label: 'Rename',
-                    icon: <Pencil size={12} />,
-                    onSelect: () => {
-                      setRenameValue(gadget.title || '')
-                      setRenaming(true)
+              <HoverRowTrail>
+                <HoverFadeLabel className="text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default">
+                  {title}
+                </HoverFadeLabel>
+                <HoverActionBar
+                  actions={[
+                    {
+                      label: gadget.pinned ? 'Unfavorite' : 'Favorite',
+                      icon: <Star size={12} weight={gadget.pinned ? 'fill' : 'regular'} />,
+                      onSelect: () => onTogglePin(gadget),
                     },
-                  },
-                  {
-                    label: 'Share',
-                    icon: <ShareNetwork size={12} />,
-                    onSelect: () => onShare(gadget),
-                  },
-                  {
-                    label: gadget.owner ? 'Dismiss' : 'Delete',
-                    icon: <Trash size={12} />,
-                    onSelect: () => onDelete(gadget),
-                    danger: true,
-                  },
-                ]}
-              />
+                    {
+                      label: 'Rename',
+                      icon: <Pencil size={12} />,
+                      onSelect: () => {
+                        setRenameValue(gadget.title || '')
+                        setRenaming(true)
+                      },
+                    },
+                    {
+                      label: 'Share',
+                      icon: <ShareNetwork size={12} />,
+                      onSelect: () => onShare(gadget),
+                    },
+                    {
+                      label: gadget.owner ? 'Dismiss' : 'Delete',
+                      icon: <Trash size={12} />,
+                      onSelect: () => onDelete(gadget),
+                      danger: true,
+                    },
+                  ]}
+                />
+              </HoverRowTrail>
             )}
           </>
         )}

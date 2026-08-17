@@ -838,32 +838,29 @@ body:has([role="dialog"], [role="alertdialog"]) .app-header {
 .group\/hover-row.sidebar-hover-has-actions:hover .sidebar-hover-label,
 .group\/hover-row.sidebar-hover-has-actions:focus-within .sidebar-hover-label {
   text-overflow: clip;
-  -webkit-mask-image: linear-gradient(
-    to right,
-    #000 calc(100% - var(--sidebar-hover-fade, 4.5rem)),
-    transparent
-  );
-  mask-image: linear-gradient(
-    to right,
-    #000 calc(100% - var(--sidebar-hover-fade, 4.5rem)),
-    transparent
-  );
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent);
 }
 
 .sidebar-hover-actions {
+  display: flex;
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
   opacity: 0;
-  transform: translateX(4px);
   pointer-events: none;
-  transition:
-    opacity 140ms var(--ease-out-strong),
-    transform 140ms var(--ease-out-strong);
+  transition: opacity 140ms var(--ease-out-strong);
 }
 
 .group\/hover-row:hover .sidebar-hover-actions,
 .group\/hover-row:focus-within .sidebar-hover-actions {
+  flex: 0 0 auto;
+  width: auto;
+  overflow: visible;
   opacity: 1;
-  transform: translateX(0);
   pointer-events: auto;
+  padding-left: 2px;
 }
 
 .sidebar-hover-preview {
