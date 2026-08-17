@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import GadgetEditor from '../../GadgetEditor'
-import { gadgetsOptions } from '../../query/hooks'
+import { aiConfigOptions, gadgetsOptions, modelsOptions } from '../../query/hooks'
+import { ensureWorkspaceBoot } from '../../query/workspace-session'
 
 type GadgetSearch = {
   chat?: number
@@ -27,9 +28,25 @@ export const Route = createFileRoute('/_authenticated/workspace/$id')({
     w: parseIntParam(search.w),
   }),
   loaderDeps: ({ search }) => ({ chat: search.chat, w: search.w }),
-  loader: ({ context }) =>
-    context.queryClient.ensureQueryData({
-      ...gadgetsOptions(context.session),
-      revalidateIfStale: true,
-    }),
+  loader: async ({ context, params, cause }) => {
+    await Promise.all([
+      context.queryClient.ensureQueryData({
+        ...gadgetsOptions(context.session),
+        revalidateIfStale: true,
+      }),
+      context.queryClient.ensureQueryData({
+        ...modelsOptions(context.session),
+        revalidateIfStale: true,
+      }),
+      context.queryClient.ensureQueryData({
+        ...aiConfigOptions(context.session),
+        revalidateIfStale: true,
+      }),
+    ])
+    if (cause === 'preload' || cause === 'stay') return
+    try {
+      await ensureWorkspaceBoot(params.id, context.session.requireAuthenticatedApi())
+    } catch {
+    }
+  },
 })

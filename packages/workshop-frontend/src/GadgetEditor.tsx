@@ -49,6 +49,7 @@ import { useActions } from './useActions'
 import DeleteConfirmationDialog from './components/DeleteConfirmationDialog'
 import WorkspaceOpenErrorPage from './components/WorkspaceOpenErrorPage'
 import { useWorkspaceOpen } from './useWorkspaceOpen'
+import { takeWorkspaceBoot } from './query/workspace-session'
 import { reportIssue } from './errorReporting'
 import GadgetExportMenu from './GadgetExportMenu'
 
@@ -421,6 +422,17 @@ export default function GadgetEditor() {
     { chat?: number; w?: number }
   const urlChatId = chatParam !== undefined ? chatParam : null
   const urlWorkpieceId = workpieceParam !== undefined ? workpieceParam : null
+  const [bootId, setBootId] = useState(id)
+  const [boot, setBoot] = useState(() => id ? takeWorkspaceBoot(id) : null)
+  const bootRef = useRef(boot)
+  if (id !== bootId) {
+    const nextBoot = id ? takeWorkspaceBoot(id) : null
+    bootRef.current = nextBoot
+    setBootId(id)
+    setBoot(nextBoot)
+  } else {
+    bootRef.current = boot
+  }
 
   // ── toasts ─────────────────────────────────────────────────────────────────────
   const toasts = useKumoToastManager()
@@ -428,7 +440,9 @@ export default function GadgetEditor() {
   // ── core state ──────────────────────────────────────────────────────────────
   // The workspace's workpiece list (gadget-type workpieces only in v1), kept live via
   // subscribeToWorkpieces(). `workpiecesReady` flips once the initial listing has arrived.
-  const cachedWorkpieces = id ? readCachedWorkpieces(id) : undefined
+  const takenBoot = bootRef.current
+  const cachedWorkpieces = (takenBoot && takenBoot.id === id ? takenBoot.workpieces : undefined)
+    ?? (id ? readCachedWorkpieces(id) : undefined)
   const [workpieces, setWorkpieces] = useState<Map<WorkpieceId, WorkpieceSummary>>(() =>
     cachedWorkpieces ? new Map(cachedWorkpieces.map(item => [item.id, item])) : new Map())
   const [workpiecesReady, setWorkpiecesReady] = useState(() => cachedWorkpieces !== undefined)
@@ -455,6 +469,7 @@ export default function GadgetEditor() {
   } = useWorkspaceOpen({
     id,
     authenticatedApi,
+    existing: boot,
     onMetadata: nextMetadata => {
       if (!isEditingTitleRef.current) setTitleInput(nextMetadata.title)
     },
@@ -594,8 +609,8 @@ export default function GadgetEditor() {
     file: ActiveFileTarget | null | undefined
   } | null>(null)
   const [hasCode, setHasCode] = useState<boolean | null>(null)
-  const [chatCount, setChatCount] = useState<number | null>(null)
-  const [hasChatZero, setHasChatZero] = useState(false)
+  const [chatCount, setChatCount] = useState<number | null>(() => boot ? boot.chats.length : null)
+  const [hasChatZero, setHasChatZero] = useState(() => boot?.chats.some(chat => chat.id === 0) ?? false)
   const [_hasBindings, setHasBindings] = useState(false)
   const [isAgentActive, setIsAgentActive] = useState(false)
   const [hasAnyProposedChanges, setHasAnyProposedChanges] = useState(false)
@@ -750,7 +765,7 @@ export default function GadgetEditor() {
   // Whether the *selected* gadget has code. When no gadget is selected, the code interface is
   // unmounted and raw `hasCode` can't update, but a gadget-less workspace has no code to show.
   const effectiveHasCode = selectedFilesRoot !== undefined
-    ? hasCode
+    ? (hasCode ?? true)
     : workpiecesReady ? false : null
 
   const codeStateReady = effectiveHasCode !== null
@@ -980,8 +995,10 @@ export default function GadgetEditor() {
     setStreamingProposedChanges(undefined)
     setStreamingActiveFileState(null)
     setHasCode(null)
-    setChatCount(null)
-    setHasChatZero(false)
+    const currentBoot = bootRef.current
+    const fromBoot = currentBoot && currentBoot.id === id ? currentBoot : null
+    setChatCount(fromBoot ? fromBoot.chats.length : null)
+    setHasChatZero(fromBoot ? fromBoot.chats.some(chat => chat.id === 0) : false)
     setHasAnyProposedChanges(false)
     setSelectedChatHasProposedChanges(false)
     setWorkspaceView(getStoredWorkspaceView(id))
@@ -989,7 +1006,7 @@ export default function GadgetEditor() {
     activityReturnViewRef.current = null
     setActivityClosing(false)
     setWorkspaceTransitionEnabled(false)
-    const seeded = id ? readCachedWorkpieces(id) : undefined
+    const seeded = fromBoot?.workpieces ?? (id ? readCachedWorkpieces(id) : undefined)
     setWorkpieces(seeded ? new Map(seeded.map(item => [item.id, item])) : new Map())
     setWorkpiecesReady(seeded !== undefined)
     knownWorkpieceIdsRef.current = null
@@ -1289,8 +1306,7 @@ export default function GadgetEditor() {
 
   // Wait for the workpiece list (and the first selected-gadget stub, which follows it by one
   // effect pass) before rendering; a workspace with no gadgets renders with `gadget` null.
-  if (!metadata || !overseer || !workpiecesReady ||
-      (selectedGadgetId !== null && gadget === null)) {
+  if (!metadata || !overseer || !workpiecesReady) {
     return (
       <div className="relative flex h-full flex-col overflow-hidden bg-kumo-base">
         {displayMetadata && (
@@ -1471,6 +1487,9 @@ export default function GadgetEditor() {
                   key={id}
                   workspaceId={id}
                   overseer={overseer.stub}
+                  initialChats={boot?.chats}
+                  initialModels={boot?.models}
+                  initialHistory={boot?.history ?? undefined}
                   selectedChatId={effectiveSelectedChatId}
                   onNavigateToChat={navigateToChat}
                   onProposedChangesChange={setProposedChanges}

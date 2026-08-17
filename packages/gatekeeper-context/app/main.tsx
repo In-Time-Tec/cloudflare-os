@@ -32,6 +32,7 @@ interface HostCapability extends RpcTarget {
   subscribeTheme(receiver: GatekeeperAppThemeReceiver): Promise<GatekeeperAppTheme>
   readPersistedSnapshot(): Promise<ContextLibrarySnapshot | null>
   writePersistedSnapshot(data: ContextLibrarySnapshot): Promise<void>
+  writePersistedPaint(html: string): Promise<void>
 }
 
 function readBootSnapshot(): ContextLibrarySnapshot | undefined {
@@ -63,6 +64,10 @@ function main() {
             <ContextLibraryPage
               initialSnapshot={readBootSnapshot()}
               persistSnapshot={(snapshot) => host.writePersistedSnapshot(snapshot)}
+              persistPaint={() => {
+                const paintRoot = document.getElementById('root')
+                if (paintRoot) void host.writePersistedPaint(paintRoot.innerHTML)
+              }}
             />
           </Toasty>
         </TooltipProvider>

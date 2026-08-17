@@ -14,6 +14,7 @@ import {
   classifyWorkspaceOpenFailure,
   type WorkspaceOpenFailureKind,
 } from './components/WorkspaceOpenErrorPage'
+import type { WorkspaceBoot } from './query/workspace-session'
 
 const OBSERVER_CANCELLED = 'OBSERVER_CONFIG_CANCELLED'
 
@@ -30,6 +31,7 @@ type ObserverConfigState = {
 type Options = {
   id: string | undefined
   authenticatedApi: RpcStub<AuthenticatedApi>
+  existing?: WorkspaceBoot | null
   onMetadata: (metadata: GadgetMetadata) => void
   onShareKeyConsumed: () => void
   onInvalidShareKey: () => void
@@ -38,17 +40,21 @@ type Options = {
 export function useWorkspaceOpen({
   id,
   authenticatedApi,
+  existing,
   onMetadata,
   onShareKeyConsumed,
   onInvalidShareKey,
 }: Options) {
-  const [overseer, setOverseer] = useState<{ stub: RpcStub<Overseer> } | null>(null)
-  const [metadata, setMetadata] = useState<GadgetMetadata | null>(null)
+  const [overseer, setOverseer] = useState<{ stub: RpcStub<Overseer> } | null>(
+    () => existing ? { stub: existing.overseer } : null,
+  )
+  const [metadata, setMetadata] = useState<GadgetMetadata | null>(() => existing?.metadata ?? null)
   const [error, setError] = useState<WorkspaceLoadError | null>(null)
   const [connectionLost, setConnectionLost] = useState(false)
   const [observerConfig, setObserverConfig] = useState<ObserverConfigState | null>(null)
   const [reloadNonce, setReloadNonce] = useState(0)
   const openWorkspaceIdRef = useRef<string | undefined>(undefined)
+  const usedExistingForIdRef = useRef<string | undefined>(undefined)
   const pendingObserverRejectRef = useRef<((error: unknown) => void) | null>(null)
   const callbacksRef = useRef({ onMetadata, onShareKeyConsumed, onInvalidShareKey })
   callbacksRef.current = { onMetadata, onShareKeyConsumed, onInvalidShareKey }
@@ -115,7 +121,17 @@ export function useWorkspaceOpen({
         })()
         configureObservers = new RpcStub(configureObserversTarget)
 
-        overseerStub = authenticatedApi.openGadget(id, shareKey, configureObservers)
+        const boot = existing && existing.id === id && usedExistingForIdRef.current !== id && !shareKey
+          ? existing
+          : null
+        if (boot) {
+          usedExistingForIdRef.current = id
+          overseerStub = boot.overseer
+          setMetadata(boot.metadata)
+          callbacksRef.current.onMetadata(boot.metadata)
+        } else {
+          overseerStub = authenticatedApi.openGadget(id, shareKey, configureObservers)
+        }
         setOverseer({ stub: overseerStub })
 
         const resolvedSubscription = await overseerStub.subscribeToMetadata((nextMetadata) => {
@@ -175,7 +191,7 @@ export function useWorkspaceOpen({
       setObserverConfig(null)
       disposeAttempt()
     }
-  }, [id, authenticatedApi, reloadNonce])
+  }, [id, authenticatedApi, existing, reloadNonce])
 
   return {
     overseer,

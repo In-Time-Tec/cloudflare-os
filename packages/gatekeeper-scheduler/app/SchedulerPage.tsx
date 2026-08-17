@@ -73,6 +73,7 @@ type Props = {
   openPrompt: (prompt: string) => void | Promise<void>;
   resolveWorkspaceTitles: (ids: string[]) => Promise<(string | null)[]>;
   persistSnapshot?: (snapshot: SchedulerSnapshot) => void | Promise<void>;
+  persistPaint?: () => void | Promise<void>;
   initialSnapshot?: SchedulerSnapshot;
 };
 
@@ -82,6 +83,7 @@ export default function SchedulerPage({
   openPrompt,
   resolveWorkspaceTitles,
   persistSnapshot,
+  persistPaint,
   initialSnapshot,
 }: Props) {
   const boot = initialSnapshot
@@ -147,7 +149,8 @@ export default function SchedulerPage({
       schedules,
       titles: [...workspaceTitles.entries()],
     });
-  }, [debouncedQuery, error, filter, loading, persistSnapshot, schedules, workspaceTitles]);
+    void persistPaint?.();
+  }, [debouncedQuery, error, filter, loading, persistPaint, persistSnapshot, schedules, workspaceTitles]);
 
   useEffect(() => {
     setExpanded(new Set());

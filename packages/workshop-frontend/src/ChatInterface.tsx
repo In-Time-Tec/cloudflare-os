@@ -4277,6 +4277,31 @@ function fallbackToStoredModelSelection(
   return getStoredSelectedModel(availableModels);
 }
 
+function seedChatCache(
+  initialChats?: AiChatMetadata[],
+  initialHistory?: { chatId: number; page: AiChatHistoryPage },
+): ChatCache {
+  const chats = new Map<number, AiChatMetadata>();
+  for (const chat of initialChats ?? []) chats.set(chat.id, chat);
+  const messages = new Map<number, AiChatMessage[]>();
+  const compacted = new Map<number, CompactionBoundary[]>();
+  if (initialHistory) {
+    const pageMessages: AiChatMessage[] = [];
+    for (const msg of initialHistory.page.messages) pageMessages[msg.sequence] = msg;
+    messages.set(initialHistory.chatId, pageMessages);
+    if (initialHistory.page.compacted) {
+      compacted.set(initialHistory.chatId, [initialHistory.page.compacted]);
+    }
+  }
+  return {
+    chats,
+    messages,
+    compacted,
+    actionMessages: new Map(),
+    lastMessageTimestamp: null,
+  };
+}
+
 interface ChatInterfaceProps {
   workspaceId: string | undefined;
   overseer: RpcStub<Overseer>;
@@ -4315,6 +4340,9 @@ interface ChatInterfaceProps {
   // The output format a workpiece was built as, so a created-app card can name and draw it as the
   // Document (or whatever) it is rather than a generic app.
   outputOfWorkpiece: (gadgetId: WorkpieceId) => BlueprintOutput | undefined;
+  initialChats?: AiChatMetadata[];
+  initialModels?: AiChatAuthorInfo[];
+  initialHistory?: { chatId: number; page: AiChatHistoryPage };
 }
 
 // Bucket a chat's lastActive into a time grouping for the chat list.
@@ -4497,18 +4525,15 @@ function ChatInterface({
   constrainChatWidth,
   onOpenGadget,
   outputOfWorkpiece,
+  initialChats,
+  initialModels,
+  initialHistory,
 }: ChatInterfaceProps) {
   // Persistent cache that survives reconnects
   const toasts = useKumoToastManager();
   const { currentUser } = useAuthenticatedApi();
   const getOverseer = useCallback(() => overseer, [overseer]);
-  const cacheRef = useRef<ChatCache>({
-    chats: new Map(),
-    messages: new Map(),
-    compacted: new Map(),
-    actionMessages: new Map(),
-    lastMessageTimestamp: null,
-  });
+  const cacheRef = useRef<ChatCache>(seedChatCache(initialChats, initialHistory));
   const provisionalRef = useRef<Map<number, ProvisionalChatState>>(new Map());
   const draftRef = useRef<Map<number, DraftChatState>>(new Map());
   // Last server-instance generation seen (survives reconnects). Used to detect a full DO restart,
@@ -4518,7 +4543,7 @@ function ChatInterface({
 
   // UI state
   const [_isSubscribed, setIsSubscribed] = useState(false);
-  const [chatListReady, setChatListReady] = useState(false);
+  const [chatListReady, setChatListReady] = useState(() => initialChats !== undefined);
   // Out-of-credits modal (free-tier limit reached). `usageModalShownFor` tracks the error sequence
   // we've already auto-opened for, so dismissing it doesn't immediately reopen.
   const [usageModalOpen, setUsageModalOpen] = useState(false);
@@ -4579,9 +4604,11 @@ function ChatInterface({
     new Set(),
   );
   const [availableModels, setAvailableModels] = useState<AiChatAuthorInfo[]>(
-    [],
+    () => initialModels ?? [],
   );
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string | null>(() =>
+    initialModels ? getStoredSelectedModel(initialModels) : null,
+  );
   const [sidebarActiveTab, setSidebarActiveTab] = useState<
     "chat" | "connections"
   >("chat");

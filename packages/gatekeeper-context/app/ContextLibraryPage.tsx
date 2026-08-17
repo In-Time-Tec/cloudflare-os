@@ -932,9 +932,11 @@ export type ContextLibrarySnapshot = {
 export default function ContextLibraryPage({
   initialSnapshot,
   persistSnapshot,
+  persistPaint,
 }: {
   initialSnapshot?: ContextLibrarySnapshot;
   persistSnapshot?: (snapshot: ContextLibrarySnapshot) => void | Promise<void>;
+  persistPaint?: () => void | Promise<void>;
 } = {}) {
   const context = useContextApi();
 
@@ -972,6 +974,11 @@ export default function ContextLibraryPage({
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    if (!enabledLoaded || !persistPaint) return;
+    void persistPaint();
+  }, [enabled, enabledLoaded, persistPaint]);
 
   const searchLower = search.toLowerCase();
   // One combined list: public (org) collections first, then your own, each alphabetical.

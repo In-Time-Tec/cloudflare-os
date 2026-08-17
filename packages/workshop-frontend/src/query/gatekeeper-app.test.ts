@@ -42,6 +42,13 @@ describe('withPersistedSnapshot', () => {
     expect(next).not.toContain('</script><img>')
     expect(next).toContain('\\u003c/script>')
   })
+
+  it('fills #root with the last paint when a snapshot exists', () => {
+    const html = '<html><head></head><body><div id="root"></div></body></html>'
+    const next = withPersistedSnapshot(html, { enabled: [] }, '<h1>Context &amp; Skills</h1>')
+    expect(next).toContain('<div id="root"><h1>Context &amp; Skills</h1></div>')
+    expect(withPersistedSnapshot(html, undefined, '<h1>Nope</h1>')).toBe(html)
+  })
 })
 
 describe('resolveGatekeeperAppHtml', () => {

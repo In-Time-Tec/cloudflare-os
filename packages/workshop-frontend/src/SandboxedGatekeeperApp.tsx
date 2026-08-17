@@ -19,7 +19,9 @@ import {
   type GatekeeperAppWorkspaceTarget,
 } from './gatekeeperAppNavigation'
 import {
+  persistGatekeeperAppPaint,
   persistGatekeeperAppSnapshot,
+  readGatekeeperAppPaint,
   readGatekeeperAppSnapshot,
   withPersistedSnapshot,
 } from './query/gatekeeper-app'
@@ -128,6 +130,10 @@ class GatekeeperAppHostImpl extends RpcTarget {
 
   writePersistedSnapshot(data: unknown): void {
     persistGatekeeperAppSnapshot(this.#appId, data)
+  }
+
+  writePersistedPaint(html: string): void {
+    persistGatekeeperAppPaint(this.#appId, html)
   }
 
   get ui(): RpcStub<RpcTarget> {
@@ -312,9 +318,14 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
   const pendingPortRef = useRef<MessagePort | null>(null)
   const srcDocRef = useRef<{ appId: string; html: string } | undefined>(undefined)
   if (srcDocRef.current?.appId !== gatekeeperVendorId) {
+    const snapshot = readGatekeeperAppSnapshot(gatekeeperVendorId)
     srcDocRef.current = {
       appId: gatekeeperVendorId,
-      html: withPersistedSnapshot(frame.iframeHtml, readGatekeeperAppSnapshot(gatekeeperVendorId)),
+      html: withPersistedSnapshot(
+        frame.iframeHtml,
+        snapshot,
+        snapshot === undefined ? undefined : readGatekeeperAppPaint(gatekeeperVendorId),
+      ),
     }
   }
 

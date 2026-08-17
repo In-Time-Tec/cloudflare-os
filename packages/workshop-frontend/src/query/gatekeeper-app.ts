@@ -21,6 +21,13 @@ export function gatekeeperAppSnapshotKey(
   return accountKey(session.cacheScope, 'gatekeeperAppSnapshot', appId)
 }
 
+export function gatekeeperAppPaintKey(
+  appId: string,
+  session: WorkshopSession = workshopSession,
+) {
+  return accountKey(session.cacheScope, 'gatekeeperAppPaint', appId)
+}
+
 export function readGatekeeperAppHtml(appId: string): string | undefined {
   return queryClient.getQueryData(gatekeeperAppHtmlKey(appId))
 }
@@ -29,12 +36,23 @@ export function readGatekeeperAppSnapshot(appId: string): unknown {
   return queryClient.getQueryData(gatekeeperAppSnapshotKey(appId))
 }
 
+export function readGatekeeperAppPaint(appId: string): string | undefined {
+  return queryClient.getQueryData(gatekeeperAppPaintKey(appId))
+}
+
 export function persistGatekeeperAppHtml(appId: string, html: string): Promise<string> {
   return persistQueryData(queryClient, gatekeeperAppHtmlKey(appId), html)
 }
 
 export function persistGatekeeperAppSnapshot(appId: string, snapshot: unknown): Promise<unknown> {
   return persistQueryData(queryClient, gatekeeperAppSnapshotKey(appId), snapshot)
+}
+
+const MAX_PAINT_HTML = 500_000
+
+export function persistGatekeeperAppPaint(appId: string, html: string): Promise<string> | undefined {
+  if (html.length === 0 || html.length > MAX_PAINT_HTML) return undefined
+  return persistQueryData(queryClient, gatekeeperAppPaintKey(appId), html)
 }
 
 export function disposeGatekeeperFrame(frame: GatekeeperUiFrame | null | undefined): void {
@@ -79,11 +97,15 @@ export async function ensureGatekeeperAppHtml(
   return frame.iframeHtml
 }
 
-export function withPersistedSnapshot(html: string, snapshot: unknown): string {
+export function withPersistedSnapshot(html: string, snapshot: unknown, paintHtml?: string): string {
   if (snapshot === undefined) return html
   const json = JSON.stringify(snapshot).replace(/</g, '\\u003c')
   const tag = `<script>window.${GATEKEEPER_PERSISTED_GLOBAL}=${json}</script>`
   const headClose = html.search(/<\/head>/i)
-  if (headClose >= 0) return `${html.slice(0, headClose)}${tag}${html.slice(headClose)}`
-  return `${tag}${html}`
+  let next = headClose >= 0 ? `${html.slice(0, headClose)}${tag}${html.slice(headClose)}` : `${tag}${html}`
+  if (paintHtml) {
+    const safe = paintHtml.replace(/<script\b/gi, '<span')
+    next = next.replace(/<div\s+id=["']?root["']?\s*>\s*<\/div>/i, `<div id="root">${safe}</div>`)
+  }
+  return next
 }

@@ -29,6 +29,7 @@ interface HostCapability extends RpcTarget {
   openPrompt(prompt: string): Promise<void>;
   readPersistedSnapshot(): Promise<SchedulerSnapshot | null>;
   writePersistedSnapshot(data: SchedulerSnapshot): Promise<void>;
+  writePersistedPaint(html: string): Promise<void>;
 }
 
 function readBootSnapshot(): SchedulerSnapshot | undefined {
@@ -63,6 +64,10 @@ function main() {
         resolveWorkspaceTitles={(ids) => host.resolveWorkspaceTitles(ids)}
         openPrompt={(prompt) => host.openPrompt(prompt)}
         persistSnapshot={(snapshot) => host.writePersistedSnapshot(snapshot)}
+        persistPaint={() => {
+          const root = document.getElementById("root");
+          if (root) void host.writePersistedPaint(root.innerHTML);
+        }}
         initialSnapshot={readBootSnapshot()}
       />
     </ErrorBoundary>,
