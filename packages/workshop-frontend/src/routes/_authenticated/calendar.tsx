@@ -3,12 +3,12 @@ import { useMemo, useState } from 'react'
 import {
   CalendarBlank, CaretLeft, CaretRight, VideoCamera, MapPin, Users, ArrowSquareOut, X,
 } from '@phosphor-icons/react'
-import CommsLayout from '../conversations/CommsLayout'
-import WeekCalendar, { weekBounds } from '../conversations/WeekCalendar'
-import { useConversations } from '../conversations/ConversationsContext'
-import { useAgendaQuery } from '../query/conversations'
-import { Avatar, PaneHeader } from '../conversations/primitives'
-import { useDocumentTitle } from '../useDocumentTitle'
+import CommsLayout from '../../conversations/CommsLayout'
+import WeekCalendar, { weekBounds } from '../../conversations/WeekCalendar'
+import { useConversations } from '../../conversations/ConversationsContext'
+import { useAgendaQuery, conversationsCapabilityOptions, agendaOptions } from '../../query/conversations'
+import { Avatar, PaneHeader } from '../../conversations/primitives'
+import { useDocumentTitle } from '../../useDocumentTitle'
 
 // The Calendar page: a week view of the connected account's meetings. Selecting an event shows
 // its details — attendees, location, and a Join button for Teams meetings. The grid pane and the
@@ -17,10 +17,22 @@ import { useDocumentTitle } from '../useDocumentTitle'
 // Below `md` the detail pane is an overlay over the grid rather than a second column: a phone has
 // no room for two panes, and the grid is already narrowed to a single day at that width.
 
-export const Route = createFileRoute('/calendar')({
+export const Route = createFileRoute('/_authenticated/calendar')({
   component: CalendarPage,
   validateSearch: (search: Record<string, unknown>): { e?: string } =>
     typeof search.e === 'string' ? { e: search.e } : {},
+  loaderDeps: ({ search }) => ({ eventId: search.e }),
+  loader: async ({ context }) => {
+    const available = await context.queryClient.ensureQueryData(
+      conversationsCapabilityOptions(context.session),
+    )
+    if (!available) return
+    const { start, end } = weekBounds(new Date())
+    await context.queryClient.ensureQueryData({
+      ...agendaOptions(context.session, start, end),
+      revalidateIfStale: true,
+    })
+  },
 })
 
 const NAV_BUTTON =
@@ -33,7 +45,7 @@ function CalendarPage() {
   const { avatarFor, available } = useConversations()
   const [anchor, setAnchor] = useState(() => new Date())
   const { start: weekStart, end: weekEnd } = weekBounds(anchor)
-  const { data: agenda = [], isLoading: agendaLoading } = useAgendaQuery(weekStart, weekEnd)
+  const { data: agenda = [] } = useAgendaQuery(weekStart, weekEnd)
 
   const selected = useMemo(() =>
     agenda.find(entry => entry.id === selectedId) ?? null, [agenda, selectedId])
@@ -92,7 +104,6 @@ function CalendarPage() {
               rules with no events in them, so nothing about the page moves when the week arrives —
               only the chips appear. */}
           <WeekCalendar anchor={anchor} entries={agenda} selectedId={selectedId}
-              loading={agendaLoading && agenda.length === 0}
               onSelect={id => navigate({ search: { e: id } })}
               onAnchorChange={day => setAnchor(day)} />
         </div>

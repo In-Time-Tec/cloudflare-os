@@ -2,7 +2,6 @@ import { useKumoToastManager } from '@cloudflare/kumo'
 import { useAuthenticatedApi } from './AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
 import { useWhoami, whoamiKey } from './query/hooks'
-import { Skeleton } from './components/Skeleton'
 import { useState, useEffect, useRef } from 'react'
 import { AiChatAuthorInfo } from '@gadgets/workshop-shared/api'
 import { hashPassword } from './passwordHash'
@@ -143,7 +142,7 @@ export default function SettingsPage() {
 
     try {
       await authenticatedApi.setOwnDisplayName(nameInput.trim())
-      queryClient.setQueryData(whoamiKey, (prev: AiChatAuthorInfo | undefined) =>
+      queryClient.setQueryData(whoamiKey(), (prev: AiChatAuthorInfo | undefined) =>
         prev ? { ...prev, name: nameInput.trim() } : prev)
       setIsEditingName(false)
       toasts.add({ title: 'Display name updated', variant: 'success' })
@@ -229,28 +228,7 @@ export default function SettingsPage() {
   const displayAvatarUrl = localAvatarPreview || avatarUrl
 
   if (loading) {
-    return (
-      <div className="mx-auto flex h-full w-full max-w-2xl flex-col px-6 pb-16 sm:px-10">
-        <div className="px-1 pb-2 pt-10">
-          <Skeleton className="h-[1lh] w-40 text-2xl" />
-          <Skeleton className="mt-1 h-[1lh] w-64 text-[13px] leading-[18px]" />
-        </div>
-        <div className="mt-6 flex flex-col gap-9">
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-[1lh] w-24 text-[12px]" />
-            <div className="overflow-hidden rounded-xl border border-kumo-line bg-kumo-base">
-              <div className="flex items-center gap-4 px-5 py-4">
-                <Skeleton className="h-16 w-16 rounded-full" />
-                <div className="min-w-0 flex-1">
-                  <Skeleton className="h-[1lh] w-32 text-[15px]" />
-                  <Skeleton className="mt-0.5 h-[1lh] w-44 text-[12px] leading-4" />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
+    return <div className="mx-auto h-full w-full max-w-2xl px-6 pb-16 sm:px-10" />
   }
 
   return (
@@ -273,6 +251,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={avatarUploading}
+                aria-busy={avatarUploading}
                 className="press group relative flex h-16 w-16 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-kumo-fill disabled:cursor-wait"
               >
                 {displayAvatarUrl ? (
@@ -284,8 +263,8 @@ export default function SettingsPage() {
                   <Camera size={18} className="text-white" />
                 </div>
                 {avatarUploading && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-kumo-base/80">
-                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-kumo-brand border-t-transparent" />
+                  <div className="absolute inset-0 flex items-center justify-center bg-kumo-base/90 px-2 text-[10px] font-medium text-kumo-default">
+                    Uploading…
                   </div>
                 )}
               </button>

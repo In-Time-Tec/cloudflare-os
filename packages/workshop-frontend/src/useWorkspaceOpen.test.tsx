@@ -23,6 +23,12 @@ vi.mock('./components/WorkshopControls', () => ({
   ),
 }))
 
+vi.mock('./ServerConfigContext', () => ({
+  useSiteName: () => 'Cloudflare OS',
+  useServerConfig: () => null,
+  useServerConfigError: () => false,
+}))
+
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(next => { resolve = next })

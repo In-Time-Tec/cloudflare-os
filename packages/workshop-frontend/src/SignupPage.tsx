@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { RpcStub } from "capnweb";
 import { PublicApi } from "@gadgets/workshop-shared/api";
 import { Hexagon } from "@phosphor-icons/react";
-import { Input, Button, Banner, Loader } from "@cloudflare/kumo";
+import { Input, Button, Banner } from "@cloudflare/kumo";
 import { hashPassword } from "./passwordHash";
 import { useServerConfig, useServerConfigError, useSiteName } from "./ServerConfigContext";
 import { useDocumentTitle } from "./useDocumentTitle";
@@ -91,14 +91,7 @@ export default function SignupPage({ rpcStub }: SignupPageProps) {
         </div>
       );
     }
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-kumo-base px-4">
-        <Loader size="lg" />
-        <p className="text-sm text-kumo-subtle text-center">
-          {connectionLost ? "Can't reach the server. Retrying…" : "Loading…"}
-        </p>
-      </div>
-    );
+    return <div className="min-h-screen bg-kumo-base" />;
   }
 
   const authVendors = serverConfig.authVendors ?? [];
@@ -188,11 +181,11 @@ export default function SignupPage({ rpcStub }: SignupPageProps) {
               <Button
                 type="submit"
                 variant="primary"
-                disabled={!canSubmit}
-                loading={loading}
+                disabled={loading || !canSubmit}
+                aria-busy={loading}
                 className="w-full justify-center"
               >
-                Create account
+                {loading ? "Creating…" : "Create account"}
               </Button>
             </form>
           </>

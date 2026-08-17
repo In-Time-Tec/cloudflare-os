@@ -1,18 +1,22 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { useRpcStub } from '../RpcContext'
-import { CF_ACCESS_MODE } from '../useAuth'
-import { Navigate } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import SignupPage from '../SignupPage'
+import { CF_ACCESS_MODE } from '../session'
+import { serverConfigOptions } from '../query/public'
 
 export const Route = createFileRoute('/signup')({
+  beforeLoad: () => {
+    if (CF_ACCESS_MODE) {
+      throw redirect({ to: '/' })
+    }
+  },
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData({
+      ...serverConfigOptions(context.session),
+      revalidateIfStale: true,
+    }),
   component: SignupRoute,
 })
 
 function SignupRoute() {
-  const rpcStub = useRpcStub()
-  // Signup is not available in CF Access mode — identity is managed by Access.
-  if (CF_ACCESS_MODE) {
-    return <Navigate to="/" replace />
-  }
-  return <SignupPage rpcStub={rpcStub} />
+  return <SignupPage rpcStub={Route.useRouteContext().session.publicApi} />
 }

@@ -3,6 +3,7 @@
 
 import { act, type ComponentProps, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { RpcStub } from 'capnweb'
 import type {
@@ -29,7 +30,6 @@ vi.mock('@cloudflare/kumo', () => {
   )
   return {
     Dialog,
-    Loader: () => <span>Loading</span>,
     Select,
     Text: ({ children }: { children: ReactNode }) => <p>{children}</p>,
     useKumoToastManager: () => ({ add: vi.fn<(toast: unknown) => void>() }),
@@ -43,6 +43,29 @@ vi.mock('./components/WorkshopControls', () => ({
 }))
 
 vi.mock('./components/Avatar', () => ({ default: () => <span data-testid="avatar" /> }))
+
+const sessionState = vi.hoisted(() => ({
+  cacheScope: 'acct',
+}))
+
+vi.mock('./session', () => ({
+  workshopSession: {
+    get cacheScope() { return sessionState.cacheScope },
+    requireAuthenticatedApi: () => ({
+      listGatekeeperVendors: async () => [{
+        id: 'google',
+        description: { displayName: 'Google', color: '#4285f4' },
+        supportedResources: [{
+          urlPattern: 'https://docs.google.com/document/d/:docId/*',
+          title: 'Google Doc',
+          description: 'Read and edit documents you choose.',
+          grantable: true,
+        }],
+      }],
+      listAddableGatekeepers: async () => [],
+    }),
+  },
+}))
 
 import ObserverConfigModal from './ObserverConfigModal'
 
@@ -142,13 +165,22 @@ describe('ObserverConfigModal account selection', () => {
     document.body.append(container)
     root = createRoot(container)
     await act(async () => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+      client.setQueryData(['account', 'acct', 'gatekeeperVendors', null], [{
+        id: 'google',
+        description: VENDOR,
+        supportedResources: [DOC_RESOURCE],
+      }])
+      client.setQueryData(['account', 'acct', 'addableGatekeepers'], [])
       root!.render(
-        <ObserverConfigModal
-          needs={[NEED]}
-          authenticatedApi={options.api ?? fakeApi(accountEntries)}
-          onConfirm={options.onConfirm ?? (() => {})}
-          onCancel={() => {}}
-        />,
+        <QueryClientProvider client={client}>
+          <ObserverConfigModal
+            needs={[NEED]}
+            authenticatedApi={options.api ?? fakeApi(accountEntries)}
+            onConfirm={options.onConfirm ?? (() => {})}
+            onCancel={() => {}}
+          />
+        </QueryClientProvider>,
       )
       await Promise.resolve()
     })

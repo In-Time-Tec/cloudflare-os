@@ -1,10 +1,10 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { Plus } from '@phosphor-icons/react'
-import GadgetList from '../components/GadgetList'
-import PageChrome, { PAGE_ACTION } from '../components/AppShell/PageChrome'
-import { useDocumentTitle } from '../useDocumentTitle'
+import GadgetList from '../../components/GadgetList'
+import PageChrome, { PAGE_ACTION } from '../../components/AppShell/PageChrome'
+import { useDocumentTitle } from '../../useDocumentTitle'
 
-export const Route = createFileRoute('/workspaces')({
+export const Route = createFileRoute('/_authenticated/workspaces')({
   component: WorkspacesPage,
 })
 

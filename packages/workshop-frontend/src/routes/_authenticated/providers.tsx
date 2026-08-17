@@ -1,10 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, useRef } from 'react'
 import { DropdownMenu, useKumoToastManager } from '@cloudflare/kumo'
-import { useAuthenticatedApi } from '../AuthContext'
+import { useAuthenticatedApi } from '../../AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
-import { useAiConfig, useModels, useQuickModel, quickModelKey } from '../query/hooks'
-import { Skeleton, SkeletonListRow, SkeletonRows } from '../components/Skeleton'
+import { useAiConfig, useModels, useQuickModel, quickModelKey } from '../../query/hooks'
 import {
   AiChatAuthorInfo,
   AiGatewayInfo,
@@ -18,13 +17,13 @@ import {
   MagnifyingGlass,
   DotsThreeVertical,
 } from '@phosphor-icons/react'
-import AddModelModal from '../AddModelModal'
-import { getModelProviderLogo } from '../modelProviderLogo'
-import { useDocumentTitle } from '../useDocumentTitle'
-import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from '../components/menuStyles'
-import PageChrome, { PAGE_ACTION } from '../components/AppShell/PageChrome'
+import AddModelModal from '../../AddModelModal'
+import { getModelProviderLogo } from '../../modelProviderLogo'
+import { useDocumentTitle } from '../../useDocumentTitle'
+import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from '../../components/menuStyles'
+import PageChrome, { PAGE_ACTION } from '../../components/AppShell/PageChrome'
 
-export const Route = createFileRoute('/providers')({ component: ProvidersPage })
+export const Route = createFileRoute('/_authenticated/providers')({ component: ProvidersPage })
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
@@ -199,12 +198,12 @@ function ProvidersPage() {
     if (quickInFlight.current) return
     quickInFlight.current = true
     const next = quickModel === modelId ? null : modelId
-    queryClient.setQueryData(quickModelKey, next)
+    queryClient.setQueryData(quickModelKey(), next)
     try {
       await authenticatedApi.setQuickModel(next)
     } catch (err) {
       console.error('Failed to set quick model:', err)
-      queryClient.setQueryData(quickModelKey, quickModel) // revert
+      queryClient.setQueryData(quickModelKey(), quickModel)
       toasts.add({ title: 'Failed to update default model', variant: 'error' })
     } finally {
       quickInFlight.current = false
@@ -232,11 +231,6 @@ function ProvidersPage() {
 
       {/* Search — hidden when the user has no models; reserved while loading so the list below
           keeps its position when the models arrive. */}
-      {loading && (
-        <div className="mb-3 px-3">
-          <Skeleton className="h-9 w-full rounded-lg" />
-        </div>
-      )}
       {!loading && !loadError && models.length > 0 && (
         <div className="mb-3 px-3">
           <div className="relative">
@@ -285,7 +279,7 @@ function ProvidersPage() {
 
         {/* Model list */}
         {loading ? (
-          <SkeletonRows count={6}>{(i) => <SkeletonListRow key={i} />}</SkeletonRows>
+          null
         ) : loadError ? (
           <div className="py-12 text-center text-sm">
             <p className="text-kumo-danger">Something went wrong loading your providers.</p>

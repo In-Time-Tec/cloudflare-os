@@ -9,89 +9,35 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as AdminRouteImport } from './routes/admin'
-import { Route as BlueprintsRouteImport } from './routes/blueprints'
-import { Route as CalendarRouteImport } from './routes/calendar'
-import { Route as ChannelsRouteImport } from './routes/channels'
-import { Route as ContextRouteImport } from './routes/context'
-import { Route as ConversationsRouteImport } from './routes/conversations'
-import { Route as EmailRouteImport } from './routes/email'
-import { Route as ExploreRouteImport } from './routes/explore'
-import { Route as GatekeepersRouteImport } from './routes/gatekeepers'
-import { Route as OutputsRouteImport } from './routes/outputs'
-import { Route as ProfileRouteImport } from './routes/profile'
-import { Route as ProvidersRouteImport } from './routes/providers'
+import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as SignupRouteImport } from './routes/signup'
-import { Route as WorkspacesRouteImport } from './routes/workspaces'
+import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
+import { Route as AuthenticatedBlueprintsRouteImport } from './routes/_authenticated/blueprints'
+import { Route as AuthenticatedCalendarRouteImport } from './routes/_authenticated/calendar'
+import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
+import { Route as AuthenticatedContextRouteImport } from './routes/_authenticated/context'
+import { Route as AuthenticatedConversationsRouteImport } from './routes/_authenticated/conversations'
+import { Route as AuthenticatedEmailRouteImport } from './routes/_authenticated/email'
+import { Route as AuthenticatedExploreRouteImport } from './routes/_authenticated/explore'
+import { Route as AuthenticatedGatekeepersRouteImport } from './routes/_authenticated/gatekeepers'
+import { Route as AuthenticatedOutputsRouteImport } from './routes/_authenticated/outputs'
+import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
+import { Route as AuthenticatedProvidersRouteImport } from './routes/_authenticated/providers'
+import { Route as AuthenticatedWorkspacesRouteImport } from './routes/_authenticated/workspaces'
 import { Route as BlueprintIdRouteImport } from './routes/blueprint.$id'
 import { Route as GadgetIdRouteImport } from './routes/gadget.$id'
-import { Route as GatekeepersAppIdRouteImport } from './routes/gatekeepers_.$appId'
-import { Route as WorkspaceIdRouteImport } from './routes/workspace.$id'
+import { Route as AuthenticatedGatekeepersAppIdRouteImport } from './routes/_authenticated/gatekeepers_.$appId'
+import { Route as AuthenticatedWorkspaceIdRouteImport } from './routes/_authenticated/workspace.$id'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AuthenticatedRoute = AuthenticatedRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AdminRoute = AdminRouteImport.update({
-  id: '/admin',
-  path: '/admin',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BlueprintsRoute = BlueprintsRouteImport.update({
-  id: '/blueprints',
-  path: '/blueprints',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CalendarRoute = CalendarRouteImport.update({
-  id: '/calendar',
-  path: '/calendar',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChannelsRoute = ChannelsRouteImport.update({
-  id: '/channels',
-  path: '/channels',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ContextRoute = ContextRouteImport.update({
-  id: '/context',
-  path: '/context',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConversationsRoute = ConversationsRouteImport.update({
-  id: '/conversations',
-  path: '/conversations',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const EmailRoute = EmailRouteImport.update({
-  id: '/email',
-  path: '/email',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ExploreRoute = ExploreRouteImport.update({
-  id: '/explore',
-  path: '/explore',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GatekeepersRoute = GatekeepersRouteImport.update({
-  id: '/gatekeepers',
-  path: '/gatekeepers',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OutputsRoute = OutputsRouteImport.update({
-  id: '/outputs',
-  path: '/outputs',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProfileRoute = ProfileRouteImport.update({
-  id: '/profile',
-  path: '/profile',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProvidersRoute = ProvidersRouteImport.update({
-  id: '/providers',
-  path: '/providers',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SignupRoute = SignupRouteImport.update({
@@ -99,10 +45,77 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WorkspacesRoute = WorkspacesRouteImport.update({
+const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedBlueprintsRoute = AuthenticatedBlueprintsRouteImport.update({
+  id: '/blueprints',
+  path: '/blueprints',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedCalendarRoute = AuthenticatedCalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedChannelsRoute = AuthenticatedChannelsRouteImport.update({
+  id: '/channels',
+  path: '/channels',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedContextRoute = AuthenticatedContextRouteImport.update({
+  id: '/context',
+  path: '/context',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedConversationsRoute =
+  AuthenticatedConversationsRouteImport.update({
+    id: '/conversations',
+    path: '/conversations',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedEmailRoute = AuthenticatedEmailRouteImport.update({
+  id: '/email',
+  path: '/email',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedExploreRoute = AuthenticatedExploreRouteImport.update({
+  id: '/explore',
+  path: '/explore',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedGatekeepersRoute =
+  AuthenticatedGatekeepersRouteImport.update({
+    id: '/gatekeepers',
+    path: '/gatekeepers',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedOutputsRoute = AuthenticatedOutputsRouteImport.update({
+  id: '/outputs',
+  path: '/outputs',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedProfileRoute = AuthenticatedProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedProvidersRoute = AuthenticatedProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedWorkspacesRoute = AuthenticatedWorkspacesRouteImport.update({
   id: '/workspaces',
   path: '/workspaces',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
 const BlueprintIdRoute = BlueprintIdRouteImport.update({
   id: '/blueprint/$id',
@@ -114,85 +127,93 @@ const GadgetIdRoute = GadgetIdRouteImport.update({
   path: '/gadget/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
-const GatekeepersAppIdRoute = GatekeepersAppIdRouteImport.update({
-  id: '/gatekeepers_/$appId',
-  path: '/gatekeepers/$appId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const WorkspaceIdRoute = WorkspaceIdRouteImport.update({
-  id: '/workspace/$id',
-  path: '/workspace/$id',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const AuthenticatedGatekeepersAppIdRoute =
+  AuthenticatedGatekeepersAppIdRouteImport.update({
+    id: '/gatekeepers_/$appId',
+    path: '/gatekeepers/$appId',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedWorkspaceIdRoute =
+  AuthenticatedWorkspaceIdRouteImport.update({
+    id: '/workspace/$id',
+    path: '/workspace/$id',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
-  '/blueprints': typeof BlueprintsRoute
-  '/calendar': typeof CalendarRoute
-  '/channels': typeof ChannelsRoute
-  '/context': typeof ContextRoute
-  '/conversations': typeof ConversationsRoute
-  '/email': typeof EmailRoute
-  '/explore': typeof ExploreRoute
-  '/gatekeepers': typeof GatekeepersRoute
-  '/outputs': typeof OutputsRoute
-  '/profile': typeof ProfileRoute
-  '/providers': typeof ProvidersRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
-  '/workspaces': typeof WorkspacesRoute
+  '/admin': typeof AuthenticatedAdminRoute
+  '/blueprints': typeof AuthenticatedBlueprintsRoute
+  '/calendar': typeof AuthenticatedCalendarRoute
+  '/channels': typeof AuthenticatedChannelsRoute
+  '/context': typeof AuthenticatedContextRoute
+  '/conversations': typeof AuthenticatedConversationsRoute
+  '/email': typeof AuthenticatedEmailRoute
+  '/explore': typeof AuthenticatedExploreRoute
+  '/gatekeepers': typeof AuthenticatedGatekeepersRoute
+  '/outputs': typeof AuthenticatedOutputsRoute
+  '/profile': typeof AuthenticatedProfileRoute
+  '/providers': typeof AuthenticatedProvidersRoute
+  '/workspaces': typeof AuthenticatedWorkspacesRoute
   '/blueprint/$id': typeof BlueprintIdRoute
   '/gadget/$id': typeof GadgetIdRoute
-  '/gatekeepers/$appId': typeof GatekeepersAppIdRoute
-  '/workspace/$id': typeof WorkspaceIdRoute
+  '/gatekeepers/$appId': typeof AuthenticatedGatekeepersAppIdRoute
+  '/workspace/$id': typeof AuthenticatedWorkspaceIdRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
-  '/blueprints': typeof BlueprintsRoute
-  '/calendar': typeof CalendarRoute
-  '/channels': typeof ChannelsRoute
-  '/context': typeof ContextRoute
-  '/conversations': typeof ConversationsRoute
-  '/email': typeof EmailRoute
-  '/explore': typeof ExploreRoute
-  '/gatekeepers': typeof GatekeepersRoute
-  '/outputs': typeof OutputsRoute
-  '/profile': typeof ProfileRoute
-  '/providers': typeof ProvidersRoute
+  '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
-  '/workspaces': typeof WorkspacesRoute
+  '/admin': typeof AuthenticatedAdminRoute
+  '/blueprints': typeof AuthenticatedBlueprintsRoute
+  '/calendar': typeof AuthenticatedCalendarRoute
+  '/channels': typeof AuthenticatedChannelsRoute
+  '/context': typeof AuthenticatedContextRoute
+  '/conversations': typeof AuthenticatedConversationsRoute
+  '/email': typeof AuthenticatedEmailRoute
+  '/explore': typeof AuthenticatedExploreRoute
+  '/gatekeepers': typeof AuthenticatedGatekeepersRoute
+  '/outputs': typeof AuthenticatedOutputsRoute
+  '/profile': typeof AuthenticatedProfileRoute
+  '/providers': typeof AuthenticatedProvidersRoute
+  '/workspaces': typeof AuthenticatedWorkspacesRoute
   '/blueprint/$id': typeof BlueprintIdRoute
   '/gadget/$id': typeof GadgetIdRoute
-  '/gatekeepers/$appId': typeof GatekeepersAppIdRoute
-  '/workspace/$id': typeof WorkspaceIdRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/gatekeepers/$appId': typeof AuthenticatedGatekeepersAppIdRoute
+  '/workspace/$id': typeof AuthenticatedWorkspaceIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
-  '/blueprints': typeof BlueprintsRoute
-  '/calendar': typeof CalendarRoute
-  '/channels': typeof ChannelsRoute
-  '/context': typeof ContextRoute
-  '/conversations': typeof ConversationsRoute
-  '/email': typeof EmailRoute
-  '/explore': typeof ExploreRoute
-  '/gatekeepers': typeof GatekeepersRoute
-  '/outputs': typeof OutputsRoute
-  '/profile': typeof ProfileRoute
-  '/providers': typeof ProvidersRoute
+  '/_authenticated': typeof AuthenticatedRouteWithChildren
+  '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
-  '/workspaces': typeof WorkspacesRoute
+  '/_authenticated/admin': typeof AuthenticatedAdminRoute
+  '/_authenticated/blueprints': typeof AuthenticatedBlueprintsRoute
+  '/_authenticated/calendar': typeof AuthenticatedCalendarRoute
+  '/_authenticated/channels': typeof AuthenticatedChannelsRoute
+  '/_authenticated/context': typeof AuthenticatedContextRoute
+  '/_authenticated/conversations': typeof AuthenticatedConversationsRoute
+  '/_authenticated/email': typeof AuthenticatedEmailRoute
+  '/_authenticated/explore': typeof AuthenticatedExploreRoute
+  '/_authenticated/gatekeepers': typeof AuthenticatedGatekeepersRoute
+  '/_authenticated/outputs': typeof AuthenticatedOutputsRoute
+  '/_authenticated/profile': typeof AuthenticatedProfileRoute
+  '/_authenticated/providers': typeof AuthenticatedProvidersRoute
+  '/_authenticated/workspaces': typeof AuthenticatedWorkspacesRoute
   '/blueprint/$id': typeof BlueprintIdRoute
   '/gadget/$id': typeof GadgetIdRoute
-  '/gatekeepers_/$appId': typeof GatekeepersAppIdRoute
-  '/workspace/$id': typeof WorkspaceIdRoute
+  '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/gatekeepers_/$appId': typeof AuthenticatedGatekeepersAppIdRoute
+  '/_authenticated/workspace/$id': typeof AuthenticatedWorkspaceIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/login'
+    | '/signup'
     | '/admin'
     | '/blueprints'
     | '/calendar'
@@ -205,7 +226,6 @@ export interface FileRouteTypes {
     | '/outputs'
     | '/profile'
     | '/providers'
-    | '/signup'
     | '/workspaces'
     | '/blueprint/$id'
     | '/gadget/$id'
@@ -213,7 +233,8 @@ export interface FileRouteTypes {
     | '/workspace/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
+    | '/login'
+    | '/signup'
     | '/admin'
     | '/blueprints'
     | '/calendar'
@@ -226,148 +247,59 @@ export interface FileRouteTypes {
     | '/outputs'
     | '/profile'
     | '/providers'
-    | '/signup'
     | '/workspaces'
     | '/blueprint/$id'
     | '/gadget/$id'
+    | '/'
     | '/gatekeepers/$appId'
     | '/workspace/$id'
   id:
     | '__root__'
-    | '/'
-    | '/admin'
-    | '/blueprints'
-    | '/calendar'
-    | '/channels'
-    | '/context'
-    | '/conversations'
-    | '/email'
-    | '/explore'
-    | '/gatekeepers'
-    | '/outputs'
-    | '/profile'
-    | '/providers'
+    | '/_authenticated'
+    | '/login'
     | '/signup'
-    | '/workspaces'
+    | '/_authenticated/admin'
+    | '/_authenticated/blueprints'
+    | '/_authenticated/calendar'
+    | '/_authenticated/channels'
+    | '/_authenticated/context'
+    | '/_authenticated/conversations'
+    | '/_authenticated/email'
+    | '/_authenticated/explore'
+    | '/_authenticated/gatekeepers'
+    | '/_authenticated/outputs'
+    | '/_authenticated/profile'
+    | '/_authenticated/providers'
+    | '/_authenticated/workspaces'
     | '/blueprint/$id'
     | '/gadget/$id'
-    | '/gatekeepers_/$appId'
-    | '/workspace/$id'
+    | '/_authenticated/'
+    | '/_authenticated/gatekeepers_/$appId'
+    | '/_authenticated/workspace/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  AdminRoute: typeof AdminRoute
-  BlueprintsRoute: typeof BlueprintsRoute
-  CalendarRoute: typeof CalendarRoute
-  ChannelsRoute: typeof ChannelsRoute
-  ContextRoute: typeof ContextRoute
-  ConversationsRoute: typeof ConversationsRoute
-  EmailRoute: typeof EmailRoute
-  ExploreRoute: typeof ExploreRoute
-  GatekeepersRoute: typeof GatekeepersRoute
-  OutputsRoute: typeof OutputsRoute
-  ProfileRoute: typeof ProfileRoute
-  ProvidersRoute: typeof ProvidersRoute
+  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
+  LoginRoute: typeof LoginRoute
   SignupRoute: typeof SignupRoute
-  WorkspacesRoute: typeof WorkspacesRoute
   BlueprintIdRoute: typeof BlueprintIdRoute
   GadgetIdRoute: typeof GadgetIdRoute
-  GatekeepersAppIdRoute: typeof GatekeepersAppIdRoute
-  WorkspaceIdRoute: typeof WorkspaceIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof AuthenticatedRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/admin': {
-      id: '/admin'
-      path: '/admin'
-      fullPath: '/admin'
-      preLoaderRoute: typeof AdminRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/blueprints': {
-      id: '/blueprints'
-      path: '/blueprints'
-      fullPath: '/blueprints'
-      preLoaderRoute: typeof BlueprintsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/calendar': {
-      id: '/calendar'
-      path: '/calendar'
-      fullPath: '/calendar'
-      preLoaderRoute: typeof CalendarRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/channels': {
-      id: '/channels'
-      path: '/channels'
-      fullPath: '/channels'
-      preLoaderRoute: typeof ChannelsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/context': {
-      id: '/context'
-      path: '/context'
-      fullPath: '/context'
-      preLoaderRoute: typeof ContextRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/conversations': {
-      id: '/conversations'
-      path: '/conversations'
-      fullPath: '/conversations'
-      preLoaderRoute: typeof ConversationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/email': {
-      id: '/email'
-      path: '/email'
-      fullPath: '/email'
-      preLoaderRoute: typeof EmailRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/explore': {
-      id: '/explore'
-      path: '/explore'
-      fullPath: '/explore'
-      preLoaderRoute: typeof ExploreRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/gatekeepers': {
-      id: '/gatekeepers'
-      path: '/gatekeepers'
-      fullPath: '/gatekeepers'
-      preLoaderRoute: typeof GatekeepersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/outputs': {
-      id: '/outputs'
-      path: '/outputs'
-      fullPath: '/outputs'
-      preLoaderRoute: typeof OutputsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/profile': {
-      id: '/profile'
-      path: '/profile'
-      fullPath: '/profile'
-      preLoaderRoute: typeof ProfileRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/providers': {
-      id: '/providers'
-      path: '/providers'
-      fullPath: '/providers'
-      preLoaderRoute: typeof ProvidersRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/signup': {
@@ -377,12 +309,103 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/workspaces': {
-      id: '/workspaces'
+    '/_authenticated/': {
+      id: '/_authenticated/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/admin': {
+      id: '/_authenticated/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AuthenticatedAdminRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/blueprints': {
+      id: '/_authenticated/blueprints'
+      path: '/blueprints'
+      fullPath: '/blueprints'
+      preLoaderRoute: typeof AuthenticatedBlueprintsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/calendar': {
+      id: '/_authenticated/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof AuthenticatedCalendarRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/channels': {
+      id: '/_authenticated/channels'
+      path: '/channels'
+      fullPath: '/channels'
+      preLoaderRoute: typeof AuthenticatedChannelsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/context': {
+      id: '/_authenticated/context'
+      path: '/context'
+      fullPath: '/context'
+      preLoaderRoute: typeof AuthenticatedContextRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/conversations': {
+      id: '/_authenticated/conversations'
+      path: '/conversations'
+      fullPath: '/conversations'
+      preLoaderRoute: typeof AuthenticatedConversationsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/email': {
+      id: '/_authenticated/email'
+      path: '/email'
+      fullPath: '/email'
+      preLoaderRoute: typeof AuthenticatedEmailRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/explore': {
+      id: '/_authenticated/explore'
+      path: '/explore'
+      fullPath: '/explore'
+      preLoaderRoute: typeof AuthenticatedExploreRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/gatekeepers': {
+      id: '/_authenticated/gatekeepers'
+      path: '/gatekeepers'
+      fullPath: '/gatekeepers'
+      preLoaderRoute: typeof AuthenticatedGatekeepersRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/outputs': {
+      id: '/_authenticated/outputs'
+      path: '/outputs'
+      fullPath: '/outputs'
+      preLoaderRoute: typeof AuthenticatedOutputsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/profile': {
+      id: '/_authenticated/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof AuthenticatedProfileRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/providers': {
+      id: '/_authenticated/providers'
+      path: '/providers'
+      fullPath: '/providers'
+      preLoaderRoute: typeof AuthenticatedProvidersRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/workspaces': {
+      id: '/_authenticated/workspaces'
       path: '/workspaces'
       fullPath: '/workspaces'
-      preLoaderRoute: typeof WorkspacesRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedWorkspacesRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/blueprint/$id': {
       id: '/blueprint/$id'
@@ -398,43 +421,71 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GadgetIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/gatekeepers_/$appId': {
-      id: '/gatekeepers_/$appId'
+    '/_authenticated/gatekeepers_/$appId': {
+      id: '/_authenticated/gatekeepers_/$appId'
       path: '/gatekeepers/$appId'
       fullPath: '/gatekeepers/$appId'
-      preLoaderRoute: typeof GatekeepersAppIdRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedGatekeepersAppIdRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/workspace/$id': {
-      id: '/workspace/$id'
+    '/_authenticated/workspace/$id': {
+      id: '/_authenticated/workspace/$id'
       path: '/workspace/$id'
       fullPath: '/workspace/$id'
-      preLoaderRoute: typeof WorkspaceIdRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedWorkspaceIdRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
   }
 }
 
+interface AuthenticatedRouteChildren {
+  AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
+  AuthenticatedBlueprintsRoute: typeof AuthenticatedBlueprintsRoute
+  AuthenticatedCalendarRoute: typeof AuthenticatedCalendarRoute
+  AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
+  AuthenticatedContextRoute: typeof AuthenticatedContextRoute
+  AuthenticatedConversationsRoute: typeof AuthenticatedConversationsRoute
+  AuthenticatedEmailRoute: typeof AuthenticatedEmailRoute
+  AuthenticatedExploreRoute: typeof AuthenticatedExploreRoute
+  AuthenticatedGatekeepersRoute: typeof AuthenticatedGatekeepersRoute
+  AuthenticatedOutputsRoute: typeof AuthenticatedOutputsRoute
+  AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
+  AuthenticatedProvidersRoute: typeof AuthenticatedProvidersRoute
+  AuthenticatedWorkspacesRoute: typeof AuthenticatedWorkspacesRoute
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedGatekeepersAppIdRoute: typeof AuthenticatedGatekeepersAppIdRoute
+  AuthenticatedWorkspaceIdRoute: typeof AuthenticatedWorkspaceIdRoute
+}
+
+const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedAdminRoute: AuthenticatedAdminRoute,
+  AuthenticatedBlueprintsRoute: AuthenticatedBlueprintsRoute,
+  AuthenticatedCalendarRoute: AuthenticatedCalendarRoute,
+  AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
+  AuthenticatedContextRoute: AuthenticatedContextRoute,
+  AuthenticatedConversationsRoute: AuthenticatedConversationsRoute,
+  AuthenticatedEmailRoute: AuthenticatedEmailRoute,
+  AuthenticatedExploreRoute: AuthenticatedExploreRoute,
+  AuthenticatedGatekeepersRoute: AuthenticatedGatekeepersRoute,
+  AuthenticatedOutputsRoute: AuthenticatedOutputsRoute,
+  AuthenticatedProfileRoute: AuthenticatedProfileRoute,
+  AuthenticatedProvidersRoute: AuthenticatedProvidersRoute,
+  AuthenticatedWorkspacesRoute: AuthenticatedWorkspacesRoute,
+  AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedGatekeepersAppIdRoute: AuthenticatedGatekeepersAppIdRoute,
+  AuthenticatedWorkspaceIdRoute: AuthenticatedWorkspaceIdRoute,
+}
+
+const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
+  AuthenticatedRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  AdminRoute: AdminRoute,
-  BlueprintsRoute: BlueprintsRoute,
-  CalendarRoute: CalendarRoute,
-  ChannelsRoute: ChannelsRoute,
-  ContextRoute: ContextRoute,
-  ConversationsRoute: ConversationsRoute,
-  EmailRoute: EmailRoute,
-  ExploreRoute: ExploreRoute,
-  GatekeepersRoute: GatekeepersRoute,
-  OutputsRoute: OutputsRoute,
-  ProfileRoute: ProfileRoute,
-  ProvidersRoute: ProvidersRoute,
+  AuthenticatedRoute: AuthenticatedRouteWithChildren,
+  LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,
-  WorkspacesRoute: WorkspacesRoute,
   BlueprintIdRoute: BlueprintIdRoute,
   GadgetIdRoute: GadgetIdRoute,
-  GatekeepersAppIdRoute: GatekeepersAppIdRoute,
-  WorkspaceIdRoute: WorkspaceIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

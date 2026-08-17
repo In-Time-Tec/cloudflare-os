@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PaperPlaneRight, ChatsCircle } from '@phosphor-icons/react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ConversationMessage, ConversationSummary } from '@gadgets/workshop-shared/gatekeeper'
 import { parseRefKey, refKey, useConversations } from './ConversationsContext'
 import { useMessagesQuery, messagesKey } from '../query/conversations'
+import { sendConversationMessageOptions } from '../query/messages'
+import { workshopSession } from '../session'
 import { Avatar, PaneHeader, formatTime } from './primitives'
-import { Skeleton } from '../components/Skeleton'
 import { registerConversationsPush } from './push'
 
 // The conversation thread pane: header (avatar + title), message history, composer with
@@ -14,24 +15,17 @@ import { registerConversationsPush } from './push'
 
 type PendingSend = { key: string; text: string; status: 'sending' | 'failed' | 'unknown' }
 
-/** A plausible opening exchange, so the placeholder thread has a thread's shape. */
-const SKELETON_BUBBLES = [
-  { fromSelf: false, width: 'w-52' },
-  { fromSelf: true, width: 'w-36' },
-  { fromSelf: false, width: 'w-44' },
-  { fromSelf: true, width: 'w-28' },
-] as const
-
 export default function ThreadView({ conversation }: { conversation: ConversationSummary | null }) {
   const { api, avatarFor, onEvent, setViewing } = useConversations()
   const queryClient = useQueryClient()
   const selectedKey = conversation ? refKey(conversation.ref) : null
   const ref = conversation?.ref ?? null
-  const { data, isLoading: messagesLoading } = useMessagesQuery(ref)
+  const { data } = useMessagesQuery(ref)
   const messages = data?.messages ?? []
   const [pending, setPending] = useState<PendingSend[]>([])
   const [draft, setDraft] = useState('')
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const sendMutation = useMutation(sendConversationMessageOptions(workshopSession, queryClient))
 
   useEffect(() => {
     if (api) void registerConversationsPush(api.stub)
@@ -57,25 +51,23 @@ export default function ThreadView({ conversation }: { conversation: Conversatio
   }, [messages, pending])
 
   const send = useCallback(() => {
-    const stub = api?.stub
     const text = draft.trim()
-    if (!stub || !selectedKey || !text) return
+    if (!selectedKey || !text) return
     const key = `${Date.now()}-${Math.random()}`
+    const conversationRef = parseRefKey(selectedKey)
     setPending(prev => [...prev, { key, text, status: 'sending' }])
     setDraft('')
-    stub.sendMessage(parseRefKey(selectedKey), text)
-      .then(() => {
+    sendMutation.mutate({ ref: conversationRef, text }, {
+      onSuccess: () => {
         setPending(prev => prev.filter(p => p.key !== key))
-        queryClient.invalidateQueries({ queryKey: messagesKey(parseRefKey(selectedKey)) })
-      })
-      .catch(() => {
-        // The send may or may not have reached the provider (no idempotency key): mark unknown,
-        // reconcile by refetching, never blind-resend.
+      },
+      onError: () => {
         setPending(prev => prev.map(p => p.key === key ? { ...p, status: 'unknown' } : p))
         setTimeout(() =>
-          queryClient.invalidateQueries({ queryKey: messagesKey(parseRefKey(selectedKey)) }), 2000)
-      })
-  }, [api, selectedKey, draft, queryClient])
+          queryClient.invalidateQueries({ queryKey: messagesKey(conversationRef) }), 2000)
+      },
+    })
+  }, [selectedKey, draft, queryClient, sendMutation])
 
   if (!conversation) {
     return (
@@ -101,30 +93,7 @@ export default function ThreadView({ conversation }: { conversation: Conversatio
               : undefined)}
       />
       <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {messagesLoading && messages.length === 0 ? (
-          // Same gap, same avatar column, same bubble box as MessageBubble — and alternating sides,
-          // because a thread that loads all-left then re-flows half its bubbles right is the shift
-          // a placeholder is supposed to prevent.
-          <div className="flex flex-col gap-3">
-            {SKELETON_BUBBLES.map(({ fromSelf, width }, i) => (
-              <div key={i} className={`flex gap-2 ${fromSelf ? 'justify-end' : ''}`}>
-                {!fromSelf && <Avatar size="md" />}
-                <div className={`max-w-[70%] rounded-lg px-3 py-2 ${
-                  fromSelf ? 'bg-kumo-brand/10' : 'bg-kumo-elevated'
-                }`}>
-                  {!fromSelf && (
-                    <p className="mb-0.5 flex items-baseline gap-2">
-                      <Skeleton className="h-[1lh] w-20 text-[12px]" />
-                      <Skeleton className="h-[1lh] w-8 text-[10px]" />
-                    </p>
-                  )}
-                  <Skeleton className={`h-[1lh] text-[13px] ${width}`} />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3">
             {messages.map(message => (
               <MessageBubble key={message.id} message={message} avatarFor={avatarFor} />
             ))}
@@ -141,7 +110,6 @@ export default function ThreadView({ conversation }: { conversation: Conversatio
               </div>
             ))}
           </div>
-        )}
       </div>
       <div className="shrink-0 border-t border-kumo-line p-3">
         <div className="flex items-end gap-2">

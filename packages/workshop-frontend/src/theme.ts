@@ -16,7 +16,7 @@ import { applyAccentColor as applyAccentColorToStyle } from '@gadgets/workshop-s
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type ResolvedThemeMode = 'light' | 'dark'
 
-const THEME_MODE_STORAGE_KEY = 'gadgets:theme-mode'
+export const THEME_MODE_STORAGE_KEY = 'gadgets:theme-mode'
 
 function isThemeMode(value: string | null): value is ThemeMode {
   return value === 'light' || value === 'dark' || value === 'system'

@@ -1,11 +1,7 @@
 import { logRpcFailure } from './rpcErrors'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import { useAuthenticatedApi } from './AuthContext'
-import {
-  AiChatAuthorInfo,
-  AiGatewayInfo,
-} from '@gadgets/workshop-shared/api'
 import {
   VendorDescription,
 } from '@gadgets/workshop-shared/gatekeeper'
@@ -32,6 +28,8 @@ import { useSiteName } from './ServerConfigContext'
 import SiteLogo from './components/SiteLogo'
 import { useDocumentTitle } from './useDocumentTitle'
 import { AccountsSubscriberAdapter } from './accountsSubscriber'
+import { useQueryClient } from '@tanstack/react-query'
+import { modelsKey, useAiConfig, useGatekeeperVendors, useModels } from './query/hooks'
 
 // ─── constants ──────────────────────────────────────────────────────────────────
 
@@ -63,6 +61,7 @@ export default function OnboardingWizard({
   onComplete: () => void
 }) {
   const { authenticatedApi, currentUser } = useAuthenticatedApi()
+  const queryClient = useQueryClient()
   const { resolvedThemeMode } = useTheme()
   const toasts = useKumoToastManager()
   const siteName = useSiteName()
@@ -81,17 +80,14 @@ export default function OnboardingWizard({
   const [avatarProcessing, setAvatarProcessing] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Model state
-  const [models, setModels] = useState<AiChatAuthorInfo[]>([])
+  const { data: models = [] } = useModels()
+  const { data: aiConfig = null } = useAiConfig()
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
-  const [aiConfig, setAiConfig] = useState<AiGatewayInfo | null>(null)
   const [addModelOpen, setAddModelOpen] = useState(false)
-  const [modelsLoading, setModelsLoading] = useState(true)
 
-  // Connections state
+  const { data: vendorList = [], isFetched: vendorsFetched } = useGatekeeperVendors()
   const [vendors, setVendors] = useState<VendorEntry[]>([])
   const [connectedVendorIds, setConnectedVendorIds] = useState<Set<string>>(new Set())
-  const [vendorsLoading, setVendorsLoading] = useState(true)
   const [connectingVendorId, setConnectingVendorId] = useState<string | null>(null)
 
   // Entrance animation
@@ -114,29 +110,11 @@ export default function OnboardingWizard({
     }
   }, [currentUser])
 
-  // Load models + AI config
-  const fetchModels = useCallback(async () => {
-    try {
-      const [modelList, cfg] = await Promise.all([
-        authenticatedApi.listModels(),
-        authenticatedApi.getAiConfig(),
-      ])
-      setModels(modelList)
-      setAiConfig(cfg)
-      // Default to the first model in the list
-      if (modelList.length > 0) {
-        setSelectedModelId((prev) => prev ?? modelList[0].id)
-      }
-    } catch (err) {
-      console.error('Failed to load models:', err)
-    } finally {
-      setModelsLoading(false)
-    }
-  }, [authenticatedApi])
-
   useEffect(() => {
-    fetchModels()
-  }, [fetchModels])
+    if (models.length > 0) {
+      setSelectedModelId((prev) => prev ?? models[0].id)
+    }
+  }, [models])
 
   // Load vendors and subscribe to connected accounts.
   // We use a url→vendorId lookup map (built from listGatekeeperVendors) so the
@@ -160,29 +138,17 @@ export default function OnboardingWizard({
       if (!cancelled) setConnectedVendorIds(ids)
     }
 
-    authenticatedApi
-      .listGatekeeperVendors()
-      .then((vendorList) => {
-        if (cancelled) return
-        for (const v of vendorList) {
-          urlToVendorId.set(v.description.url, v.id)
-        }
-        setVendors(
-          vendorList.map((v) => ({
-            id: v.id,
-            description: v.description,
-            logoKey: VENDOR_LOGO_MAP[v.id] ?? v.id.toLowerCase(),
-          })),
-        )
-        // Resolve any accounts that arrived before the vendor list.
-        if (pendingUrls.length > 0) refreshConnectedIds()
-      })
-      .catch((err) => {
-        console.error('Failed to load vendors:', err)
-      })
-      .finally(() => {
-        if (!cancelled) setVendorsLoading(false)
-      })
+    setVendors(
+      vendorList.map((v) => ({
+        id: v.id,
+        description: v.description,
+        logoKey: VENDOR_LOGO_MAP[v.id] ?? v.id.toLowerCase(),
+      })),
+    )
+    for (const v of vendorList) {
+      urlToVendorId.set(v.description.url, v.id)
+    }
+    if (pendingUrls.length > 0) refreshConnectedIds()
 
     const subscriber = new AccountsSubscriberAdapter({
       add({ id, vendor }) {
@@ -217,7 +183,7 @@ export default function OnboardingWizard({
       cancelled = true
       subscription[Symbol.dispose]()
     }
-  }, [authenticatedApi])
+  }, [authenticatedApi, vendorList])
 
   // ── avatar handlers ───────────────────────────────────────────────────────────
 
@@ -264,7 +230,7 @@ export default function OnboardingWizard({
 
   // ── navigation ────────────────────────────────────────────────────────────────
 
-  const showConnectionsStep = vendorsLoading || vendors.length > 0
+  const showConnectionsStep = !vendorsFetched || vendors.length > 0
   const totalSteps = showConnectionsStep
     ? TOTAL_STEPS_WITH_CONNECTIONS
     : TOTAL_STEPS_WITH_CONNECTIONS - 1
@@ -402,6 +368,7 @@ export default function OnboardingWizard({
                     onClick={() => fileInputRef.current?.click()}
                     onDrop={handleDrop}
                     onDragOver={(e) => e.preventDefault()}
+                    aria-busy={avatarProcessing}
                     className={`
                       relative w-20 h-20 rounded-full border-2 border-dashed
                       transition-all duration-200 group cursor-pointer
@@ -429,8 +396,8 @@ export default function OnboardingWizard({
                       </div>
                     )}
                     {avatarProcessing && (
-                      <div className="absolute inset-0 rounded-full bg-kumo-elevated/80 flex items-center justify-center">
-                        <div className="w-5 h-5 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
+                      <div className="absolute inset-0 rounded-full bg-kumo-elevated/90 flex items-center justify-center px-2 text-[9px] font-medium text-kumo-default">
+                        Uploading…
                       </div>
                     )}
                   </button>
@@ -482,12 +449,7 @@ export default function OnboardingWizard({
                   Pick the AI model you&apos;d like to use by default
                 </p>
 
-                {modelsLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <div className="w-6 h-6 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
-                  </div>
-                ) : (
-                  <>
+                <>
                     <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                       {models.map((model) => (
                         <button
@@ -554,7 +516,6 @@ export default function OnboardingWizard({
                       </button>
                     )}
                   </>
-                )}
               </div>
             </div>
 
@@ -568,11 +529,7 @@ export default function OnboardingWizard({
                   Link your accounts so your gadgets can access them. You can always add more later.
                 </p>
 
-                {vendorsLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <div className="w-6 h-6 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
-                  </div>
-                ) : vendors.length === 0 ? (
+                {vendors.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-sm text-kumo-subtle">
                       No services available
@@ -589,6 +546,7 @@ export default function OnboardingWizard({
                           key={vendor.id}
                           onClick={() => !isConnected && !isConnecting && handleConnect(vendor.id)}
                           disabled={isConnected || isConnecting}
+                          aria-busy={isConnecting}
                           className={`
                             flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left
                             transition-all duration-150
@@ -617,7 +575,7 @@ export default function OnboardingWizard({
                               {vendor.description.displayName}
                             </p>
                             <p className="text-xs text-kumo-subtle truncate">
-                              {isConnected ? 'Connected' : isConnecting ? 'Connecting...' : 'Not connected'}
+                              {isConnected ? 'Connected' : isConnecting ? 'Connecting…' : 'Not connected'}
                             </p>
                           </div>
                           {isConnected && (
@@ -626,9 +584,6 @@ export default function OnboardingWizard({
                               className="text-kumo-brand flex-shrink-0"
                               weight="bold"
                             />
-                          )}
-                          {isConnecting && (
-                            <div className="w-3.5 h-3.5 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin flex-shrink-0" />
                           )}
                         </button>
                       )
@@ -676,6 +631,7 @@ export default function OnboardingWizard({
                 <button
                   onClick={handleFinish}
                   disabled={finishing}
+                  aria-busy={finishing}
                   className={`
                     flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg
                     transition-all duration-150
@@ -686,10 +642,7 @@ export default function OnboardingWizard({
                   `}
                 >
                   {finishing ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-kumo-inverse/30 border-t-kumo-inverse rounded-full animate-spin" />
-                      Setting up...
-                    </>
+                    'Setting up…'
                   ) : (
                     <>
                       Let&apos;s build
@@ -713,7 +666,7 @@ export default function OnboardingWizard({
         onCancel={() => setAddModelOpen(false)}
         onSuccess={() => {
           setAddModelOpen(false)
-          fetchModels()
+          void queryClient.invalidateQueries({ queryKey: modelsKey() })
         }}
         authenticatedApi={authenticatedApi}
         aiConfig={aiConfig}

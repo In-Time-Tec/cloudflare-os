@@ -1,67 +1,106 @@
-import { QueryClient } from '@tanstack/react-query'
-import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister'
-import type { PersistedClient } from '@tanstack/query-persist-client-core'
-import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval'
+import {
+  defaultShouldDehydrateQuery,
+  QueryClient,
+  type DehydrateOptions,
+} from '@tanstack/react-query'
+import type {
+  PersistedClient,
+  Persister,
+  PersistQueryClientOptions,
+} from '@tanstack/query-persist-client-core'
+import { del as idbDel, get as idbGet, set as idbSet } from 'idb-keyval'
 
-// Persisted queries are read-mostly, non-secret, plain-data responses that make the sidebar and
-// pages render instantly on reload. Mutations and anything returning RPC stubs are never persisted
-// (stubs can't survive a page reload and must not be cached).
-const PERSISTED_PREFIXES = new Set([
-  'whoami', 'gadgets', 'gatekeeperApps',
-  'conversations', 'channels', 'emails', 'agenda',
-  'messages', 'emailDetail', 'outputs', 'models', 'aiConfig',
-])
-
-/** The key under which a query's data is stored; null when the query must never persist. */
-export function persistedQueryKey(queryKey: readonly unknown[]): string | null {
-  const head = queryKey[0]
-  if (typeof head !== 'string') return null
-  // Nested scoped keys start with the resource name, e.g. ['messages', refKey].
-  return PERSISTED_PREFIXES.has(head) ? head : null
+export type WorkshopQueryMeta = Record<string, unknown> & {
+  persist?: true
 }
 
-/**
- * The single QueryClient for the Workshop. staleTime is short (30s) for fresh-but-instant data;
- * gcTime is generous so navigated-away queries stay warm for the back button. Reads always render
- * cached data immediately and revalidate in the background.
- */
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      gcTime: 30 * 60_000,
-      retry: (failureCount, error) => {
-        // Retry connection/do-reset errors once; never retry terminal failures (auth, not-found).
-        const flag = (error as { retryable?: boolean } | null | undefined)?.retryable
-        return flag === true && failureCount < 1
-      },
-      refetchOnWindowFocus: true,
-      refetchOnReconnect: true,
-    },
-  },
-})
-
-/** IndexedDB persister (async, off the main thread). Keyed for schema versioning. */
-export // RPC payloads carry Date objects; a JSON round-trip turns them into strings, which crashes
-// consumers calling `.getTime()` on restore. Revive ISO date strings recursively on read.
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/
-
-function reviveDates(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(reviveDates)
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    const out: Record<string, unknown> = {}
-    for (const [key, entry] of Object.entries(record)) {
-      out[key] = typeof entry === 'string' && ISO_DATE.test(entry) ? new Date(entry) : reviveDates(entry)
-    }
-    return out
+declare module '@tanstack/react-query' {
+  interface Register {
+    queryMeta: WorkshopQueryMeta
   }
-  return value
 }
 
-export const asyncPersister = createAsyncStoragePersister({
-  storage: { getItem: idbGet, setItem: idbSet, removeItem: idbDel },
-  key: 'WORKSHOP_QUERY_CACHE_V2',
-  throttleTime: 1000,
-  deserialize: (cachedString) => reviveDates(JSON.parse(cachedString)) as PersistedClient,
-})
+export const QUERY_CACHE_MAX_AGE = 24 * 60 * 60 * 1000
+export const QUERY_CACHE_BUSTER = 'v3'
+export const persistedQueryMeta = { persist: true } satisfies WorkshopQueryMeta
+
+export type QueryPersistenceStorage = {
+  get<T>(key: string): Promise<T | undefined>
+  set<T>(key: string, value: T): Promise<void>
+  delete(key: string): Promise<void>
+}
+
+const indexedDbStorage: QueryPersistenceStorage = {
+  get: key => idbGet(key),
+  set: (key, value) => idbSet(key, value),
+  delete: key => idbDel(key),
+}
+
+export function cacheStoreKey(scope: string): string {
+  return `WORKSHOP_QUERY_CACHE_V3:${encodeURIComponent(scope)}`
+}
+
+export function shouldDehydrateQuery(query: Parameters<typeof defaultShouldDehydrateQuery>[0]): boolean {
+  return defaultShouldDehydrateQuery(query) && query.meta?.persist === true
+}
+
+export const queryDehydrateOptions = {
+  shouldDehydrateQuery,
+  shouldDehydrateMutation: () => false,
+} satisfies DehydrateOptions
+
+export function createWorkshopQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 30_000,
+        gcTime: QUERY_CACHE_MAX_AGE,
+        retry: (failureCount, error) => {
+          const flag = (error as { retryable?: boolean } | null | undefined)?.retryable
+          return flag === true && failureCount < 1
+        },
+        refetchOnWindowFocus: true,
+        refetchOnReconnect: true,
+      },
+      dehydrate: queryDehydrateOptions,
+    },
+  })
+}
+
+export const queryClient = createWorkshopQueryClient()
+
+function filterPersistedClient(client: PersistedClient): PersistedClient {
+  return {
+    ...client,
+    clientState: {
+      mutations: [],
+      queries: client.clientState.queries.filter(
+        query => query.meta?.persist === true && query.state.status === 'success',
+      ),
+    },
+  }
+}
+
+export function createAccountPersister(
+  scope: string,
+  storage: QueryPersistenceStorage = indexedDbStorage,
+): Persister {
+  const key = cacheStoreKey(scope)
+  return {
+    persistClient: client => storage.set(key, filterPersistedClient(client)),
+    restoreClient: () => storage.get<PersistedClient>(key),
+    removeClient: () => storage.delete(key),
+  }
+}
+
+export function createAccountPersistOptions(
+  scope: string,
+  storage: QueryPersistenceStorage = indexedDbStorage,
+): Omit<PersistQueryClientOptions, 'queryClient'> {
+  return {
+    persister: createAccountPersister(scope, storage),
+    maxAge: QUERY_CACHE_MAX_AGE,
+    buster: QUERY_CACHE_BUSTER,
+    dehydrateOptions: queryDehydrateOptions,
+  }
+}

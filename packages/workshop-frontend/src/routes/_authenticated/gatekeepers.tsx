@@ -1,8 +1,8 @@
-import { logRpcFailure } from '../rpcErrors'
+import { logRpcFailure } from '../../rpcErrors'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useAddableGatekeepers, useGatekeeperVendors, addableGatekeepersKey } from '../query/hooks'
+import { useAddableGatekeepers, useGatekeeperVendors, addableGatekeepersKey } from '../../query/hooks'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import {
   MagnifyingGlass,
@@ -11,22 +11,21 @@ import {
   CaretRight,
   Plugs,
 } from '@phosphor-icons/react'
-import ViewToggle from '../components/ViewToggle'
-import { useAuthenticatedApi } from '../AuthContext'
-import { refreshGatekeeperApps } from '../useGatekeeperApps'
-import { EmptyState } from '../components/EmptyState'
-import ConnectConnectorModal from '../components/ConnectConnectorModal'
+import ViewToggle from '../../components/ViewToggle'
+import { useAuthenticatedApi } from '../../AuthContext'
+import { refreshGatekeeperApps } from '../../useGatekeeperApps'
+import { EmptyState } from '../../components/EmptyState'
+import ConnectConnectorModal from '../../components/ConnectConnectorModal'
 import {
   AccountDescription,
   SupportedResource,
   VendorDescription,
 } from '@gadgets/workshop-shared/gatekeeper'
-import { useDocumentTitle } from '../useDocumentTitle'
-import { AccountsSubscriberAdapter } from '../accountsSubscriber'
-import PageChrome from '../components/AppShell/PageChrome'
-import { Skeleton, SkeletonListRow, SkeletonRows } from '../components/Skeleton'
+import { useDocumentTitle } from '../../useDocumentTitle'
+import { AccountsSubscriberAdapter } from '../../accountsSubscriber'
+import PageChrome from '../../components/AppShell/PageChrome'
 
-export const Route = createFileRoute('/gatekeepers')({
+export const Route = createFileRoute('/_authenticated/gatekeepers')({
   component: ConnectorsPage,
 })
 
@@ -354,7 +353,7 @@ function ConnectorsPage() {
         // Ambient gatekeeper: mint the account directly, no OAuth redirect. It then appears under
         // "Connected" via the subscription and drops out of "Available".
         await authenticatedApi.provisionAmbientAccount(vendorId)
-        void queryClient.invalidateQueries({ queryKey: addableGatekeepersKey })
+        void queryClient.invalidateQueries({ queryKey: addableGatekeepersKey() })
         // If the gatekeeper provides a management UI, its nav entry should appear without a reload.
         refreshGatekeeperApps(authenticatedApi)
       } else {
@@ -400,7 +399,7 @@ function ConnectorsPage() {
       await authenticatedApi.disconnectAccount(modalTarget.accountId)
       // If this was an opt-in ambient account, it's now removable and should return to "Available";
       // re-fetch the addable list so it reappears there immediately (no refresh needed).
-      void queryClient.invalidateQueries({ queryKey: addableGatekeepersKey })
+      void queryClient.invalidateQueries({ queryKey: addableGatekeepersKey() })
       // Drop its nav entry too, if it provided a management UI.
       refreshGatekeeperApps(authenticatedApi)
       handleCloseModal()
@@ -526,32 +525,6 @@ function ConnectorsPage() {
               Check your connection and try refreshing the page.
             </p>
           </div>
-        )}
-
-        {initialLoading && (
-          // A section of placeholder connectors in the active view, rather than one centred line of
-          // text that a grid of cards then replaces.
-          <section className="mb-10">
-            <SectionEyebrow label="Connected" count={0} />
-            <div className={sectionGridClass}>
-              <SkeletonRows count={view === 'list' ? 6 : 4}>
-                {(i) => view === 'list'
-                  ? <SkeletonListRow key={i} />
-                  : (
-                    <div key={i} aria-hidden="true"
-                        className="grid grid-cols-[48px_1fr_auto] items-center gap-4 rounded-2xl border border-kumo-line bg-kumo-base px-5 py-5">
-                      <Skeleton className="h-12 w-12 rounded-2xl" />
-                      <div className="min-w-0">
-                        <Skeleton className="h-[1lh] w-32 text-[15px] leading-5" />
-                        <Skeleton className="mt-0.5 h-[1lh] w-20 text-[12px] leading-4" />
-                        <Skeleton className="mt-2 h-[1lh] w-full text-[13px] leading-[18px]" />
-                      </div>
-                      <Skeleton className="h-7 w-7 rounded-md" />
-                    </div>
-                  )}
-              </SkeletonRows>
-            </div>
-          </section>
         )}
 
         {filteredAccounts.length > 0 && (

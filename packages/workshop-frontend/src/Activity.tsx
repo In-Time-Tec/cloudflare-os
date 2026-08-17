@@ -182,11 +182,7 @@ export default function Activity({
   }
 
   if (!isReady) {
-    return (
-      <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading activity…
-      </div>
-    )
+    return <div className="flex h-full flex-col bg-kumo-base" />
   }
 
   return (
@@ -390,11 +386,7 @@ function AutoApprovalPanel({
   }, [entries])
 
   if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading auto-approval…
-      </div>
-    )
+    return <div className="flex h-full flex-col bg-kumo-base" />
   }
 
   if (entries.length === 0) {

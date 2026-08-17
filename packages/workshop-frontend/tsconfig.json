@@ -21,5 +21,6 @@
     }
   },
   "include": ["src"],
+  "exclude": ["src/instant-ui.source.test.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

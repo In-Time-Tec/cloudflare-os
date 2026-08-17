@@ -17,7 +17,6 @@ export default function UsageSettings() {
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
   const [usage, setUsage] = useState<CloudflareUsageInfo | null>(null)
-  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
   // Account-selection state (only used when the user has multiple Cloudflare accounts).
@@ -28,14 +27,10 @@ export default function UsageSettings() {
     authenticatedApi.getCloudflareUsage()
       .then((u: CloudflareUsageInfo) => setUsage(u))
       .catch(() => {})
-      .finally(() => setLoading(false))
   }, [authenticatedApi])
 
   useEffect(() => {
-    if (!limitsEnabled) {
-      setLoading(false)
-      return
-    }
+    if (!limitsEnabled) return
     refresh()
     // Re-check when the tab regains focus (e.g. after connecting / topping up elsewhere).
     const onFocus = () => refresh()
@@ -90,9 +85,7 @@ export default function UsageSettings() {
         Usage &amp; billing
       </h2>
       <div className="rounded-xl border border-kumo-line bg-kumo-base p-5">
-      {loading || !usage ? (
-        <p className="text-sm text-kumo-subtle">Loading usage…</p>
-      ) : (
+      {usage ? (
         <div className="space-y-6">
           {/* Free daily allowance */}
           <div>
@@ -124,9 +117,9 @@ export default function UsageSettings() {
                   credits.
                 </p>
                 <div className="pt-1">
-                  <Button variant="primary" size="sm" onClick={connect} loading={busy}>
+                  <Button variant="primary" size="sm" onClick={connect} disabled={busy} aria-busy={busy}>
                     <Lightning size={14} weight="bold" className="mr-1" />
-                    Connect Cloudflare
+                    {busy ? 'Connecting…' : 'Connect Cloudflare'}
                   </Button>
                 </div>
               </div>
@@ -142,7 +135,7 @@ export default function UsageSettings() {
                   AI Gateway credits should be used.
                 </p>
                 {accounts === null ? (
-                  <p className="text-sm text-kumo-subtle">Loading accounts…</p>
+                  null
                 ) : accounts.length === 0 ? (
                   <p className="text-sm text-kumo-subtle">
                     No accounts available on this connection.
@@ -156,10 +149,10 @@ export default function UsageSettings() {
                         size="sm"
                         className="justify-start"
                         onClick={() => selectAccount(a.accountId)}
-                        loading={selecting === a.accountId}
                         disabled={selecting !== null}
+                        aria-busy={selecting === a.accountId}
                       >
-                        {a.accountName}
+                        {selecting === a.accountId ? 'Selecting…' : a.accountName}
                       </Button>
                     ))}
                   </div>
@@ -210,7 +203,7 @@ export default function UsageSettings() {
             .
           </p>
         </div>
-      )}
+      ) : null}
       </div>
     </section>
   )

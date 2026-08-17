@@ -1,37 +1,22 @@
-import { createContext, useContext } from 'react'
-import { ServerConfig, AuthVendorInfo, resolveSiteName } from '@gadgets/workshop-shared/api'
+import { resolveSiteName, type AuthVendorInfo, type ServerConfig } from '@gadgets/workshop-shared/api'
+import { useServerConfigQuery } from './query/public'
 
-/**
- * Deployment-level configuration fetched once at boot via PublicApi.getServerConfig().
- * `null` while still loading.
- */
-export const ServerConfigContext = createContext<ServerConfig | null>(null)
-export const ServerConfigErrorContext = createContext(false)
-
-/** Returns the server config, or null while it is still loading. */
 export function useServerConfig(): ServerConfig | null {
-  return useContext(ServerConfigContext)
+  return useServerConfigQuery().data ?? null
 }
 
-/** Returns whether the latest deployment-config request failed. */
 export function useServerConfigError(): boolean {
-  return useContext(ServerConfigErrorContext)
+  return useServerConfigQuery().isError
 }
 
-/**
- * Convenience: the admin-configured site name, falling back to the default while config is still
- * loading or when the admin hasn't set one.
- */
 export function useSiteName(): string {
-  return resolveSiteName(useContext(ServerConfigContext)?.siteName)
+  return resolveSiteName(useServerConfig()?.siteName)
 }
 
-/** Convenience: the gatekeeper vendors offered as sign-in methods (empty until config loads / none). */
 export function useAuthVendors(): AuthVendorInfo[] {
-  return useContext(ServerConfigContext)?.authVendors ?? []
+  return useServerConfig()?.authVendors ?? []
 }
 
-/** Convenience: whether the Cloudflare limits / top-up flow is enabled. */
 export function useCloudflareLimitsEnabled(): boolean {
-  return useContext(ServerConfigContext)?.cloudflareLimitsEnabled ?? false
+  return useServerConfig()?.cloudflareLimitsEnabled ?? false
 }

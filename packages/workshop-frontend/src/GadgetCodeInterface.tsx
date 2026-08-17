@@ -837,14 +837,7 @@ export default function GadgetCodeInterface({ overseer, filesRoot, height = '100
       : 'Editing'
 
   if (loading) {
-    return (
-      <div
-        className="flex justify-center items-center text-kumo-subtle"
-        style={{ height }}
-      >
-        Loading code files...
-      </div>
-    )
+    return <div style={{ height, width: '100%' }} />
   }
 
   if (!isVisible) {

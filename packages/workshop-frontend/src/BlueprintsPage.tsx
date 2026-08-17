@@ -1,5 +1,4 @@
 import { Link } from "@tanstack/react-router";
-import { Skeleton, SkeletonListRow, SkeletonRows } from './components/Skeleton'
 import { useKumoToastManager } from "@cloudflare/kumo";
 import {
   Blueprint as BlueprintIcon,
@@ -78,7 +77,7 @@ export default function BlueprintsPage() {
 
       <div className="chat-panel min-h-0 flex-1 overflow-y-auto pb-8 pt-1">
         {loading ? (
-          <LoadingSkeleton view={view} />
+          null
         ) : filtered.length === 0 ? (
           <EmptySection
             title={
@@ -229,40 +228,6 @@ function FeaturedBlueprintRow({
         </div>
       )}
     </Link>
-  );
-}
-
-function LoadingSkeleton({ view }: { view: "grid" | "list" }) {
-  if (view === "list") {
-    return (
-      <div className="flex flex-col gap-0.5">
-        <SkeletonRows count={6}>{(i) => <SkeletonListRow key={i} trailing />}</SkeletonRows>
-      </div>
-    );
-  }
-  return (
-    <div className="grid grid-cols-1 gap-4 px-3 sm:grid-cols-2 lg:grid-cols-3">
-      <SkeletonRows count={6}>
-        {(i) => (
-          <div key={i} aria-hidden="true"
-              className="flex flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base">
-            <Skeleton className="aspect-[16/9] w-full rounded-none border-b border-kumo-line" />
-            <div className="flex flex-1 items-start gap-2.5 px-3 py-2.5">
-              <Skeleton className="h-8 w-8 rounded-lg" />
-              <div className="min-w-0 flex-1">
-                <Skeleton className="h-[1lh] w-2/3 text-[13px] leading-[18px]" />
-                <Skeleton className="mt-0.5 h-[1lh] w-full text-[12px] leading-4" />
-                {/* The badge row the loaded card carries; without it every card grows on load. */}
-                <div className="mt-2 flex gap-1">
-                  <Skeleton className="h-[18px] w-14 rounded-full" />
-                  <Skeleton className="h-[18px] w-10 rounded-full" />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </SkeletonRows>
-    </div>
   );
 }
 

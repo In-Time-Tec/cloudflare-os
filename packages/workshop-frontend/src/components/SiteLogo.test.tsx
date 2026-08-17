@@ -5,10 +5,17 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ServerConfig } from '@gadgets/workshop-shared/api'
-import { ServerConfigContext } from '../ServerConfigContext'
 import SiteLogo from './SiteLogo'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+const configState = vi.hoisted(() => ({
+  value: null as ServerConfig | null,
+}))
+
+vi.mock('../ServerConfigContext', () => ({
+  useServerConfig: () => configState.value,
+}))
+
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 describe('SiteLogo', () => {
   let root: Root | undefined
@@ -18,26 +25,23 @@ describe('SiteLogo', () => {
     vi.useRealTimers()
     act(() => root?.unmount())
     container?.remove()
+    configState.value = null
   })
 
   function render(logoUrl?: string) {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
-    let config = { siteLogo: logoUrl ? { url: logoUrl } : undefined } as ServerConfig
+    configState.value = { siteLogo: logoUrl ? { url: logoUrl } : undefined } as ServerConfig
     act(() => root!.render(
-      <ServerConfigContext.Provider value={config}>
-        <SiteLogo size={20}><span data-fallback>fallback</span></SiteLogo>
-      </ServerConfigContext.Provider>,
+      <SiteLogo size={20}><span data-fallback>fallback</span></SiteLogo>,
     ))
   }
 
   function rerender(logoUrl?: string) {
-    let config = { siteLogo: logoUrl ? { url: logoUrl } : undefined } as ServerConfig
+    configState.value = { siteLogo: logoUrl ? { url: logoUrl } : undefined } as ServerConfig
     act(() => root!.render(
-      <ServerConfigContext.Provider value={config}>
-        <SiteLogo size={20}><span data-fallback>fallback</span></SiteLogo>
-      </ServerConfigContext.Provider>,
+      <SiteLogo size={20}><span data-fallback>fallback</span></SiteLogo>,
     ))
   }
 
@@ -71,17 +75,13 @@ describe('SiteLogo', () => {
 
   it('uses an explicit null override for the Admin reset preview', () => {
     render('/api/site-logo?v=configured')
-    const config = { siteLogo: { url: '/api/site-logo?v=configured' } } as ServerConfig
     act(() => root!.render(
-      <ServerConfigContext.Provider value={config}>
-        <SiteLogo size={20} srcOverride={null}>
-          <span data-fallback>fallback</span>
-        </SiteLogo>
-      </ServerConfigContext.Provider>,
+      <SiteLogo size={20} srcOverride={null}>
+        <span data-fallback>fallback</span>
+      </SiteLogo>,
     ))
 
     expect(container!.querySelector('img')).toBeNull()
     expect(container!.querySelector('[data-fallback]')).not.toBeNull()
   })
-
 })

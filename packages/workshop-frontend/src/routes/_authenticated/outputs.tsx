@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Link, useMatchRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DropdownMenu, useKumoToastManager } from '@cloudflare/kumo'
 import {
@@ -17,27 +17,31 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { OutputSummary } from '@gadgets/workshop-shared/api'
-import { useAuthenticatedApi } from '../AuthContext'
+import { useAuthenticatedApi } from '../../AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
-import { useOutputs, outputsKey } from '../query/hooks'
-import { SkeletonListRow, SkeletonRows, SkeletonThumbnailCard } from '../components/Skeleton'
-import { useDocumentTitle } from '../useDocumentTitle'
-import PageChrome from '../components/AppShell/PageChrome'
-import ViewToggle from '../components/ViewToggle'
-import { MENU_CONTENT, MENU_ITEM, MENU_POSITIONER_STYLE } from '../components/menuStyles'
-import { formatOf } from '../components/format/formats'
-import { FormatThumbnail, FormatTile } from '../components/format/FormatVisuals'
-import { useOutputFormats } from '../components/format/useOutputFormats'
-import NewFormatRow from '../components/format/NewFormatRow'
-import DeleteConfirmationDialog from '../components/DeleteConfirmationDialog'
-import { WorkshopButton, WorkshopIconButton } from '../components/WorkshopControls'
+import { useOutputs, outputsKey, outputsOptions } from '../../query/hooks'
+import { useDocumentTitle } from '../../useDocumentTitle'
+import PageChrome from '../../components/AppShell/PageChrome'
+import ViewToggle from '../../components/ViewToggle'
+import { MENU_CONTENT, MENU_ITEM, MENU_POSITIONER_STYLE } from '../../components/menuStyles'
+import { formatOf } from '../../components/format/formats'
+import { FormatThumbnail, FormatTile } from '../../components/format/FormatVisuals'
+import { useOutputFormats } from '../../components/format/useOutputFormats'
+import NewFormatRow from '../../components/format/NewFormatRow'
+import DeleteConfirmationDialog from '../../components/DeleteConfirmationDialog'
+import { WorkshopButton, WorkshopIconButton } from '../../components/WorkshopControls'
 
 // The Outputs page: everything the user's workspaces have produced, in one place, so they don't
 // have to remember which workspace they made a thing in. Backed by an index in the user's own
 // account that each workspace pushes to (AuthenticatedApi.listOutputs()).
 
-export const Route = createFileRoute('/outputs')({
+export const Route = createFileRoute('/_authenticated/outputs')({
   component: OutputsPage,
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData({
+      ...outputsOptions(context.session),
+      revalidateIfStale: true,
+    }),
 })
 
 function formatRelativeTime(date: Date): string {
@@ -152,13 +156,20 @@ type OutputActions = {
 function OutputCard({
   output, onOpen, onOpenWorkspace, onRename, onRemove,
 }: { output: OutputSummary } & OutputActions) {
+  const matchRoute = useMatchRoute()
+  const pending = !!matchRoute({
+    to: '/workspace/$id',
+    params: { id: output.workspaceId },
+    search: { w: output.workpieceId },
+    pending: true,
+  })
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
-      className="themed-card-hover-shadow press group flex cursor-pointer flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base text-left transition-[border-color,box-shadow] duration-150 ease-out hover:border-kumo-fill"
+    <Link
+      to="/workspace/$id"
+      params={{ id: output.workspaceId }}
+      search={{ w: output.workpieceId }}
+      aria-busy={pending}
+      className={`themed-card-hover-shadow press group flex cursor-pointer flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base text-left transition-[border-color,box-shadow] duration-150 ease-out hover:border-kumo-fill ${pending ? 'opacity-70' : ''}`}
     >
       <div className="relative aspect-[4/3] w-full border-b border-kumo-line">
         <FormatThumbnail output={output.output} />
@@ -176,20 +187,27 @@ function OutputCard({
         <OutputMenu onOpen={onOpen} onOpenWorkspace={onOpenWorkspace}
                     onRename={onRename} onRemove={onRemove} />
       </div>
-    </div>
+    </Link>
   )
 }
 
 function OutputRow({
   output, onOpen, onOpenWorkspace, onRename, onRemove,
 }: { output: OutputSummary } & OutputActions) {
+  const matchRoute = useMatchRoute()
+  const pending = !!matchRoute({
+    to: '/workspace/$id',
+    params: { id: output.workspaceId },
+    search: { w: output.workpieceId },
+    pending: true,
+  })
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
-      className="group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint"
+    <Link
+      to="/workspace/$id"
+      params={{ id: output.workspaceId }}
+      search={{ w: output.workpieceId }}
+      aria-busy={pending}
+      className={`group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint ${pending ? 'opacity-70' : ''}`}
     >
       <FormatTile output={output.output} />
       <div className="min-w-0 flex-1">
@@ -210,7 +228,7 @@ function OutputRow({
       </div>
       <OutputMenu onOpen={onOpen} onOpenWorkspace={onOpenWorkspace}
                   onRename={onRename} onRemove={onRemove} />
-    </div>
+    </Link>
   )
 }
 
@@ -458,7 +476,7 @@ function OutputsPage() {
       gadget = overseer.getGadget(current.workpieceId)
       const title = renameValue.trim()
       await gadget.setTitle(title)
-      queryClient.setQueryData(outputsKey, (list: OutputSummary[] | undefined) => (list ?? []).map((output) =>
+      queryClient.setQueryData(outputsKey(), (list: OutputSummary[] | undefined) => (list ?? []).map((output) =>
         outputKey(output) === outputKey(current) ? { ...output, title } : output))
       setRenameOutput(null)
     } catch (err) {
@@ -481,7 +499,7 @@ function OutputsPage() {
       overseer = await authenticatedApi.openGadget(current.workspaceId)
       gadget = overseer.getGadget(current.workpieceId)
       await gadget.remove()
-      queryClient.setQueryData(outputsKey, (list: OutputSummary[] | undefined) => (list ?? []).filter((output) => outputKey(output) !== outputKey(current)))
+      queryClient.setQueryData(outputsKey(), (list: OutputSummary[] | undefined) => (list ?? []).filter((output) => outputKey(output) !== outputKey(current)))
       setRemoveOutput(null)
     } catch (err) {
       console.error('Failed to remove output:', err)
@@ -595,17 +613,7 @@ function OutputsPage() {
 
       <div className="chat-panel min-h-0 flex-1 overflow-y-auto pb-8 pt-1">
         {loading ? (
-          // Placeholders follow the restored view, and a card placeholder carries the same meta
-          // strip the real card has below its thumbnail — otherwise every card grew 56px on load.
-          view === 'grid' ? (
-            <div className="grid grid-cols-2 gap-4 px-3 sm:grid-cols-3 lg:grid-cols-4">
-              <SkeletonRows count={8}>{(i) => <SkeletonThumbnailCard key={i} />}</SkeletonRows>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-0.5">
-              <SkeletonRows count={8}>{(i) => <SkeletonListRow key={i} trailing />}</SkeletonRows>
-            </div>
-          )
+          null
         ) : loadError ? (
           <div className="py-12 text-center text-sm">
             <p className="text-kumo-danger">Something went wrong loading your outputs.</p>

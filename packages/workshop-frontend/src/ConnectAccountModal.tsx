@@ -1,22 +1,18 @@
 import { useState, useEffect } from 'react'
-import { Dialog, Text, Loader, useKumoToastManager } from '@cloudflare/kumo'
+import { Dialog, Text, useKumoToastManager } from '@cloudflare/kumo'
+import { useQuery } from '@tanstack/react-query'
 import { RpcStub } from 'capnweb'
 import { AuthenticatedApi, GatekeeperVendorFilter } from '@gadgets/workshop-shared/api'
-import { VendorDescription } from '@gadgets/workshop-shared/gatekeeper'
 import VendorCard from './VendorCard'
+import { gatekeeperVendorsOptions } from './query/hooks'
+import { workshopSession } from './session'
 
 interface ConnectAccountModalProps {
   visible: boolean
   onCancel: () => void
   onInitiated: () => void
   authenticatedApi: RpcStub<AuthenticatedApi>
-  /** Optional filter to only show vendors supporting certain features */
   filter?: GatekeeperVendorFilter
-}
-
-interface VendorOption {
-  id: string
-  description: VendorDescription
 }
 
 export default function ConnectAccountModal({
@@ -28,38 +24,25 @@ export default function ConnectAccountModal({
 }: ConnectAccountModalProps) {
   const toasts = useKumoToastManager()
   const [connecting, setConnecting] = useState<string | null>(null)
-  const [vendors, setVendors] = useState<VendorOption[]>([])
-  const [vendorsLoading, setVendorsLoading] = useState(true)
+  const { data: vendorList, isFetched } = useQuery({
+    ...gatekeeperVendorsOptions(workshopSession, filter),
+    enabled: visible,
+  })
+  const vendors = (vendorList ?? []).filter(v => !v.unavailable)
 
-  // Fetch vendors when modal opens
   useEffect(() => {
     if (!visible) {
       setConnecting(null)
       return
     }
-
-    const fetchVendors = async () => {
-      setVendorsLoading(true)
-      try {
-        const vendorList = await authenticatedApi.listGatekeeperVendors(filter)
-        const unavailable = vendorList.filter(v => v.unavailable)
-        if (unavailable.length > 0) {
-          toasts.add({
-            title: `Some services are temporarily unavailable: ${unavailable.map(v => v.id).join(', ')}`,
-            variant: 'warning',
-          })
-        }
-        setVendors(vendorList.filter(v => !v.unavailable).map(v => ({ id: v.id, description: v.description })))
-      } catch (error) {
-        console.error('Failed to fetch vendors:', error)
-        toasts.add({ title: 'Failed to load available services', variant: 'error' })
-      } finally {
-        setVendorsLoading(false)
-      }
+    const unavailable = (vendorList ?? []).filter(v => v.unavailable)
+    if (unavailable.length > 0) {
+      toasts.add({
+        title: `Some services are temporarily unavailable: ${unavailable.map(v => v.id).join(', ')}`,
+        variant: 'warning',
+      })
     }
-
-    fetchVendors()
-  }, [visible, authenticatedApi, filter])
+  }, [visible, vendorList, toasts])
 
   const handleConnect = async (vendorId: string) => {
     setConnecting(vendorId)
@@ -78,10 +61,8 @@ export default function ConnectAccountModal({
     <Dialog.Root open={visible} onOpenChange={(open) => { if (!open) onCancel() }}>
       <Dialog className="p-6" size="base">
         <Dialog.Title className="text-lg font-semibold mb-4">Connect Account</Dialog.Title>
-        {vendorsLoading ? (
-          <div className="text-center py-8">
-            <Loader />
-          </div>
+        {!isFetched ? (
+          null
         ) : vendors.length === 0 ? (
           <div className="text-center py-8">
             <Text variant="secondary">No services available to connect.</Text>

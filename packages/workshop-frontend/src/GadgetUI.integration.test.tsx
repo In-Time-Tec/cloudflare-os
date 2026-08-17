@@ -20,7 +20,6 @@ afterAll(() => {
 
 vi.mock('@cloudflare/kumo', () => ({
   Banner: () => null,
-  Loader: () => null,
   Text: ({ children }: { children: ReactNode }) => children,
 }))
 

@@ -51,10 +51,13 @@ vi.mock("./ChatInterface", () => ({
   },
 }));
 
+vi.mock("./query/hooks", () => ({
+  useModels: () => ({ data: [] }),
+}));
 vi.mock("./components/AppShell/HomeTaskSuggestions", () => ({ default: () => null }));
 vi.mock("./useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
 
-import { HomePageContent } from "./routes/index";
+import { HomePageContent } from "./routes/_authenticated/index";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

@@ -3,17 +3,13 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RpcStub } from "capnweb";
-import type { AuthenticatedApi } from "@gadgets/workshop-shared/api";
 import {
   DEFAULT_UI_FEATURE_FLAGS,
   type UiFeatureFlags,
 } from "@gadgets/workshop-shared/feature-flags";
-import { useAuthenticatedApi } from "./AuthContext";
 import { FeatureFlagsProvider, useUiFeatureFlags } from "./FeatureFlagsContext";
-
-vi.mock("./AuthContext", () => ({ useAuthenticatedApi: vi.fn<typeof useAuthenticatedApi>() }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -21,15 +17,14 @@ const RESOLVED_FLAGS = {
   "test-flag": true,
 } as unknown as UiFeatureFlags;
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => { resolve = next; });
-  return { promise, resolve };
-}
+const queryState = vi.hoisted(() => ({
+  data: undefined as UiFeatureFlags | undefined,
+  isPending: true,
+}))
 
-function api(getUiFeatureFlags: () => Promise<UiFeatureFlags>): RpcStub<AuthenticatedApi> {
-  return { getUiFeatureFlags } as unknown as RpcStub<AuthenticatedApi>;
-}
+vi.mock("./query/hooks", () => ({
+  useFeatureFlagsQuery: () => ({ data: queryState.data, isPending: queryState.isPending }),
+}))
 
 describe("FeatureFlagsProvider", () => {
   let root: Root | undefined;
@@ -38,19 +33,12 @@ describe("FeatureFlagsProvider", () => {
   afterEach(() => {
     act(() => root?.unmount());
     container?.remove();
-    vi.restoreAllMocks();
+    queryState.data = undefined
+    queryState.isPending = true
   });
 
-  it("uses defaults while loading and ignores a stale API response", async () => {
-    const first = deferred<UiFeatureFlags>();
-    const second = deferred<UiFeatureFlags>();
-    let currentApi = api(() => first.promise);
+  it("uses defaults while loading then applies resolved flags", async () => {
     let current: ReturnType<typeof useUiFeatureFlags> | undefined;
-
-    vi.mocked(useAuthenticatedApi).mockImplementation(
-      () => ({ authenticatedApi: currentApi }) as ReturnType<typeof useAuthenticatedApi>,
-    );
-
     function Probe() {
       current = useUiFeatureFlags();
       return null;
@@ -59,18 +47,22 @@ describe("FeatureFlagsProvider", () => {
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-    await act(async () => root!.render(<FeatureFlagsProvider><Probe /></FeatureFlagsProvider>));
+    await act(async () => root!.render(
+      <QueryClientProvider client={client}>
+        <FeatureFlagsProvider><Probe /></FeatureFlagsProvider>
+      </QueryClientProvider>,
+    ));
     expect(current).toEqual({ flags: DEFAULT_UI_FEATURE_FLAGS, loading: true });
 
-    currentApi = api(() => second.promise);
-    await act(async () => root!.render(<FeatureFlagsProvider><Probe /></FeatureFlagsProvider>));
-    expect(current).toEqual({ flags: DEFAULT_UI_FEATURE_FLAGS, loading: true });
-
-    await act(async () => { first.resolve(RESOLVED_FLAGS); });
-    expect(current).toEqual({ flags: DEFAULT_UI_FEATURE_FLAGS, loading: true });
-
-    await act(async () => { second.resolve(RESOLVED_FLAGS); });
+    queryState.data = RESOLVED_FLAGS
+    queryState.isPending = false
+    await act(async () => root!.render(
+      <QueryClientProvider client={client}>
+        <FeatureFlagsProvider><Probe /></FeatureFlagsProvider>
+      </QueryClientProvider>,
+    ));
     expect(current).toEqual({
       flags: { ...DEFAULT_UI_FEATURE_FLAGS, ...RESOLVED_FLAGS },
       loading: false,

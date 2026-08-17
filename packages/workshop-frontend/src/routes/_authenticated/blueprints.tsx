@@ -1,11 +1,11 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useRef } from 'react'
 import { Compass, UploadSimple } from '@phosphor-icons/react'
-import BlueprintList from '../components/BlueprintList'
-import PageChrome, { PAGE_ACTION } from '../components/AppShell/PageChrome'
-import { useDocumentTitle } from '../useDocumentTitle'
+import BlueprintList from '../../components/BlueprintList'
+import PageChrome, { PAGE_ACTION } from '../../components/AppShell/PageChrome'
+import { useDocumentTitle } from '../../useDocumentTitle'
 
-export const Route = createFileRoute('/blueprints')({
+export const Route = createFileRoute('/_authenticated/blueprints')({
   component: BlueprintsRoutePage,
 })
 

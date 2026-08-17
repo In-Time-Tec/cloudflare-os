@@ -6720,9 +6720,7 @@ function ChatInterface({
         <div className="chat-panel min-h-0 flex-1 overflow-y-auto">
         <div className="p-3 pb-8">
         {!chatListReady ? (
-          <div className="flex items-center justify-center py-10">
-            <div className="w-5 h-5 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
-          </div>
+          null
         ) : chatList.length === 0 ? (
           <p className="text-sm text-kumo-inactive text-center py-8">
             No conversations yet
@@ -7054,9 +7052,7 @@ function ChatInterface({
                 className="chat-panel min-h-0 flex-1 overflow-y-auto"
               >
                 {isLoading ? (
-                  <div className="flex items-center justify-center py-10">
-                    <div className="w-5 h-5 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
-                  </div>
+                  null
                 ) : (
                   <div
                     className={`flex flex-col px-6 pt-8 ${pendingConsoleLogCount > 0 ? "pb-10" : "pb-8"} ${useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}`}

@@ -1,32 +1,45 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { EnvelopeSimple, ArrowSquareOut, Paperclip } from '@phosphor-icons/react'
-import CommsLayout from '../conversations/CommsLayout'
-import { useConversations } from '../conversations/ConversationsContext'
-import { useEmailDetailQuery } from '../query/conversations'
-import { Avatar, ListRow, PaneHeader, formatTime } from '../conversations/primitives'
-import { Skeleton, SkeletonRows } from '../components/Skeleton'
-import { useDocumentTitle } from '../useDocumentTitle'
+import CommsLayout from '../../conversations/CommsLayout'
+import { useConversations } from '../../conversations/ConversationsContext'
+import {
+  conversationsCapabilityOptions,
+  emailDetailOptions,
+  emailsOptions,
+  useEmailDetailQuery,
+} from '../../query/conversations'
+import { Avatar, ListRow, PaneHeader, formatTime } from '../../conversations/primitives'
+import { useDocumentTitle } from '../../useDocumentTitle'
 
-// The Email page: the connected mailbox's inbox in the section-scoped list pane, with a reading
-// pane. Bodies are provider HTML sanitized by the gatekeeper before reaching the client.
-
-export const Route = createFileRoute('/email')({
-  component: EmailPage,
+export const Route = createFileRoute('/_authenticated/email')({
   validateSearch: (search: Record<string, unknown>): { m?: string } =>
     typeof search.m === 'string' ? { m: search.m } : {},
+  loaderDeps: ({ search }) => ({ messageId: search.m }),
+  loader: async ({ context, deps }) => {
+    const available = await context.queryClient.ensureQueryData(
+      conversationsCapabilityOptions(context.session),
+    )
+    if (!available) return
+    await context.queryClient.ensureQueryData({
+      ...emailsOptions(context.session),
+      revalidateIfStale: true,
+    })
+    if (deps.messageId) {
+      await context.queryClient.ensureQueryData({
+        ...emailDetailOptions(context.session, deps.messageId),
+        revalidateIfStale: true,
+      })
+    }
+  },
+  component: EmailPage,
 })
 
 function EmailPage() {
   useDocumentTitle('Email')
   const { m: selectedId } = Route.useSearch()
-  const navigate = Route.useNavigate()
-  const { emails, emailsLoading, refreshEmails, available } = useConversations()
-  const { data: detail, isLoading: detailLoading } = useEmailDetailQuery(selectedId ?? null)
-
-  useEffect(() => {
-    refreshEmails()
-  }, [refreshEmails])
+  const { emails, available } = useConversations()
+  const { data: detail } = useEmailDetailQuery(selectedId ?? null)
 
   const selectedSummary = useMemo(() =>
     emails.find(e => e.id === selectedId) ?? null, [emails, selectedId])
@@ -48,7 +61,8 @@ function EmailPage() {
             <ListRow
               key={email.id}
               selected={email.id === selectedId}
-              onClick={() => navigate({ search: { m: email.id } })}
+              to="/email"
+              search={{ m: email.id }}
               avatar={<Avatar title={email.from?.name || email.from?.address || '?'} size="md" />}
               title={email.from?.name || email.from?.address || '(unknown sender)'}
               meta={formatTime(email.received)}
@@ -56,9 +70,6 @@ function EmailPage() {
               unread={!email.isRead}
             />
           ))}
-          {emailsLoading && emails.length === 0 && (
-            <SkeletonRows count={8}>{i => <ListRow key={i} />}</SkeletonRows>
-          )}
         </div>
       }
       detail={
@@ -83,26 +94,14 @@ function EmailPage() {
                   <Paperclip size={14} /> Has attachments — open in Outlook to download.
                 </p>
               )}
-              {/* Sanitized by the gatekeeper (allowlist HTMLRewriter). */}
               <div
                 className="prose prose-sm max-w-none text-[13.5px] text-kumo-default [&_a]:text-kumo-brand"
                 dangerouslySetInnerHTML={{ __html: detail.html }}
               />
             </div>
           </>
-        ) : detailLoading || (selectedId && selectedSummary) ? (
-          // The same header band and body padding as the loaded mail, so the body doesn't drop by
-          // the header's height (and grow a hairline) the moment the record arrives.
-          <>
-            <PaneHeader />
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-              <div className="flex flex-col gap-2">
-                <Skeleton className="h-[1lh] w-full text-[13.5px]" />
-                <Skeleton className="h-[1lh] w-11/12 text-[13.5px]" />
-                <Skeleton className="h-[1lh] w-4/5 text-[13.5px]" />
-              </div>
-            </div>
-          </>
+        ) : selectedId && selectedSummary ? (
+          <PaneHeader title={selectedSummary.subject || '(no subject)'} />
         ) : (
           <Empty text="Select an email" />
         )

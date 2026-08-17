@@ -1,108 +1,98 @@
-// @vitest-environment jsdom
-/* eslint-disable react/react-in-jsx-scope */
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { QueryClient, QueryClientProvider, keepPreviousData, useQuery } from '@tanstack/react-query'
-import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, describe, expect, it } from 'vitest'
+import { QueryClient, dehydrate } from '@tanstack/react-query'
+import type { PersistedClient } from '@tanstack/query-persist-client-core'
+import { cacheStoreKey, createAccountPersister, shouldDehydrateQuery } from './client'
 
-// The vitest jsdom environment needs this flag for act() to flush synchronously.
-const testGlobal = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-testGlobal.IS_REACT_ACT_ENVIRONMENT = true
-import { act, useState } from 'react'
-import { persistedQueryKey } from './client'
+describe('query persistence', () => {
+  const store = new Map<string, unknown>()
+  const kv = {
+    get: async <T,>(key: string) => store.get(key) as T | undefined,
+    set: async <T,>(key: string, value: T) => {
+      store.set(key, value)
+    },
+    delete: async (key: string) => {
+      store.delete(key)
+    },
+  }
 
-afterEach(() => vi.restoreAllMocks())
+  afterEach(() => store.clear())
 
-describe('query layer', () => {
-  it('dedupes concurrent fetches of the same query key into one RPC', async () => {
-    const queryFn = vi.fn<() => Promise<{ ok: boolean }>>(async () => ({ ok: true }))
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
-    await Promise.all([
-      client.fetchQuery({ queryKey: ['gadgets'], queryFn }),
-      client.fetchQuery({ queryKey: ['gadgets'], queryFn }),
-    ])
-
-    expect(queryFn).toHaveBeenCalledTimes(1)
-
-    // A different key is a separate resource.
-    await client.fetchQuery({ queryKey: ['whoami'], queryFn })
-    expect(queryFn).toHaveBeenCalledTimes(2)
-  })
-
-  it('keeps the previous data visible while a new key loads (no blank on navigation)', async () => {
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root: Root = createRoot(container)
-
-    const queryFn = vi.fn<(ctx: { queryKey: readonly unknown[] }) => Promise<{ name: string }>>()
-      .mockResolvedValueOnce({ name: 'first' })
-      .mockImplementation(async ({ queryKey }) => {
-        // Second fetch is intentionally slow; the UI must keep showing "first" meanwhile.
-        await new Promise(resolve => setTimeout(resolve, 20))
-        return { name: queryKey[0] as string }
-      })
-
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
-    function Probe() {
-      const [key, setKey] = useState('a')
-      const { data, isPlaceholderData } = useQuery({
-        queryKey: [key],
-        queryFn,
-        placeholderData: keepPreviousData,
-      })
-      return (
-        <div>
-          <span data-testid="value">{(data as { name: string } | undefined)?.name ?? 'none'}</span>
-          <span data-testid="placeholder">{String(isPlaceholderData)}</span>
-          <button data-testid="next" onClick={() => setKey('b')}>next</button>
-        </div>
-      )
-    }
-
-    await act(async () => {
-      root.render(
-        <QueryClientProvider client={client}>
-          <Probe />
-        </QueryClientProvider>,
-      )
+  it('dehydrates only successful queries with meta.persist', async () => {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        dehydrate: {
+          shouldDehydrateQuery,
+          shouldDehydrateMutation: () => false,
+        },
+      },
     })
-    // Wait for the first query to resolve.
-    await act(async () => { await vi.waitFor(() =>
-      expect(container.querySelector('[data-testid="value"]')?.textContent).toBe('first')) })
-
-    // Navigate to the next key: previous data must remain visible (placeholder) immediately.
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="next"]')!.click()
+    await client.fetchQuery({
+      queryKey: ['account', 'a', 'gadgets'],
+      queryFn: async () => [{ id: '1', lastActive: new Date('2026-08-15T12:00:00.000Z') }],
+      meta: { persist: true },
     })
-    expect(container.querySelector('[data-testid="value"]')?.textContent).toBe('first')
-    expect(container.querySelector('[data-testid="placeholder"]')?.textContent).toBe('true')
-
-    await act(async () => { await vi.waitFor(() =>
-      expect(container.querySelector('[data-testid="value"]')?.textContent).toBe('b')) })
-
-    root.unmount()
-    container.remove()
+    await client.fetchQuery({
+      queryKey: ['account', 'a', 'secret'],
+      queryFn: async () => ({ token: 'nope' }),
+    })
+    const state = dehydrate(client)
+    const keys = state.queries.map((query) => query.queryKey[2])
+    expect(keys).toContain('gadgets')
+    expect(keys).not.toContain('secret')
   })
 
-  it('revives persisted ISO date strings into Date objects on hydrate', () => {
-    const revived = (JSON.parse(
-      '{"a":"2026-08-15T12:00:00.000Z","b":"not a date","c":{"d":"2026-08-16T00:00:00Z"}}',
-    ))
-    // Exercise the same revive path the persister uses: import the function isn't exported, so
-    // assert through the persister contract via a round-trip is covered by the client wiring; here
-    // we just pin the ISO shape the reviver recognizes.
-    expect(new Date(revived.a).getTime()).toBe(Date.parse('2026-08-15T12:00:00.000Z'))
-    expect(revived.b).toBe('not a date')
+  it('round-trips Date values through the native persister', async () => {
+    const persister = createAccountPersister('acct-1', kv)
+    const when = new Date('2026-08-15T12:00:00.000Z')
+    const payload = {
+      timestamp: Date.now(),
+      buster: 'v3',
+      clientState: {
+        mutations: [],
+        queries: [{
+          dehydratedAt: Date.now(),
+          meta: { persist: true },
+          state: {
+            data: { received: when },
+            dataUpdateCount: 1,
+            dataUpdatedAt: 1,
+            error: null,
+            errorUpdateCount: 0,
+            errorUpdatedAt: 0,
+            fetchFailureCount: 0,
+            fetchFailureReason: null,
+            fetchMeta: null,
+            isInvalidated: false,
+            status: 'success',
+            fetchStatus: 'idle',
+          },
+          queryKey: ['account', 'acct-1', 'emails'],
+          queryHash: '["account","acct-1","emails"]',
+        }],
+      },
+    } as PersistedClient
+    await persister.persistClient(payload)
+    const restored = await persister.restoreClient()
+    const received = restored?.clientState.queries[0]?.state.data as { received: Date }
+    expect(received.received).toBeInstanceOf(Date)
+    expect(received.received.getTime()).toBe(when.getTime())
   })
 
-  it('only persists read-only, non-secret query keys', () => {
-    expect(persistedQueryKey(['whoami'])).toBe('whoami')
-    expect(persistedQueryKey(['messages', 'chat:1'])).toBe('messages')
-    expect(persistedQueryKey(['conversations'])).toBe('conversations')
-    // Mutations / unknown / stub-returning keys never persist.
-    expect(persistedQueryKey(['getConversationsApi'])).toBeNull()
-    expect(persistedQueryKey(['connectAccount'])).toBeNull()
-    expect(persistedQueryKey([123])).toBeNull()
+  it('scopes stores per account', () => {
+    expect(cacheStoreKey('one')).not.toBe(cacheStoreKey('two'))
+    expect(cacheStoreKey('one')).toBe('WORKSHOP_QUERY_CACHE_V3:one')
+  })
+
+  it('removes an account store on logout', async () => {
+    const persister = createAccountPersister('acct-1', kv)
+    await persister.persistClient({
+      timestamp: 1,
+      buster: 'v3',
+      clientState: { mutations: [], queries: [] },
+    })
+    expect(await persister.restoreClient()).toBeTruthy()
+    await persister.removeClient()
+    expect(await persister.restoreClient()).toBeUndefined()
   })
 })

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Dialog, Select, Loader, Text, useKumoToastManager } from '@cloudflare/kumo'
-import { Warning, Plus, ArrowClockwise, CheckCircle } from '@phosphor-icons/react'
+import { Dialog, Select, Text, useKumoToastManager } from '@cloudflare/kumo'
+import { Warning, Plus, CheckCircle } from '@phosphor-icons/react'
 import { RpcStub } from 'capnweb'
 import {
   AuthenticatedApi,
@@ -17,6 +17,9 @@ import {
 import { WorkshopButton } from './components/WorkshopControls'
 import Avatar from './components/Avatar'
 import { AccountsSubscriberAdapter } from './accountsSubscriber'
+import { addableGatekeepersOptions, gatekeeperVendorsOptions } from './query/hooks'
+import { workshopSession } from './session'
+import { useQuery } from '@tanstack/react-query'
 
 // Shown when a non-owner opens a shared Gadget that reads data through one or more gatekeeper
 // bindings, and they haven't yet chosen which of their own connected accounts to use for each one.
@@ -89,7 +92,11 @@ export default function ObserverConfigModal({
   // Vendor metadata keyed by vendorId, used both for display and to resolve the resource scopes each
   // observer binding needs.
   const [vendorsById, setVendorsById] = useState<Map<string, GatekeeperVendorInfo>>(new Map())
-  const [vendorsReady, setVendorsReady] = useState(false)
+  const vendorsQuery = useQuery(gatekeeperVendorsOptions(workshopSession))
+  const addableQuery = useQuery(addableGatekeepersOptions(workshopSession))
+  const listedVendors = vendorsQuery.data ?? []
+  const addableVendors = addableQuery.data ?? []
+  const vendorsReady = vendorsQuery.isFetched && addableQuery.isFetched
   const [connecting, setConnecting] = useState<string | null>(null)
   const [reconnecting, setReconnecting] = useState<number | null>(null)
   const [granting, setGranting] = useState<number | null>(null)
@@ -151,26 +158,11 @@ export default function ObserverConfigModal({
     }
   }, [authenticatedApi])
 
-  // ── load vendor metadata for display and resource-scope resolution ─────────────
   useEffect(() => {
-    let cancelled = false
-    Promise.all([
-      authenticatedApi.listGatekeeperVendors(),
-      authenticatedApi.listAddableGatekeepers(),
-    ])
-      .then(([vendors, addable]) => {
-        if (cancelled) return
-        const map = new Map<string, GatekeeperVendorInfo>()
-        for (const vendor of [...vendors, ...addable]) map.set(vendor.id, vendor)
-        setVendorsById(map)
-        setVendorsReady(true)
-      })
-      .catch(err => {
-        console.error('Failed to load vendors:', err)
-        if (!cancelled) setVendorsReady(true)
-      })
-    return () => { cancelled = true }
-  }, [authenticatedApi])
+    const map = new Map<string, GatekeeperVendorInfo>()
+    for (const vendor of [...listedVendors, ...addableVendors]) map.set(vendor.id, vendor)
+    setVendorsById(map)
+  }, [listedVendors, addableVendors])
 
   // ── keep choices in sync with the available accounts ──────────────────────────
   // Default each binding to its first matching account, and drop a choice whose account has
@@ -326,9 +318,7 @@ export default function ObserverConfigModal({
         </Text>
 
         {!ready || !vendorsReady ? (
-          <div className="text-center py-10">
-            <Loader />
-          </div>
+          null
         ) : (
           <div className="flex flex-col gap-4 mt-5">
             {needs.map(need => {
@@ -431,13 +421,10 @@ export default function ObserverConfigModal({
                           type="button"
                           onClick={() => handleGrantResourceAccess(need, chosen)}
                           disabled={granting === chosen.id}
+                          aria-busy={granting === chosen.id}
                           className="flex items-center gap-1.5 text-xs text-kumo-warning hover:underline disabled:opacity-60"
                         >
-                          {granting === chosen.id ? (
-                            <ArrowClockwise size={12} className="animate-spin" />
-                          ) : (
-                            <Warning size={12} />
-                          )}
+                          {granting !== chosen.id && <Warning size={12} />}
                           {granting === chosen.id
                             ? 'Waiting for access…'
                             : 'Grant the access needed to verify this resource'}
@@ -455,13 +442,10 @@ export default function ObserverConfigModal({
                           type="button"
                           onClick={() => handleReconnect(chosen.id)}
                           disabled={reconnecting === chosen.id}
+                          aria-busy={reconnecting === chosen.id}
                           className="flex items-center gap-1.5 text-xs text-kumo-warning hover:underline disabled:opacity-60"
                         >
-                          {reconnecting === chosen.id ? (
-                            <ArrowClockwise size={12} className="animate-spin" />
-                          ) : (
-                            <Warning size={12} />
-                          )}
+                          {reconnecting !== chosen.id && <Warning size={12} />}
                           {reconnecting === chosen.id
                             ? 'Re-authenticating…'
                             : chosen.credentialsValid

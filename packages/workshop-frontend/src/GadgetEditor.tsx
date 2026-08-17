@@ -1280,11 +1280,7 @@ export default function GadgetEditor() {
   if (!metadata || !overseer || !workpiecesReady ||
       (selectedGadgetId !== null && gadget === null)) {
     return (
-      <div className="flex h-full items-center justify-center bg-kumo-base">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-kumo-subtle">Loading workspace…</p>
-        </div>
+      <div className="h-full bg-kumo-base">
         {observerConfig && (
           <ObserverConfigModal
             needs={observerConfig.needs}
@@ -1484,18 +1480,11 @@ export default function GadgetEditor() {
               </div>
 
               {!layoutModeReady && (
-                <div className="absolute inset-0 flex items-center justify-center bg-kumo-base">
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="w-6 h-6 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
-                    <p className="text-sm text-kumo-subtle">Loading conversation…</p>
-                  </div>
-                </div>
+                <div className="absolute inset-0 bg-kumo-base" />
               )}
             </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="w-6 h-6 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
-            </div>
+            <div className="flex-1" />
           )}
         </div>
 

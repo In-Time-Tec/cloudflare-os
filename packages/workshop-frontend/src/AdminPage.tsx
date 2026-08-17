@@ -2,15 +2,17 @@ import { useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { RpcStub } from 'capnweb'
 import { Switch, Textarea, Input, Button, Tabs, useKumoToastManager } from '@cloudflare/kumo'
 import { Hexagon, ShieldWarning, UserPlus } from '@phosphor-icons/react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAuthenticatedApi } from './AuthContext'
 import { AdminApi, AdminFormat, AdminResourceVendor, AmbientGatekeeperMode, MAX_INSTANCE_INSTRUCTIONS_LENGTH, MAX_ANNOUNCEMENT_LENGTH, MAX_SITE_NAME_LENGTH, DEFAULT_SITE_NAME, BannerColor, BANNER_COLORS, DEFAULT_BANNER_COLOR } from '@gadgets/workshop-shared/api'
 import { applyAccentColor, DEFAULT_ACCENT_COLOR } from './theme'
 import { cacheBustSiteLogoUrl, prepareSiteLogo } from './siteLogoUtils'
 import SiteLogo from './components/SiteLogo'
-import { Skeleton, SkeletonRows } from './components/Skeleton'
 import { useDocumentTitle } from './useDocumentTitle'
 import AdminFormatsPanel from './components/format/AdminFormatsPanel'
 import PageChrome from './components/AppShell/PageChrome'
+import { adminSettingsOptions, useAdminSettings } from './query/hooks'
+import { workshopSession } from './session'
 
 // Preset accent colors offered in the Theme section ('' = default brand).
 const ACCENT_PRESETS: { label: string; value: string }[] = [
@@ -33,59 +35,49 @@ const BANNER_SWATCH: Record<BannerColor, string> = {
 }
 
 export default function AdminPage() {
-  const { authenticatedApi, isAdmin } = useAuthenticatedApi()
+  const { isAdmin } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
+  const queryClient = useQueryClient()
+  const { data, isError, refetch } = useAdminSettings()
   useDocumentTitle('Admin')
 
-  // The admin capability (minted once via getAdminApi; null until loaded / for non-admins). Wrapped
-  // in an object so useState doesn't treat the (callable) RPC stub as a state updater function.
   const [admin, setAdmin] = useState<{ api: RpcStub<AdminApi> } | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
 
-  // System-prompt instructions: last-saved value + current editor draft.
   const [savedInstructions, setSavedInstructions] = useState('')
   const [instructionsDraft, setInstructionsDraft] = useState('')
   const [savingInstructions, setSavingInstructions] = useState(false)
 
-  // Top-bar notice: last-saved value + current editor draft.
   const [savedAnnouncement, setSavedAnnouncement] = useState('')
   const [announcementDraft, setAnnouncementDraft] = useState('')
   const [savingAnnouncement, setSavingAnnouncement] = useState(false)
 
-  // Full-width banner: last-saved value + current editor draft (text + accent color).
   const [savedBanner, setSavedBanner] = useState<{ text: string; color: BannerColor }>({ text: '', color: DEFAULT_BANNER_COLOR })
   const [bannerTextDraft, setBannerTextDraft] = useState('')
   const [bannerColorDraft, setBannerColorDraft] = useState<BannerColor>(DEFAULT_BANNER_COLOR)
   const [savingBanner, setSavingBanner] = useState(false)
 
-  // Accent (brand) color: '' means the default theme. Live-previewed while editing.
   const [savedAccent, setSavedAccent] = useState('')
   const [accentDraft, setAccentDraft] = useState('')
   const [savingAccent, setSavingAccent] = useState(false)
 
-  // Site name (shown next to the top-bar logo): last-saved value + current editor draft.
   const [savedSiteName, setSavedSiteName] = useState('')
   const [siteNameDraft, setSiteNameDraft] = useState('')
   const [savingSiteName, setSavingSiteName] = useState(false)
 
-  // Current custom logo URL. Uploads are normalized to PNG before crossing the RPC boundary.
   const [siteLogoUrl, setSiteLogoUrl] = useState<string | null>(null)
   const [savingSiteLogo, setSavingSiteLogo] = useState(false)
   const siteLogoInputRef = useRef<HTMLInputElement>(null)
 
-  // Whether new account signups are allowed.
   const [signupsEnabled, setSignupsEnabled] = useState(true)
   const [savingSignups, setSavingSignups] = useState(false)
 
-  // Gatekeeper resource config, and the set of resource keys ("vendorId\u0000urlPattern") busy toggling.
   const [resourceVendors, setResourceVendors] = useState<AdminResourceVendor[]>([])
   const [resourceBusy, setResourceBusy] = useState<Set<string>>(new Set())
 
   const [activeTab, setActiveTab] = useState('general')
 
-  // Promoted output formats, in menu order (see AdminFormatsPanel).
   const [formats, setFormats] = useState<AdminFormat[]>([])
+  const seeded = useRef(false)
 
   const resourceKey = (vendorId: string, urlPattern: string) => `${vendorId}\u0000${urlPattern}`
 
@@ -108,42 +100,22 @@ export default function AdminPage() {
     setFormats(view.formats)
   }
 
-  // Mint the admin capability once (the access check happens server-side) and load settings.
   useEffect(() => {
-    if (!isAdmin) {
-      setLoading(false)
-      return
-    }
+    if (!data || seeded.current) return
+    seeded.current = true
+    applySettings(data)
+  }, [data])
+
+  useEffect(() => {
+    if (!isAdmin) return
     let cancelled = false
-    let stub: RpcStub<AdminApi> | null = null
-    ;(async () => {
-      try {
-        const api = await authenticatedApi.getAdminApi()
-        if (cancelled) {
-          api?.[Symbol.dispose]?.()
-          return
-        }
-        if (!api) {
-          setLoadError(true)
-          return
-        }
-        stub = api
-        setAdmin({ api })
-        applySettings(await api.getSettings())
-      } catch (err) {
-        if (!cancelled) {
-          console.error('Failed to load admin settings:', err)
-          setLoadError(true)
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
+    void workshopSession.ensureAdminApi().then((api) => {
+      if (!cancelled && api) setAdmin({ api })
+    })
     return () => {
       cancelled = true
-      stub?.[Symbol.dispose]?.()
     }
-  }, [isAdmin, authenticatedApi])
+  }, [isAdmin])
 
   // Live-preview the draft accent color across the whole app while the admin page is open. On leave
   // (or before each change) revert to the last-saved value so an unsaved preview doesn't stick.
@@ -371,31 +343,12 @@ export default function AdminPage() {
     )
   }
 
-  if (loading) {
-    return (
-      <PageChrome title="Admin">
-        <div className="space-y-6">
-          <Skeleton className="h-8 w-64 rounded-lg" />
-          <SkeletonRows count={4}>
-            {(i) => (
-              <div key={i} aria-hidden="true"
-                  className="rounded-xl border border-kumo-line bg-kumo-base px-5 py-4">
-                <Skeleton className="h-[1lh] w-40 text-sm" />
-                <Skeleton className="mt-2 h-9 w-full rounded-lg" />
-              </div>
-            )}
-          </SkeletonRows>
-        </div>
-      </PageChrome>
-    )
-  }
-
-  if (loadError || !admin) {
+  if (isError && !data) {
     return (
       <PageChrome title="Admin">
         <div className="py-16 text-center">
           <p className="text-sm text-kumo-danger">Something went wrong loading admin settings.</p>
-          <button onClick={() => window.location.reload()} className="text-kumo-brand mt-2 text-sm underline">
+          <button onClick={() => { void refetch() }} className="text-kumo-brand mt-2 text-sm underline">
             Try again
           </button>
         </div>
@@ -423,7 +376,12 @@ export default function AdminPage() {
         <AdminFormatsPanel
           admin={admin.api}
           formats={formats}
-          onChanged={async () => { setFormats((await admin.api.getSettings()).formats) }}
+          onChanged={async () => {
+            const api = admin?.api ?? await workshopSession.ensureAdminApi()
+            if (!api) return
+            setFormats((await api.getSettings()).formats)
+            void queryClient.invalidateQueries({ queryKey: adminSettingsOptions(workshopSession).queryKey })
+          }}
         />
       )}
 
@@ -480,10 +438,10 @@ export default function AdminPage() {
               variant="primary"
               size="sm"
               onClick={handleSaveSiteName}
-              loading={savingSiteName}
-              disabled={siteNameDraft === savedSiteName}
+              disabled={savingSiteName || siteNameDraft === savedSiteName}
+              aria-busy={savingSiteName}
             >
-              Save
+              {savingSiteName ? 'Saving…' : 'Save'}
             </Button>
           </div>
         </div>
@@ -518,10 +476,10 @@ export default function AdminPage() {
                 variant="secondary"
                 size="sm"
                 onClick={() => siteLogoInputRef.current?.click()}
-                loading={savingSiteLogo}
                 disabled={savingSiteLogo}
+                aria-busy={savingSiteLogo}
               >
-                {siteLogoUrl ? 'Change logo' : 'Upload logo'}
+                {savingSiteLogo ? 'Uploading…' : siteLogoUrl ? 'Change logo' : 'Upload logo'}
               </Button>
               {siteLogoUrl && (
                 <Button
@@ -601,10 +559,10 @@ export default function AdminPage() {
               variant="primary"
               size="sm"
               onClick={handleSaveAccent}
-              loading={savingAccent}
-              disabled={!accentDirty}
+              disabled={savingAccent || !accentDirty}
+              aria-busy={savingAccent}
             >
-              Save
+              {savingAccent ? 'Saving…' : 'Save'}
             </Button>
           </div>
         </div>
@@ -680,10 +638,10 @@ export default function AdminPage() {
                 variant="primary"
                 size="sm"
                 onClick={handleSaveBanner}
-                loading={savingBanner}
-                disabled={!bannerDirty || bannerTextDraft.length > MAX_ANNOUNCEMENT_LENGTH}
+                disabled={savingBanner || !bannerDirty || bannerTextDraft.length > MAX_ANNOUNCEMENT_LENGTH}
+                aria-busy={savingBanner}
               >
-                Save
+                {savingBanner ? 'Saving…' : 'Save'}
               </Button>
             </div>
           </div>
@@ -733,13 +691,14 @@ export default function AdminPage() {
                 variant="primary"
                 size="sm"
                 onClick={handleSaveAnnouncement}
-                loading={savingAnnouncement}
                 disabled={
+                  savingAnnouncement ||
                   announcementDraft === savedAnnouncement ||
                   announcementDraft.length > MAX_ANNOUNCEMENT_LENGTH
                 }
+                aria-busy={savingAnnouncement}
               >
-                Save
+                {savingAnnouncement ? 'Saving…' : 'Save'}
               </Button>
             </div>
           </div>
@@ -788,13 +747,14 @@ export default function AdminPage() {
               variant="primary"
               size="sm"
               onClick={handleSaveInstructions}
-              loading={savingInstructions}
               disabled={
+                savingInstructions ||
                 instructionsDraft === savedInstructions ||
                 instructionsDraft.length > MAX_INSTANCE_INSTRUCTIONS_LENGTH
               }
+              aria-busy={savingInstructions}
             >
-              Save
+              {savingInstructions ? 'Saving…' : 'Save'}
             </Button>
           </div>
         </div>

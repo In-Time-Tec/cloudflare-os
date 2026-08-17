@@ -1,4 +1,3 @@
-import { Loader } from '@cloudflare/kumo'
 import { Hexagon } from '@phosphor-icons/react'
 import type { ChatMessage as ChatMessageType } from '../../data/chat'
 import ToolCallCard from './ToolCallCard'
@@ -76,8 +75,8 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
         <div className="text-sm leading-relaxed text-kumo-default">
           <RichContent text={message.content} />
           {message.isStreaming && (
-            <span className="inline-flex items-center ml-1.5">
-              <Loader size="sm" />
+            <span className="ml-1.5 inline-flex items-center text-xs text-kumo-inactive">
+              Streaming…
             </span>
           )}
         </div>

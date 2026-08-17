@@ -15,7 +15,6 @@ import { useAuthenticatedApi } from '../AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
 import { useLibraryBlueprints, useOwnBlueprints } from '../query/hooks'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './menuStyles'
-import { Skeleton, SkeletonListRow, SkeletonRows } from './Skeleton'
 
 // A unified row item, merged from the user's published blueprints (`listOwnBlueprints`) and their
 // library (`listLibraryBlueprints`). Mirrors the sidebar's SidebarBlueprintItem but adds the bits
@@ -245,11 +244,6 @@ export default function BlueprintList({
 
       {/* Toolbar — search plus the page's actions. Hidden when the user has no blueprints, since
           the empty state carries its own copies of the same two actions. */}
-      {loading && (
-        <div className="mb-4 flex items-center gap-2 px-3">
-          <Skeleton className="h-9 flex-1 rounded-lg" />
-        </div>
-      )}
       {!loading && items.length > 0 && (
         <div className="mb-4 flex items-center gap-2 px-3">
           <div className="relative flex-1">
@@ -289,7 +283,7 @@ export default function BlueprintList({
           past the aligned content. */}
       <div className="chat-panel flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pt-1">
         {loading ? (
-          <SkeletonRows count={6}>{(i) => <SkeletonListRow key={i} trailing />}</SkeletonRows>
+          null
         ) : loadError ? (
           <div className="py-12 text-center text-sm">
             <p className="text-kumo-danger">Something went wrong loading your blueprints.</p>

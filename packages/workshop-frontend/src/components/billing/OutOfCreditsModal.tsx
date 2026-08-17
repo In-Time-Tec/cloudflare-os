@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CloudflareUsageInfo, CloudflareAccountOption } from '@gadgets/workshop-shared/api'
-import { Dialog, Button, Loader, useKumoToastManager } from '@cloudflare/kumo'
+import { Dialog, Button, useKumoToastManager } from '@cloudflare/kumo'
 import { CloudWarning, Lightning } from '@phosphor-icons/react'
 import { useOptionalAuthenticatedApi } from '../../AuthContext'
 import { buildAddCreditsUrl } from './creditsUrl'
@@ -96,7 +96,7 @@ export default function OutOfCreditsModal({ open, onClose }: OutOfCreditsModalPr
         </Dialog.Title>
 
         {usage === null ? (
-          <div className="flex justify-center py-8"><Loader size="base" /></div>
+          null
         ) : (
           <div className="space-y-4">
             {!connected ? (
@@ -136,7 +136,7 @@ export default function OutOfCreditsModal({ open, onClose }: OutOfCreditsModalPr
             {needsSelection && (
               <div className="flex flex-col gap-2">
                 {accounts === null ? (
-                  <p className="text-sm text-kumo-subtle">Loading accounts…</p>
+                  null
                 ) : accounts.length === 0 ? (
                   <p className="text-sm text-kumo-subtle">No accounts available on this connection.</p>
                 ) : (
@@ -146,10 +146,10 @@ export default function OutOfCreditsModal({ open, onClose }: OutOfCreditsModalPr
                       variant="secondary"
                       className="justify-start"
                       onClick={() => selectAccount(a.accountId)}
-                      loading={selecting === a.accountId}
                       disabled={selecting !== null}
+                      aria-busy={selecting === a.accountId}
                     >
-                      {a.accountName}
+                      {selecting === a.accountId ? 'Selecting…' : a.accountName}
                     </Button>
                   ))
                 )}
@@ -173,9 +173,9 @@ export default function OutOfCreditsModal({ open, onClose }: OutOfCreditsModalPr
               {!connected ? (
                 <>
                   <Button variant="secondary" onClick={onClose}>Maybe later</Button>
-                  <Button variant="primary" onClick={connect} loading={connecting}>
+                  <Button variant="primary" onClick={connect} disabled={connecting} aria-busy={connecting}>
                     <Lightning size={16} weight="bold" />
-                    Connect Cloudflare
+                    {connecting ? 'Connecting…' : 'Connect Cloudflare'}
                   </Button>
                 </>
               ) : needsSelection ? (

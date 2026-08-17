@@ -16,8 +16,8 @@ import {
   Overseer,
 } from '@gadgets/workshop-shared/api'
 import { useAuthenticatedApi } from '../../AuthContext'
-import { useQueryClient } from '@tanstack/react-query'
-import { gadgetsKey, useGadgets, useWhoami } from '../../query/hooks'
+import { useGadgets, useWhoami } from '../../query/hooks'
+import { useGadgetMutations } from '../../query/useGadgetMutations'
 import ShareModal from '../../ShareModal'
 import DeleteConfirmationDialog from '../DeleteConfirmationDialog'
 import SidebarGadgetRow from './SidebarGadgetRow'
@@ -31,12 +31,10 @@ const RECENT_INITIAL_LIMIT = 6
 // the same data and the dialog state has a single owner.
 // ─────────────────────────────────────────────────────────────────────────────
 type WorkspacesContextValue = {
-  // Search query, lifted up so the input lives in the pinned area but filters the scrolling lists.
   search: string
   setSearch: (v: string) => void
 
   gadgets: GadgetMetadataWithTimestamps[]
-  gadgetsLoading: boolean
   favorites: GadgetMetadataWithTimestamps[]
   recent: GadgetMetadataWithTimestamps[]
 
@@ -64,16 +62,14 @@ function useWorkspacesContext(): WorkspacesContextValue {
 export function SidebarWorkspacesProvider({ children }: { children: ReactNode }) {
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
-
-  const queryClient = useQueryClient()
-  const { data: gadgets = [], isLoading: gadgetsLoading } = useGadgets()
+  const { data: gadgets = [] } = useGadgets()
   const { data: currentUser = null } = useWhoami()
+  const { togglePin, renameGadget, deleteGadget, remove } = useGadgetMutations()
 
   const [search, setSearch] = useState('')
 
   // Delete / share dialog state (workspaces).
   const [deleteTarget, setDeleteTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
   const [shareTarget, setShareTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
   const [shareOverseer, setShareOverseer] = useState<{ stub: RpcStub<Overseer> } | null>(null)
 
@@ -111,38 +107,13 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
 
   // --- Workspace actions ---------------------------------------------------
 
-  const onTogglePin = useCallback(async (g: GadgetMetadataWithTimestamps) => {
-    const newPinned = !g.pinned
-    queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
-      (prev ?? []).map((x) => (x.id === g.id ? { ...x, pinned: newPinned } : x)))
-    const overseer = authenticatedApi.openGadget(g.id) // pipelining
-    try {
-      await overseer.setPinned(newPinned)
-    } catch (err) {
-      console.error('Failed to toggle pin:', err)
-      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
-      (prev ?? []).map((x) => (x.id === g.id ? { ...x, pinned: g.pinned } : x)))
-      toasts.add({ title: 'Failed to update favorite', variant: 'error' })
-    } finally {
-      overseer[Symbol.dispose]()
-    }
-  }, [authenticatedApi, toasts])
+  const onTogglePin = useCallback((g: GadgetMetadataWithTimestamps) => {
+    togglePin(g)
+  }, [togglePin])
 
-  const onRename = useCallback(async (g: GadgetMetadataWithTimestamps, newTitle: string) => {
-    queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
-      (prev ?? []).map((x) => (x.id === g.id ? { ...x, title: newTitle } : x)))
-    const overseer = authenticatedApi.openGadget(g.id)
-    try {
-      await overseer.setTitle(newTitle)
-    } catch (err) {
-      console.error('Failed to rename:', err)
-      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
-      (prev ?? []).map((x) => (x.id === g.id ? { ...x, title: g.title } : x)))
-      toasts.add({ title: 'Failed to rename workspace', variant: 'error' })
-    } finally {
-      overseer[Symbol.dispose]()
-    }
-  }, [authenticatedApi, toasts])
+  const onRename = useCallback((g: GadgetMetadataWithTimestamps, newTitle: string) => {
+    renameGadget(g, newTitle)
+  }, [renameGadget])
 
   const onShare = useCallback(async (g: GadgetMetadataWithTimestamps) => {
     let overseer: RpcStub<Overseer> | null = null
@@ -161,38 +132,17 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!deleteTarget) return
-    setIsDeleting(true)
     try {
-      if (deleteTarget.owner) {
-        await authenticatedApi.dismissSharedGadget(deleteTarget.id)
-      } else {
-        const overseer = authenticatedApi.openGadget(deleteTarget.id) // pipelining
-        try {
-          await overseer.deleteSelf()
-        } finally {
-          overseer[Symbol.dispose]()
-        }
-      }
-      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
-      (prev ?? []).filter((x) => x.id !== deleteTarget.id))
-      toasts.add({
-        title: deleteTarget.owner ? 'Workspace removed' : 'Workspace deleted',
-        variant: 'success',
-      })
-    } catch (err) {
-      console.error('Failed to delete workspace:', err)
-      toasts.add({ title: 'Failed to delete workspace', variant: 'error' })
-    } finally {
-      setIsDeleting(false)
+      await deleteGadget(deleteTarget)
       setDeleteTarget(null)
+    } catch {
     }
-  }, [authenticatedApi, deleteTarget, toasts])
+  }, [deleteGadget, deleteTarget])
 
   const value: WorkspacesContextValue = {
     search,
     setSearch,
     gadgets,
-    gadgetsLoading,
     favorites,
     recent,
     onTogglePin,
@@ -209,7 +159,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
       <DeleteConfirmationDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
-        isDeleting={isDeleting}
+        isDeleting={remove.isPending}
         title={deleteTarget?.owner ? 'Remove workspace' : 'Delete workspace'}
         description={
           deleteTarget?.owner
@@ -311,8 +261,6 @@ export function SidebarRecentWorkspaces({ collapsed = false }: { collapsed?: boo
 
   const recentShown = recent.slice(0, RECENT_INITIAL_LIMIT)
 
-  // No loading branch: the shell holds the rail back until the workspace list is in hand
-  // (see useSidebarReady), so this renders the real rows or nothing at all.
   return (
     <div className="flex flex-col pb-3">
       <SidebarSection

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CloudflareUsageInfo, CloudflareAccountOption } from '@gadgets/workshop-shared/api'
-import { Dialog, Button, Loader, Radio, useKumoToastManager } from '@cloudflare/kumo'
+import { Dialog, Button, Radio, useKumoToastManager } from '@cloudflare/kumo'
 import { Warning } from '@phosphor-icons/react'
 import { useOptionalAuthenticatedApi } from '../../AuthContext'
 import { useCloudflareLimitsEnabled } from '../../ServerConfigContext'
@@ -83,7 +83,7 @@ export default function AccountSelectionModal() {
           </p>
 
           {accounts === null ? (
-            <div className="flex justify-center py-6"><Loader size="base" /></div>
+            null
           ) : accounts.length === 0 ? (
             <p className="text-sm text-kumo-subtle">No accounts available on this connection.</p>
           ) : (
@@ -117,10 +117,10 @@ export default function AccountSelectionModal() {
               <Button
                 variant="primary"
                 onClick={save}
-                loading={saving}
                 disabled={!chosen || saving}
+                aria-busy={saving}
               >
-                Save
+                {saving ? 'Saving…' : 'Save'}
               </Button>
             )}
           </div>

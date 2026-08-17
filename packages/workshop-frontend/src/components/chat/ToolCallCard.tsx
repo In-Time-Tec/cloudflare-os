@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Loader } from '@cloudflare/kumo'
 import {
   Code as CodeIcon,
   Database,
@@ -29,7 +28,7 @@ const iconMap: Record<string, React.ElementType> = {
 function StatusIndicator({ status }: { status: string }) {
   switch (status) {
     case 'running':
-      return <Loader size="sm" />
+      return <span className="text-[11px] text-kumo-inactive">Running…</span>
     case 'complete':
       return <CheckCircle size={14} weight="fill" className="text-kumo-success" />
     case 'error':

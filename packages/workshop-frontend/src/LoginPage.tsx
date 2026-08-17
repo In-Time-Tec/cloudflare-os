@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { RpcStub } from 'capnweb'
 import { PublicApi } from '@gadgets/workshop-shared/api'
 import { Hexagon } from '@phosphor-icons/react'
-import { Input, Button, Banner, Loader } from '@cloudflare/kumo'
+import { Input, Button, Banner } from '@cloudflare/kumo'
 import { hashPassword } from './passwordHash'
 import { useServerConfig, useServerConfigError, useSiteName } from './ServerConfigContext'
 import { useDocumentTitle } from './useDocumentTitle'
@@ -72,14 +72,7 @@ export default function LoginPage({ rpcStub, onLoginSuccess }: LoginPageProps) {
         </div>
       )
     }
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-kumo-base px-4">
-        <Loader size="lg" />
-        <p className="text-sm text-kumo-subtle text-center">
-          {connectionLost ? "Can't reach the server. Retrying…" : 'Loading…'}
-        </p>
-      </div>
-    )
+    return <div className="min-h-screen bg-kumo-base" />
   }
 
   const authVendors = serverConfig.authVendors ?? []
@@ -141,11 +134,11 @@ export default function LoginPage({ rpcStub, onLoginSuccess }: LoginPageProps) {
               <Button
                 type="submit"
                 variant="primary"
-                disabled={!username || !password}
-                loading={loading}
+                disabled={loading || !username || !password}
+                aria-busy={loading}
                 className="w-full justify-center"
               >
-                Sign in
+                {loading ? 'Signing in…' : 'Sign in'}
               </Button>
             </form>
 

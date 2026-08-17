@@ -8,9 +8,10 @@ import {
 } from '@phosphor-icons/react'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import { useAuthenticatedApi } from '../../AuthContext'
-import type { GadgetMetadataWithTimestamps, OutputFormatOffer } from '@gadgets/workshop-shared/api'
+import type { OutputFormatOffer } from '@gadgets/workshop-shared/api'
 import { FormatGlyph } from '../format/FormatVisuals'
 import { createFromFormat } from '../format/useOutputFormats'
+import { useGadgets, useLibraryBlueprints, useOutputFormatsQuery, useOwnBlueprints } from '../../query/hooks'
 
 // A ⌘K command palette: jump to a workspace or a primary destination. Because it's keyboard-driven
 // and opened many times a day, it deliberately has *no* open/close animation (instant feels faster
@@ -26,17 +27,6 @@ type Command = {
 }
 
 type BlueprintEntry = { id: string; title: string; recency: number }
-type PaletteData = {
-  gadgets: GadgetMetadataWithTimestamps[]
-  blueprints: BlueprintEntry[]
-  formats: OutputFormatOffer[]
-}
-
-// Module-level cache shared across opens for the lifetime of the page. The palette serves this
-// instantly on open and only refetches when it's older than the TTL (stale-while-revalidate), so
-// hammering ⌘K doesn't spam RPCs while newly-created items still appear on the next open.
-const PALETTE_CACHE_TTL_MS = 30_000
-let paletteCache: { data: PaletteData; fetchedAt: number } | null = null
 
 // Merge the user's published blueprints and their library into a single de-duplicated list, keyed
 // by id and keeping the most-recent timestamp from either source.
@@ -143,66 +133,30 @@ export default function CommandPalette({
   const { authenticatedApi } = useAuthenticatedApi()
   const navigate = useNavigate()
   const toasts = useKumoToastManager()
+  const { data: gadgets = [] } = useGadgets()
+  const { data: ownBlueprints = [] } = useOwnBlueprints()
+  const { data: libraryBlueprints = [] } = useLibraryBlueprints()
+  const { data: formats = [] } = useOutputFormatsQuery()
+  const blueprints = useMemo(
+    () => mergeBlueprints(ownBlueprints, libraryBlueprints),
+    [ownBlueprints, libraryBlueprints],
+  )
 
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
-  const [gadgets, setGadgets] = useState<GadgetMetadataWithTimestamps[]>(
-    () => paletteCache?.data.gadgets ?? [],
-  )
-  const [blueprints, setBlueprints] = useState<BlueprintEntry[]>(
-    () => paletteCache?.data.blueprints ?? [],
-  )
-  const [formats, setFormats] = useState<OutputFormatOffer[]>(
-    () => paletteCache?.data.formats ?? [],
-  )
 
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  // Reset transient state and focus the input each time the palette opens. Serve cached results
-  // instantly, then refetch in the background only when the cache is missing or stale. Nothing runs
-  // while the palette is closed.
   useEffect(() => {
     if (!open) return
     setQuery('')
     setActiveIndex(0)
-    // Defer focus until after the element is painted.
     const id = requestAnimationFrame(() => inputRef.current?.focus())
-
-    if (paletteCache) {
-      setGadgets(paletteCache.data.gadgets)
-      setBlueprints(paletteCache.data.blueprints)
-      setFormats(paletteCache.data.formats)
-    }
-
-    let cancelled = false
-    const isFresh = paletteCache && Date.now() - paletteCache.fetchedAt < PALETTE_CACHE_TTL_MS
-    if (!isFresh) {
-      Promise.all([
-        authenticatedApi.listGadgets(),
-        authenticatedApi.listOwnBlueprints(),
-        authenticatedApi.listLibraryBlueprints(),
-        authenticatedApi.listOutputFormats(),
-      ])
-        .then(([gadgetList, own, library, formatList]) => {
-          const data: PaletteData = {
-            gadgets: gadgetList,
-            blueprints: mergeBlueprints(own, library),
-            formats: formatList,
-          }
-          paletteCache = { data, fetchedAt: Date.now() }
-          if (cancelled) return
-          setGadgets(data.gadgets)
-          setBlueprints(data.blueprints)
-          setFormats(data.formats)
-        })
-        .catch((err) => console.error('Command palette: failed to load items', err))
-    }
     return () => {
-      cancelled = true
       cancelAnimationFrame(id)
     }
-  }, [open, authenticatedApi])
+  }, [open])
 
   const go = useCallback(
     (run: () => void) => {

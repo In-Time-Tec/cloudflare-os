@@ -371,10 +371,10 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
           <Button
             variant="primary"
             onClick={handleSubmit}
-            loading={loading}
-            disabled={!selection}
+            disabled={loading || !selection}
+            aria-busy={loading}
           >
-            Add Model
+            {loading ? 'Adding…' : 'Add Model'}
           </Button>
         </div>
       </Dialog>

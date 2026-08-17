@@ -455,7 +455,7 @@ export default function ResourcePicker({
     <div style={style}>
       <div className="overflow-y-auto" style={{ maxHeight }}>
         {!ready ? (
-          <p className={PICKER_EMPTY}>Loading connections…</p>
+          null
         ) : matchedResources.length === 0 ? (
           <p className={PICKER_EMPTY}>No matching resources.</p>
         ) : (() => {
@@ -552,6 +552,7 @@ export default function ResourcePicker({
                       className={`${PICKER_ROW} ${isActive ? PICKER_ROW_ACTIVE : ''} ${
                         ((isExpired && !isReconnecting) || needsAccess || searchHasPlaceholders) ? 'opacity-70' : ''
                       }`}
+                      aria-busy={isReconnecting || isGranting}
                       style={{
                         cursor: searchHasPlaceholders ? 'default' : (isReconnecting || isGranting) ? 'wait' : 'pointer',
                       }}
@@ -574,7 +575,9 @@ export default function ResourcePicker({
                         )}
                       </span>
                       {isReconnecting || isGranting ? (
-                        <div className="h-3 w-3 flex-shrink-0 animate-spin rounded-full border-2 border-kumo-brand border-t-transparent" />
+                        <span className="flex-shrink-0 text-[11.5px] text-kumo-inactive">
+                          {isReconnecting ? 'Reconnecting…' : 'Granting…'}
+                        </span>
                       ) : isExpired ? (
                         <span className="flex flex-shrink-0 items-center gap-1">
                           <Warning size={12} className="text-kumo-warning" />
@@ -612,19 +615,16 @@ export default function ResourcePicker({
                   <div
                     onClick={() => !connectingVendor && handleConnectNew(vendor.id, resource.grantable ? [resource.urlPattern] : undefined)}
                     className={`${PICKER_ROW} ${isActive ? PICKER_ROW_ACTIVE : ''}`}
+                    aria-busy={connectingVendor === vendor.id}
                     style={{
                       cursor: connectingVendor === vendor.id ? 'wait' : 'pointer',
                     }}
                   >
                     <span className="grid h-6 w-6 flex-shrink-0 place-items-center rounded-md border border-dashed border-kumo-line text-kumo-inactive">
-                      {connectingVendor === vendor.id ? (
-                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-kumo-brand border-t-transparent" />
-                      ) : (
-                        <Plus size={11} />
-                      )}
+                      {connectingVendor !== vendor.id && <Plus size={11} />}
                     </span>
                     <span className="flex-1 text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-subtle">
-                      {connectingVendor === vendor.id ? 'Opening…' : 'Connect new account'}
+                      {connectingVendor === vendor.id ? 'Connecting…' : 'Connect new account'}
                     </span>
                     {isActive && <TabHint />}
                   </div>

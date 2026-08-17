@@ -101,8 +101,8 @@ export default function OAuthButtons({ rpcStub, vendors, onSuccess }: OAuthButto
           key={vendor.vendorId}
           variant="secondary"
           onClick={() => start(vendor.vendorId)}
-          loading={pending === vendor.vendorId}
           disabled={pending !== null}
+          aria-busy={pending === vendor.vendorId}
           className="w-full justify-center"
         >
           {vendor.logo && (
@@ -113,7 +113,7 @@ export default function OAuthButtons({ rpcStub, vendors, onSuccess }: OAuthButto
               style={{ height: 18, width: 'auto' }}
             />
           )}
-          Continue with {vendor.displayName}
+          {pending === vendor.vendorId ? 'Connecting…' : `Continue with ${vendor.displayName}`}
         </Button>
       ))}
     </div>

@@ -1,11 +1,11 @@
-import { logRpcFailure } from "../rpcErrors";
+import { logRpcFailure } from "../../rpcErrors";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useKumoToastManager } from "@cloudflare/kumo";
-import { ChatInput } from "../ChatInterface";
-import HomeTaskSuggestions from "../components/AppShell/HomeTaskSuggestions";
-import { useAuthenticatedApi } from "../AuthContext";
-import { useModels } from "../query/hooks";
+import { ChatInput } from "../../ChatInterface";
+import HomeTaskSuggestions from "../../components/AppShell/HomeTaskSuggestions";
+import { useAuthenticatedApi } from "../../AuthContext";
+import { useModels, modelsOptions } from "../../query/hooks";
 import { RpcStub } from "capnweb";
 import {
   Overseer,
@@ -17,18 +17,23 @@ import {
 import {
   getStoredSelectedModel,
   persistSelectedModel,
-} from "../modelSelection";
-import { useDocumentTitle } from "../useDocumentTitle";
-import { homePromptFromSearch } from "../homePrompt";
-import { composerDraftStorageKey } from "../composerDraft";
+} from "../../modelSelection";
+import { useDocumentTitle } from "../../useDocumentTitle";
+import { homePromptFromSearch } from "../../homePrompt";
+import { composerDraftStorageKey } from "../../composerDraft";
 
 type HomeSearch = { prompt?: string };
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/_authenticated/")({
   component: HomePage,
   validateSearch: (search: Record<string, unknown>): HomeSearch => ({
     prompt: homePromptFromSearch(search.prompt),
   }),
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData({
+      ...modelsOptions(context.session),
+      revalidateIfStale: true,
+    }),
 });
 
 // The Home page is the "new workspace" launcher. Persistent navigation (recents, favorites) lives

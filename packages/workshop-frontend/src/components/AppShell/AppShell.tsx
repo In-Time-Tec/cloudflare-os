@@ -8,11 +8,9 @@ import Sidebar from './Sidebar'
 import { ConversationsProvider } from '../../conversations/ConversationsContext'
 import CommandPalette from './CommandPalette'
 import { OPEN_COMMAND_PALETTE_EVENT } from './commandPaletteBus'
-import { useSidebarReady } from './useSidebarReady'
 
 const STORAGE_KEY_COLLAPSED = 'gadgets:sidebar-collapsed'
 
-// Read synchronously for the initial state so the rail doesn't flash open then collapse.
 function readCollapsed(): boolean {
   try {
     return localStorage.getItem(STORAGE_KEY_COLLAPSED) === '1'
@@ -21,14 +19,6 @@ function readCollapsed(): boolean {
   }
 }
 
-/**
- * The authenticated application chrome: a persistent left rail + a thin top notice
- * strip + the routed content. Replaces the old <Header /> on these routes.
- *
- * Mobile: below `md` the rail collapses to an overlay drawer triggered by a hamburger button in a
- * minimal top bar. We don't try to gracefully shrink the rail at narrow widths; the overlay model
- * is simpler and matches how the rest of the app handles small screens.
- */
 export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ConversationsProvider>
@@ -42,7 +32,6 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const connectionLost = useConnectionLost()
-  const sidebarReady = useSidebarReady()
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -52,7 +41,6 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
     })
   }, [])
 
-  // Close mobile drawer when escape is pressed.
   useEffect(() => {
     if (!mobileOpen) return
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobileOpen(false) }
@@ -60,18 +48,11 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener('keydown', handler)
   }, [mobileOpen])
 
-  // Close the mobile drawer on navigation. Links in the drawer (primary nav, Gatekeepers, the user
-  // menu, workspace rows) otherwise navigate while leaving the drawer covering the page — so on a
-  // phone it looks like nothing happened. Watching the pathname catches every navigation source
-  // without prop-drilling a close callback through the whole rail. No-op on desktop, where the
-  // drawer is never open.
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   useEffect(() => {
     setMobileOpen(false)
   }, [pathname])
 
-  // Global ⌘K / Ctrl+K opens the command palette; the rail's search button opens it via a custom
-  // event so it doesn't have to prop-drill into the palette.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
@@ -87,19 +68,6 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpen)
     }
   }, [])
-
-  // The rail renders complete or not at all — see useSidebarReady. Until then the app frame is on
-  // screen (so the window isn't blank and the chrome doesn't move afterwards) with an empty rail.
-  if (!sidebarReady) {
-    return (
-      <div className="h-screen min-h-screen w-screen overflow-hidden bg-app-frame p-0 md:p-3">
-        <div className="flex h-full w-full overflow-hidden bg-kumo-base md:rounded-2xl md:border md:border-kumo-line md:shadow-app-shell">
-          <div className="hidden w-[260px] shrink-0 border-r border-kumo-line bg-kumo-elevated md:block" />
-          <div className="relative flex min-w-0 flex-1 flex-col" />
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="h-screen min-h-screen w-screen overflow-hidden bg-app-frame p-0 md:p-3">

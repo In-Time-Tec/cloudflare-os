@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Text, Loader, Banner } from '@cloudflare/kumo'
+import { Text, Banner } from '@cloudflare/kumo'
 import { Sparkle } from '@phosphor-icons/react'
 import { RpcStub, RpcTarget, newMessagePortRpcSession } from 'capnweb'
 import { GadgetClient, ConsoleLogEvent } from '@gadgets/workshop-shared/api'
@@ -410,16 +410,7 @@ function GadgetUISession({ gadget, height, reloadTrigger, isVisible = true, chat
   }
 
   if (loading) {
-    return (
-      <div style={{
-        height,
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center'
-      }}>
-        <Loader size="lg" />
-      </div>
-    )
+    return <div style={{ height }} />
   }
 
   if (error) {

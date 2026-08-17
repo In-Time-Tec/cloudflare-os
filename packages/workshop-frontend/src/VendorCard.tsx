@@ -1,4 +1,4 @@
-import { Text, Loader } from '@cloudflare/kumo'
+import { Text } from '@cloudflare/kumo'
 import { LinkSimple } from '@phosphor-icons/react'
 import { VendorDescription } from '@gadgets/workshop-shared/gatekeeper'
 import Avatar from './components/Avatar'
@@ -21,6 +21,7 @@ export default function VendorCard({
   return (
     <div
       onClick={disabled ? undefined : onClick}
+      aria-busy={loading}
       className={`flex items-center gap-4 p-4 border border-kumo-line rounded-lg transition-all ${
         disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:border-kumo-brand hover:bg-kumo-tint'
       } ${disabled && !loading ? 'opacity-50' : ''}`}
@@ -41,7 +42,7 @@ export default function VendorCard({
           </Text>
         )}
       </div>
-      {loading && <Loader size="sm" />}
+      {loading && <span className="text-xs text-kumo-subtle">Connecting…</span>}
     </div>
   )
 }

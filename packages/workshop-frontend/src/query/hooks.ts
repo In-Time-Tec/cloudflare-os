@@ -1,99 +1,246 @@
-import { useQuery } from '@tanstack/react-query'
-import { getActiveAuthenticatedApi } from './api'
+import { queryOptions, useQuery } from '@tanstack/react-query'
+import type { AiChatAuthorInfo, GatekeeperVendorFilter } from '@gadgets/workshop-shared/api'
+import { workshopSession, type WorkshopSession } from '../session'
+import { persistedQueryMeta } from './client'
 
-// Boot + sidebar read queries, centralized here so every consumer shares one cache entry per
-// resource (deduping the duplicate whoami/listGadgets calls that used to fire per component).
-// These hooks only run inside the authenticated shell, by which point useAuth has registered the
-// active stub in query/api.ts, so the queryFn can read it synchronously.
+export const OUTPUT_CATCH_UP_LIMIT = 32
 
-export const whoamiKey = ['whoami'] as const
-export const gadgetsKey = ['gadgets'] as const
-export const gatekeeperAppsKey = ['gatekeeperApps'] as const
-
-function api() {
-  const stub = getActiveAuthenticatedApi()
-  if (!stub) throw new Error('Not authenticated yet')
-  return stub
+export function accountKey(scope: string, name: string, ...rest: unknown[]) {
+  return ['account', scope, name, ...rest] as const
 }
 
-export function useWhoami() {
-  return useQuery({ queryKey: whoamiKey, queryFn: async () => await api().whoami() })
+function api(session: WorkshopSession) {
+  return session.requireAuthenticatedApi()
 }
 
-export function useGadgets() {
-  return useQuery({ queryKey: gadgetsKey, queryFn: async () => await api().listGadgets() })
-}
-
-export function useGatekeeperApps() {
-  return useQuery({ queryKey: gatekeeperAppsKey, queryFn: async () => await api().listGatekeeperApps() })
-}
-
-
-export const amIAdminKey = ['amIAdmin'] as const
-export function useAmIAdmin() {
-  return useQuery({ queryKey: amIAdminKey, queryFn: async () => await api().amIAdmin() })
-}
-
-
-export const modelsKey = ['models'] as const
-export const quickModelKey = ['quickModel'] as const
-export const aiConfigKey = ['aiConfig'] as const
-
-export function useModels() {
-  return useQuery({ queryKey: modelsKey, queryFn: async () => await api().listModels() })
-}
-
-export function useQuickModel() {
-  return useQuery({ queryKey: quickModelKey, queryFn: async () => await api().getQuickModel() })
-}
-
-export function useAiConfig() {
-  return useQuery({ queryKey: aiConfigKey, queryFn: async () => await api().getAiConfig() })
-}
-
-
-export const addableGatekeepersKey = ['addableGatekeepers'] as const
-export const gatekeeperVendorsKey = ['gatekeeperVendors'] as const
-
-export function useAddableGatekeepers() {
-  return useQuery({ queryKey: addableGatekeepersKey, queryFn: async () => await api().listAddableGatekeepers() })
-}
-
-export function useGatekeeperVendors() {
-  return useQuery({ queryKey: gatekeeperVendorsKey, queryFn: async () => await api().listGatekeeperVendors() })
-}
-
-
-export const featuredBlueprintsKey = ['featuredBlueprints'] as const
-export const ownBlueprintsKey = ['ownBlueprints'] as const
-export const libraryBlueprintsKey = ['libraryBlueprints'] as const
-
-export function useFeaturedBlueprints() {
-  return useQuery({ queryKey: featuredBlueprintsKey, queryFn: async () => await api().listFeaturedBlueprints() })
-}
-
-export function useOwnBlueprints() {
-  return useQuery({ queryKey: ownBlueprintsKey, queryFn: async () => await api().listOwnBlueprints() })
-}
-
-export function useLibraryBlueprints() {
-  return useQuery({ queryKey: libraryBlueprintsKey, queryFn: async () => await api().listLibraryBlueprints() })
-}
-
-
-export const outputsKey = ['outputs'] as const
-
-/** listOutputs is a bounded catch-up sweep; one queryFn loops until the server reports done. */
-export function useOutputs() {
-  return useQuery({
-    queryKey: outputsKey,
-    queryFn: async () => {
-      for (;;) {
-        const { outputs, catchingUp } = await api().listOutputs()
-        if (!catchingUp) return outputs
-      }
-    },
+export function whoamiOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'whoami'),
+    queryFn: async (): Promise<AiChatAuthorInfo> => ({ ...await api(session).whoami() }),
+    meta: persistedQueryMeta,
   })
 }
 
+export function gadgetsOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'gadgets'),
+    queryFn: async () => [...await api(session).listGadgets()],
+    meta: persistedQueryMeta,
+  })
+}
 
+export function gatekeeperAppsOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'gatekeeperApps'),
+    queryFn: async () => [...await api(session).listGatekeeperApps()],
+    meta: persistedQueryMeta,
+  })
+}
+
+export function amIAdminOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'amIAdmin'),
+    queryFn: async () => await api(session).amIAdmin(),
+    meta: persistedQueryMeta,
+  })
+}
+
+export function modelsOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'models'),
+    queryFn: async () => [...await api(session).listModels()],
+    meta: persistedQueryMeta,
+  })
+}
+
+export function quickModelOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'quickModel'),
+    queryFn: async () => await api(session).getQuickModel(),
+    meta: persistedQueryMeta,
+  })
+}
+
+export function aiConfigOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'aiConfig'),
+    queryFn: async () => ({ ...await api(session).getAiConfig() }),
+    meta: persistedQueryMeta,
+  })
+}
+
+export function addableGatekeepersOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'addableGatekeepers'),
+    queryFn: async () => [...await api(session).listAddableGatekeepers()],
+  })
+}
+
+export function gatekeeperVendorsOptions(session: WorkshopSession, filter?: GatekeeperVendorFilter) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'gatekeeperVendors', filter ?? null),
+    queryFn: async () => [...await api(session).listGatekeeperVendors(filter)],
+  })
+}
+
+export function featuredBlueprintsOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'featuredBlueprints'),
+    queryFn: async () => [...await api(session).listFeaturedBlueprints()],
+    meta: persistedQueryMeta,
+  })
+}
+
+export function ownBlueprintsOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'ownBlueprints'),
+    queryFn: async () => [...await api(session).listOwnBlueprints()],
+    meta: persistedQueryMeta,
+  })
+}
+
+export function libraryBlueprintsOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'libraryBlueprints'),
+    queryFn: async () => [...await api(session).listLibraryBlueprints()],
+    meta: persistedQueryMeta,
+  })
+}
+
+export function outputsOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'outputs'),
+    queryFn: async () => {
+      for (let attempt = 0; attempt < OUTPUT_CATCH_UP_LIMIT; attempt += 1) {
+        const { outputs, catchingUp } = await api(session).listOutputs()
+        if (!catchingUp) return [...outputs]
+      }
+      throw new Error(`Output index did not catch up within ${OUTPUT_CATCH_UP_LIMIT} attempts`)
+    },
+    meta: persistedQueryMeta,
+  })
+}
+
+export function onboardingOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'onboardingCompleted'),
+    queryFn: async () => await api(session).isOnboardingCompleted(),
+    meta: persistedQueryMeta,
+  })
+}
+
+export function featureFlagsOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'featureFlags'),
+    queryFn: async () => ({ ...await api(session).getUiFeatureFlags() }),
+    meta: persistedQueryMeta,
+  })
+}
+
+export function outputFormatsOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'outputFormats'),
+    queryFn: async () => [...await api(session).listOutputFormats()],
+    meta: persistedQueryMeta,
+  })
+}
+
+export function adminSettingsOptions(session: WorkshopSession) {
+  return queryOptions({
+    queryKey: accountKey(session.cacheScope, 'adminSettings'),
+    queryFn: async () => {
+      const admin = await session.ensureAdminApi()
+      if (!admin) throw new Error('Not an admin')
+      const view = await admin.getSettings()
+      return {
+        ...view,
+        resourceVendors: [...view.resourceVendors],
+        formats: [...view.formats],
+      }
+    },
+    meta: persistedQueryMeta,
+  })
+}
+
+export const whoamiKey = (session: WorkshopSession = workshopSession) => whoamiOptions(session).queryKey
+export const gadgetsKey = (session: WorkshopSession = workshopSession) => gadgetsOptions(session).queryKey
+export const gatekeeperAppsKey = (session: WorkshopSession = workshopSession) => gatekeeperAppsOptions(session).queryKey
+export const amIAdminKey = (session: WorkshopSession = workshopSession) => amIAdminOptions(session).queryKey
+export const modelsKey = (session: WorkshopSession = workshopSession) => modelsOptions(session).queryKey
+export const quickModelKey = (session: WorkshopSession = workshopSession) => quickModelOptions(session).queryKey
+export const aiConfigKey = (session: WorkshopSession = workshopSession) => aiConfigOptions(session).queryKey
+export const addableGatekeepersKey = (session: WorkshopSession = workshopSession) => addableGatekeepersOptions(session).queryKey
+export const gatekeeperVendorsKey = (session: WorkshopSession = workshopSession) => gatekeeperVendorsOptions(session).queryKey
+export const featuredBlueprintsKey = (session: WorkshopSession = workshopSession) => featuredBlueprintsOptions(session).queryKey
+export const ownBlueprintsKey = (session: WorkshopSession = workshopSession) => ownBlueprintsOptions(session).queryKey
+export const libraryBlueprintsKey = (session: WorkshopSession = workshopSession) => libraryBlueprintsOptions(session).queryKey
+export const outputsKey = (session: WorkshopSession = workshopSession) => outputsOptions(session).queryKey
+export const adminSettingsKey = (session: WorkshopSession = workshopSession) => adminSettingsOptions(session).queryKey
+
+export function useWhoami() {
+  return useQuery(whoamiOptions(workshopSession))
+}
+
+export function useGadgets() {
+  return useQuery(gadgetsOptions(workshopSession))
+}
+
+export function useGatekeeperApps() {
+  return useQuery(gatekeeperAppsOptions(workshopSession))
+}
+
+export function useAmIAdmin() {
+  return useQuery(amIAdminOptions(workshopSession))
+}
+
+export function useModels() {
+  return useQuery(modelsOptions(workshopSession))
+}
+
+export function useQuickModel() {
+  return useQuery(quickModelOptions(workshopSession))
+}
+
+export function useAiConfig() {
+  return useQuery(aiConfigOptions(workshopSession))
+}
+
+export function useAddableGatekeepers() {
+  return useQuery(addableGatekeepersOptions(workshopSession))
+}
+
+export function useGatekeeperVendors() {
+  return useQuery(gatekeeperVendorsOptions(workshopSession))
+}
+
+export function useFeaturedBlueprints() {
+  return useQuery(featuredBlueprintsOptions(workshopSession))
+}
+
+export function useOwnBlueprints() {
+  return useQuery(ownBlueprintsOptions(workshopSession))
+}
+
+export function useLibraryBlueprints() {
+  return useQuery(libraryBlueprintsOptions(workshopSession))
+}
+
+export function useOutputs() {
+  return useQuery(outputsOptions(workshopSession))
+}
+
+export function useOnboardingCompleted() {
+  return useQuery(onboardingOptions(workshopSession))
+}
+
+export function useFeatureFlagsQuery() {
+  return useQuery(featureFlagsOptions(workshopSession))
+}
+
+export function useOutputFormatsQuery() {
+  return useQuery(outputFormatsOptions(workshopSession))
+}
+
+export function useAdminSettings() {
+  return useQuery(adminSettingsOptions(workshopSession))
+}

@@ -1,8 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
-import BlueprintsPage from '../BlueprintsPage'
-import { useDocumentTitle } from '../useDocumentTitle'
+import BlueprintsPage from '../../BlueprintsPage'
+import { useDocumentTitle } from '../../useDocumentTitle'
 
-export const Route = createFileRoute('/explore')({
+export const Route = createFileRoute('/_authenticated/explore')({
   component: ExplorePage,
 })
 

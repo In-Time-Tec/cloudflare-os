@@ -1,16 +1,16 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { BookOpen, Sparkle, type Icon as PhosphorIcon } from '@phosphor-icons/react'
-import { useDocumentTitle } from '../useDocumentTitle'
-import ComingSoonPreview from '../components/ComingSoonPreview'
-import { useSiteName } from '../ServerConfigContext'
-import PageChrome from '../components/AppShell/PageChrome'
+import { useDocumentTitle } from '../../useDocumentTitle'
+import ComingSoonPreview from '../../components/ComingSoonPreview'
+import { useSiteName } from '../../ServerConfigContext'
+import PageChrome from '../../components/AppShell/PageChrome'
 
 /**
  * Context & Skills. The knowledge/skills surface isn't built into the rail yet — agents read
  * curated collections of documents (context) and reusable skills. Until then this page shows a
  * frosted design mock so the nav entry has a stable, on-language target.
  */
-export const Route = createFileRoute('/context')({
+export const Route = createFileRoute('/_authenticated/context')({
   component: ContextPage,
 })
 

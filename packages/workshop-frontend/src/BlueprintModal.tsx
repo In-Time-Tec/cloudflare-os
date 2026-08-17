@@ -4,7 +4,6 @@ import { ArrowsClockwise, Check, Copy, ImageSquare, Pencil, Plus, Trash, Warning
 import { RpcStub } from 'capnweb'
 import { BlueprintGadgetSummary, GadgetClient, GadgetMetadata, Overseer, BlueprintBindingAnnotation, BlueprintScreenshotUpload } from '@gadgets/workshop-shared/api'
 import { WorkshopButton, WorkshopIconButton, WorkshopInput, WorkshopInputArea } from './components/WorkshopControls'
-import { Skeleton, SkeletonRows } from './components/Skeleton'
 import { copyToClipboard } from './clipboard'
 import {
   BindingCardData,
@@ -394,21 +393,7 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                   </div>
 
                   {bindingsLoading ? (
-                    // The container the bindings land in, with placeholder rows inside it.
-                    <div className="overflow-hidden rounded-xl border border-kumo-line bg-kumo-base">
-                      <SkeletonRows count={3}>
-                        {(i) => (
-                          <div key={i} aria-hidden="true"
-                              className={`flex items-center gap-3 px-3 py-3 ${i > 0 ? 'border-t border-kumo-line' : ''}`}>
-                            <Skeleton className="h-8 w-8 rounded-lg" />
-                            <div className="min-w-0 flex-1">
-                              <Skeleton className="h-[1lh] w-32 text-[13px] leading-[18px]" />
-                              <Skeleton className="mt-0.5 h-[1lh] w-24 text-[11px] leading-4" />
-                            </div>
-                          </div>
-                        )}
-                      </SkeletonRows>
-                    </div>
+                    null
                   ) : bindingsError ? (
                     <div className="rounded-xl border border-kumo-line bg-kumo-base px-4 py-3 text-[13px] text-kumo-subtle">
                       {bindingsError}
@@ -460,8 +445,8 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                     >
                       {creating
                         ? formMode === 'create' ? 'Creating...' : 'Saving...'
-                        : processingScreenshot ? 'Processing...'
-                          : bindingsLoading ? 'Loading...'
+                        : processingScreenshot ? 'Processing…'
+                          : bindingsLoading ? 'Loading…'
                             : formMode === 'create' ? 'Create' : 'Save'}
                     </WorkshopButton>
                   </div>
@@ -498,11 +483,9 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                 Existing blueprints
               </h3>
 
-              {loading ? (
-                <div className="rounded-xl border border-kumo-line bg-kumo-base px-4 py-6 text-center text-[13px] text-kumo-subtle">
-                  Loading blueprints...
-                </div>
-              ) : blueprints.length === 0 ? (
+          {loading ? (
+            null
+          ) : blueprints.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-kumo-line bg-kumo-base px-4 py-6 text-center">
                   <p className="text-[13px] leading-[18px] font-normal tracking-[-0.25px] text-kumo-subtle">
                     No blueprints yet.

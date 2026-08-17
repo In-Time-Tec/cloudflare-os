@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
-import GadgetEditor from '../GadgetEditor'
+import GadgetEditor from '../../GadgetEditor'
+import { gadgetsOptions } from '../../query/hooks'
 
 type GadgetSearch = {
   chat?: number
@@ -17,7 +18,7 @@ function parseIntParam(value: unknown): number | undefined {
   return undefined
 }
 
-export const Route = createFileRoute('/workspace/$id')({
+export const Route = createFileRoute('/_authenticated/workspace/$id')({
   component: GadgetEditor,
   validateSearch: (search: Record<string, unknown>): GadgetSearch => ({
     chat: typeof search.chat === 'number' ? search.chat
@@ -25,4 +26,10 @@ export const Route = createFileRoute('/workspace/$id')({
       : undefined,
     w: parseIntParam(search.w),
   }),
+  loaderDeps: ({ search }) => ({ chat: search.chat, w: search.w }),
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData({
+      ...gadgetsOptions(context.session),
+      revalidateIfStale: true,
+    }),
 })

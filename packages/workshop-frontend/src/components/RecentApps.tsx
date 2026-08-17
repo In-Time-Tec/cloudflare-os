@@ -77,18 +77,7 @@ export default function RecentApps() {
     [rawGadgets])
 
   if (loading) {
-    return (
-      <section className="w-full max-w-2xl mx-auto">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-medium text-kumo-default">Recent workspaces</h2>
-        </div>
-        <div className="flex flex-col gap-2">
-          {[1, 2].map((i) => (
-            <div key={i} className="h-[64px] rounded-xl border border-kumo-line bg-kumo-elevated animate-pulse" />
-          ))}
-        </div>
-      </section>
-    )
+    return null
   }
 
   if (loadError) {

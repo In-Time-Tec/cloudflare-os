@@ -5,14 +5,14 @@ import { DropdownMenu, Dialog, Button, useKumoToastManager } from '@cloudflare/k
 import { RpcStub } from 'capnweb'
 import { useAuthenticatedApi } from '../AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
-import { gadgetsKey, useGadgets, useWhoami } from '../query/hooks'
+import { gadgetsKey, useFeaturedBlueprints, useGadgets, useWhoami } from '../query/hooks'
+import { useGadgetMutations } from '../query/useGadgetMutations'
 import { GadgetMetadataWithTimestamps, BlueprintPublicInfo, Overseer } from '@gadgets/workshop-shared/api'
 import ShareModal from '../ShareModal'
 import { BindingBadge, getGradient as getBlueprintGradient, uniqueBindingBadges } from './BlueprintCard'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './menuStyles'
 import { BlueprintPreviewImage } from './BlueprintPreviewImage'
 import DeleteConfirmationDialog from './DeleteConfirmationDialog'
-import { Skeleton, SkeletonListRow, SkeletonRows } from './Skeleton'
 
 // Neutral monogram for a workspace — matches the sidebar treatment (no per-item color noise).
 function initials(title: string | undefined): string {
@@ -173,8 +173,9 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
   const queryClient = useQueryClient()
-  const { data: rawGadgets = [], isLoading: loading, isError: loadError } = useGadgets()
+  const { data: rawGadgets = [], isError: loadError } = useGadgets()
   const { data: userInfo = null } = useWhoami()
+  const { togglePin, renameGadget, deleteGadget, remove } = useGadgetMutations()
   const gadgets = useMemo(() => [...rawGadgets].toSorted((a, b) => {
     if (a.pinned && !b.pinned) return -1
     if (!a.pinned && b.pinned) return 1
@@ -182,20 +183,15 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
   }), [rawGadgets])
   const [search, setSearch] = useState('')
 
-  // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
 
-  // Info modal state
   const [infoTarget, setInfoTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
 
-  // Share modal state
   const [shareTarget, setShareTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
   const [shareOverseer, setShareOverseer] = useState<{ stub: RpcStub<Overseer> } | null>(null)
 
-  // Cache-level retry: refetch the gadgets query (the error UI's "Try again").
   const loadGadgets = () => {
-    void queryClient.invalidateQueries({ queryKey: gadgetsKey })
+    void queryClient.invalidateQueries({ queryKey: gadgetsKey() })
   }
 
   // Clean up share overseer when modal closes
@@ -219,28 +215,10 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return
-    setIsDeleting(true)
     try {
-      if (deleteTarget.owner) {
-        await authenticatedApi.dismissSharedGadget(deleteTarget.id)
-        toasts.add({ title: 'Workspace removed from list', variant: 'success' })
-      } else {
-        const overseer = await authenticatedApi.openGadget(deleteTarget.id)
-        try {
-          await overseer.deleteSelf()
-        } finally {
-          overseer[Symbol.dispose]()
-        }
-        toasts.add({ title: 'Workspace deleted', variant: 'success' })
-      }
-      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
-      (prev ?? []).filter(g => g.id !== deleteTarget.id))
-    } catch (err) {
-      console.error('Failed to delete workspace:', err)
-      toasts.add({ title: 'Failed to delete workspace', variant: 'error' })
-    } finally {
-      setIsDeleting(false)
+      await deleteGadget(deleteTarget)
       setDeleteTarget(null)
+    } catch {
     }
   }
 
@@ -259,41 +237,12 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
     }
   }
 
-  const handleTogglePin = async (gadget: GadgetMetadataWithTimestamps) => {
-    const newPinned = !gadget.pinned
-    // Optimistically update the list
-    queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
-      (prev ?? []).map(g => g.id === gadget.id ? { ...g, pinned: newPinned } : g))
-    // Use promise pipelining — call setPinned without awaiting openGadget first
-    const overseer = authenticatedApi.openGadget(gadget.id)
-    try {
-      await overseer.setPinned(newPinned)
-    } catch (err) {
-      console.error('Failed to pin workspace:', err)
-      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
-        (prev ?? []).map(g => g.id === gadget.id ? { ...g, pinned: gadget.pinned } : g))
-      toasts.add({ title: 'Failed to update favorite status', variant: 'error' })
-    } finally {
-      (await overseer)[Symbol.dispose]()
-    }
+  const handleTogglePin = (gadget: GadgetMetadataWithTimestamps) => {
+    togglePin(gadget)
   }
 
-  const handleRename = async (gadget: GadgetMetadataWithTimestamps, newTitle: string) => {
-    // Optimistically update
-    queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
-      (prev ?? []).map(g => g.id === gadget.id ? { ...g, title: newTitle } : g))
-    // Use promise pipelining — call setTitle without awaiting openGadget first
-    const overseer = authenticatedApi.openGadget(gadget.id)
-    try {
-      await overseer.setTitle(newTitle)
-    } catch (err) {
-      console.error('Failed to rename workspace:', err)
-      queryClient.setQueryData(gadgetsKey, (prev: GadgetMetadataWithTimestamps[] | undefined) =>
-        (prev ?? []).map(g => g.id === gadget.id ? { ...g, title: gadget.title } : g))
-      toasts.add({ title: 'Failed to rename workspace', variant: 'error' })
-    } finally {
-      (await overseer)[Symbol.dispose]()
-    }
+  const handleRename = (gadget: GadgetMetadataWithTimestamps, newTitle: string) => {
+    renameGadget(gadget, newTitle)
   }
 
   const handleShareClose = () => {
@@ -313,7 +262,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
           <h2 className="text-lg font-semibold text-kumo-default">
             Your workspaces
           </h2>
-          {!loading && gadgets.length === 0 && !loadError && (
+          {gadgets.length === 0 && !loadError && (
             <p className="mt-1 text-sm text-kumo-inactive">
               You haven&apos;t created any workspaces yet
             </p>
@@ -323,12 +272,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
 
       {/* Search — hidden when the user has no gadgets. While loading, the row is reserved (below)
           rather than hidden, so resolving the list doesn't shove it down by the row's height. */}
-      {loading && (
-        <div className="mb-4 px-3">
-          <Skeleton className="h-9 w-full rounded-lg" />
-        </div>
-      )}
-      {!loading && gadgets.length > 0 && (
+      {gadgets.length > 0 && (
         <div className="mb-4 px-3">
           <div className="relative">
             <MagnifyingGlass
@@ -350,11 +294,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
           uniform px-3 so their content lines up exactly. The scroll container itself carries no
           horizontal padding, so the scrollbar sits just past the aligned content (not far out). */}
       <div className="chat-panel flex flex-1 min-h-0 flex-col gap-0.5 overflow-y-auto pt-1">
-        {loading ? (
-          <SkeletonRows count={6}>
-            {(i) => <SkeletonListRow key={i} subtitle={false} trailing />}
-          </SkeletonRows>
-        ) : loadError ? (
+        {loadError ? (
           <div className="text-center py-12 text-sm">
             <p className="text-kumo-danger">Something went wrong loading your workspaces.</p>
             <button onClick={loadGadgets} className="text-kumo-brand mt-1 underline">Try again</button>
@@ -386,7 +326,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
       <DeleteConfirmationDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
-        isDeleting={isDeleting}
+        isDeleting={remove.isPending}
         title={deleteTarget?.owner ? 'Remove workspace' : 'Delete workspace'}
         description={
           deleteTarget?.owner
@@ -510,50 +450,7 @@ function HomeFeaturedBlueprintCard({
 }
 
 function FeaturedBlueprintsGallery() {
-  const { authenticatedApi } = useAuthenticatedApi()
-  const [blueprints, setBlueprints] = useState<BlueprintPublicInfo[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    authenticatedApi
-      .listFeaturedBlueprints()
-      .then((list) => {
-        if (!cancelled) setBlueprints(list)
-      })
-      .catch((err) => {
-        console.error('Failed to load featured blueprints:', err)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [authenticatedApi])
-
-  if (loading) {
-    // Matches HomeFeaturedBlueprintCard: min-h-[190px], rounded-2xl and a border, under the same
-    // mb-5 heading. The old 108px block left every card 82px short of its loaded height.
-    return (
-      <div className="py-4 pr-4 sm:pr-6">
-        <div className="mb-5">
-          <Skeleton className="h-[1lh] w-40 text-[13px] leading-[18px]" />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <SkeletonRows count={4}>
-            {(i) => (
-              <div key={i} aria-hidden="true"
-                  className="flex min-h-[190px] flex-col rounded-2xl border border-kumo-line bg-kumo-base p-2.5">
-                <Skeleton className="mb-3 aspect-[16/9] w-full rounded-lg" />
-                <Skeleton className="h-8 w-8 rounded-lg" />
-                <Skeleton className="mt-1.5 h-[1lh] w-2/3 text-[13px] leading-[18px]" />
-                <Skeleton className="mt-0.5 h-8 w-full text-[12px] leading-4" />
-              </div>
-            )}
-          </SkeletonRows>
-        </div>
-      </div>
-    )
-  }
+  const { data: blueprints = [] } = useFeaturedBlueprints()
 
   if (blueprints.length === 0) {
     return null

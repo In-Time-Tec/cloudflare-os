@@ -1,13 +1,9 @@
 import { useState, type ReactNode } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { Link, useMatchRoute } from '@tanstack/react-router'
 import { EnvelopeSimple } from '@phosphor-icons/react'
 import type { ConversationSummary, EmailSummary } from '@gadgets/workshop-shared/gatekeeper'
 import { refKey, useConversations } from './ConversationsContext'
 import { Avatar } from './primitives'
-
-// Sidebar sections for the communications surfaces — Conversations, Channels, Email —
-// styled to match Favorites / Recent workspaces (label, hairline, count). Each row deep-links
-// into its section-scoped page.
 
 const SECTION_HEADER =
   'flex h-6 w-full cursor-pointer items-center gap-2 px-1.5 text-[11px] font-medium ' +
@@ -46,7 +42,7 @@ function ConversationRows({ items, section }: {
   section: 'conversations' | 'channels'
 }) {
   const { avatarFor } = useConversations()
-  const navigate = useNavigate()
+  const matchRoute = useMatchRoute()
   return (
     <>
       {items.slice(0, INITIAL_LIMIT).map(conversation => {
@@ -54,12 +50,21 @@ function ConversationRows({ items, section }: {
         const photo = conversation.ref.kind === 'chat' && conversation.members.length === 1
           ? avatarFor(conversation.members[0]?.userId)
           : undefined
+        const to = `/${section}` as const
+        const search = { c: key }
+        const pending = !!matchRoute({ to, search, pending: true })
         return (
-          <button key={key} type="button" title={conversation.title} className={ROW}
-              onClick={() => navigate({ to: `/${section}`, search: { c: key } })}>
+          <Link
+            key={key}
+            to={to}
+            search={search}
+            title={conversation.title}
+            aria-busy={pending}
+            className={`${ROW} ${pending ? 'opacity-70' : ''}`}
+          >
             <Avatar photo={photo} title={conversation.title} size="sm" />
             <span className={ROW_TEXT}>{conversation.title}</span>
-          </button>
+          </Link>
         )
       })}
     </>
@@ -67,28 +72,34 @@ function ConversationRows({ items, section }: {
 }
 
 function EmailRows({ items }: { items: EmailSummary[] }) {
-  const navigate = useNavigate()
+  const matchRoute = useMatchRoute()
   return (
     <>
-      {items.slice(0, INITIAL_LIMIT).map(email => (
-        <button key={email.id} type="button" title={email.subject} className={ROW}
-            onClick={() => navigate({ to: '/email', search: { m: email.id } })}>
-          <EnvelopeSimple size={14} className="shrink-0 text-kumo-inactive" />
-          <span className={`${ROW_TEXT} ${email.isRead ? '' : 'font-semibold text-kumo-default'}`}>
-            {email.from?.name || email.from?.address || email.subject}
-          </span>
-        </button>
-      ))}
+      {items.slice(0, INITIAL_LIMIT).map(email => {
+        const pending = !!matchRoute({ to: '/email', search: { m: email.id }, pending: true })
+        return (
+          <Link
+            key={email.id}
+            to="/email"
+            search={{ m: email.id }}
+            title={email.subject}
+            aria-busy={pending}
+            className={`${ROW} ${pending ? 'opacity-70' : ''}`}
+          >
+            <EnvelopeSimple size={14} className="shrink-0 text-kumo-inactive" />
+            <span className={`${ROW_TEXT} ${email.isRead ? '' : 'font-semibold text-kumo-default'}`}>
+              {email.from?.name || email.from?.address || email.subject}
+            </span>
+          </Link>
+        )
+      })}
     </>
   )
 }
 
-/** Sidebar sections; renders nothing when no connected account provides conversations. */
 export default function SidebarConversations({ collapsed }: { collapsed: boolean }) {
   const { available, conversations, channels, emails } = useConversations()
-  // No loading branch: the shell doesn't render the rail until these lists are in hand
-  // (see useSidebarReady), so a section either has its rows or genuinely doesn't exist.
-  if (collapsed || !available) return null
+  if (collapsed || available === false) return null
   return (
     <>
       {conversations.length > 0 && (
@@ -106,7 +117,6 @@ export default function SidebarConversations({ collapsed }: { collapsed: boolean
           <EmailRows items={emails} />
         </Section>
       )}
-
     </>
   )
 }

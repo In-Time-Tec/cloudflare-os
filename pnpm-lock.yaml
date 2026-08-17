@@ -905,9 +905,6 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@7.3.6(@types/node@26.1.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.49.2)(yaml@2.9.0))
-      '@tanstack/query-async-storage-persister':
-        specifier: 5.101.4
-        version: 5.101.4
       '@tanstack/query-persist-client-core':
         specifier: 5.101.4
         version: 5.101.4
@@ -2524,9 +2521,6 @@ packages:
   '@tanstack/history@1.162.1':
     resolution: {integrity: sha512-DR9t6lfLVdrjgCwpglrR9DR7Ok8/HlXjcOE+goWXF3zyuLUO/ug7vMbSFxTqrQTtbRghJfyhmIZ0S6LhPIy44w==}
     engines: {node: '>=20.19'}
-
-  '@tanstack/query-async-storage-persister@5.101.4':
-    resolution: {integrity: sha512-ROenNOVvxIZ1zKsBAiIvvslLo2xD8Me/vFz/tChdmuI7ciU+ET63yRrQ01W899Tx1ayQXdsGQJqYqjjVZk+OBQ==}
 
   '@tanstack/query-core@5.101.4':
     resolution: {integrity: sha512-gNwcvOJcRbLWPOLG/2OBm+zM+Yv+MKsXKEOWC57USuZDEsI71hEErQsiEGx5wX9rzWWkfwM0fVSPoiIFSsxfiw==}
@@ -6545,11 +6539,6 @@ snapshots:
       vite: 7.3.6(@types/node@26.1.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.49.2)(yaml@2.9.0)
 
   '@tanstack/history@1.162.1': {}
-
-  '@tanstack/query-async-storage-persister@5.101.4':
-    dependencies:
-      '@tanstack/query-core': 5.101.4
-      '@tanstack/query-persist-client-core': 5.101.4
 
   '@tanstack/query-core@5.101.4': {}
 

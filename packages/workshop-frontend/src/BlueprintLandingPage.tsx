@@ -7,7 +7,7 @@ import { SupportedResource, VendorDescription, ResourceConfiguratorFrame } from 
 import { Button, Dialog, DropdownMenu, Select, Tooltip, useKumoToastManager } from '@cloudflare/kumo'
 import { ArrowsOutSimple, ArrowLeft, ArrowSquareOut, DotsThree, DownloadSimple, Lightning, Plus, Robot, Sparkle, Star, Trash, X } from '@phosphor-icons/react'
 
-import { useAuth } from './useAuth'
+import { useWorkshopSession, workshopSession } from './session'
 import LoginPage from './LoginPage'
 import { normalizeResourceUrl } from './resourceMatching'
 import {
@@ -21,6 +21,9 @@ import { WorkshopButton, WorkshopIconButton } from './components/WorkshopControl
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './components/menuStyles'
 import { useDocumentTitle } from './useDocumentTitle'
 import { AccountsSubscriberAdapter } from './accountsSubscriber'
+import { usePublicBlueprintQuery } from './query/public'
+import { gatekeeperVendorsOptions, modelsOptions } from './query/hooks'
+import { useQuery } from '@tanstack/react-query'
 
 interface Props {
   rpcStub: RpcStub<PublicApi>
@@ -35,12 +38,22 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
   const id = params.id ?? ''
   const navigate = useNavigate()
   const router = useRouter()
-  const { isAuthenticated, authenticatedApi, isLoading: authLoading, login } = useAuth(rpcStub)
+  const session = useWorkshopSession()
+  const isAuthenticated = session.isAuthenticated
+  const authenticatedApi = session.authenticatedApi
   const toasts = useKumoToastManager()
 
+  const { data: queriedBlueprint, isError: blueprintQueryError, error: blueprintQueryErr } = usePublicBlueprintQuery(id)
+  const { data: queriedModels = [] } = useQuery({
+    ...modelsOptions(workshopSession),
+    enabled: isAuthenticated,
+  })
+  const { data: queriedVendors = [] } = useQuery({
+    ...gatekeeperVendorsOptions(workshopSession),
+    enabled: isAuthenticated,
+  })
   const [blueprint, setBlueprint] = useState<BlueprintPublicInfo | null>(null)
   useDocumentTitle(blueprint?.metadata.title)
-  const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -87,29 +100,25 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     () => new Map(vendors.map(v => [v.id.toLowerCase(), v])),
     [vendors],
   )
-  // Fetch blueprint metadata.
   useEffect(() => {
     if (!id) {
-      setLoading(false)
       setNotFound(true)
+      setBlueprint(null)
       return
     }
-    setLoading(true)
-    setNotFound(false)
-    setError(null)
-
-    rpcStub.getBlueprint(id).then(result => {
-      if (result) {
-        setBlueprint(result)
-      } else {
-        setNotFound(true)
-      }
-    }).catch(err => {
-      setError(err.message || 'Failed to load blueprint.')
-    }).finally(() => {
-      setLoading(false)
-    })
-  }, [id, rpcStub])
+    if (blueprintQueryError) {
+      setError(blueprintQueryErr instanceof Error ? blueprintQueryErr.message : 'Failed to load blueprint.')
+      return
+    }
+    if (queriedBlueprint === undefined) return
+    if (queriedBlueprint) {
+      setBlueprint(queriedBlueprint)
+      setNotFound(false)
+      setError(null)
+    } else {
+      setNotFound(true)
+    }
+  }, [id, queriedBlueprint, blueprintQueryError, blueprintQueryErr])
 
   useEffect(() => {
     setActiveBindingName(null)
@@ -119,33 +128,13 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     collectorsRef.current.clear()
   }, [id])
 
-  // When authenticated, fetch models for binding assignment.
   useEffect(() => {
-    if (isAuthenticated && authenticatedApi) {
-      authenticatedApi.listModels()
-        .then(setModels)
-        .catch(err => logRpcFailure('Failed to load models:', err))
-    } else {
-      setModels([])
-    }
-  }, [isAuthenticated, authenticatedApi])
+    setModels(isAuthenticated ? queriedModels : [])
+  }, [isAuthenticated, queriedModels])
 
-  // Load vendors (gatekeeper catalog) for both the summary cards and configure panel.
   useEffect(() => {
-    if (!(isAuthenticated && authenticatedApi)) {
-      setVendors([])
-      return
-    }
-    let cancelled = false
-    authenticatedApi.listGatekeeperVendors().then(list => {
-      if (cancelled) return
-      setVendors(list)
-    }).catch(err => {
-      if (cancelled) return
-      console.error('Failed to load gatekeeper vendors:', err)
-    })
-    return () => { cancelled = true }
-  }, [isAuthenticated, authenticatedApi])
+    setVendors(isAuthenticated ? queriedVendors : [])
+  }, [isAuthenticated, queriedVendors])
 
   // Subscribe to connected accounts while authenticated. The same subscription serves all
   // gatekeeper bindings; each binding filters down to the vendor + resource it requires.
@@ -487,7 +476,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
   const handleLoginSuccess = () => {
     const token = localStorage.getItem('authToken')
     if (token) {
-      login(token)
+      void workshopSession.authenticateWithToken(token)
       setShowLogin(false)
     }
   }
@@ -725,8 +714,8 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     return <LoginPage rpcStub={rpcStub} onLoginSuccess={handleLoginSuccess} />
   }
 
-  if (loading || authLoading) {
-    return <BlueprintStatePage title="Loading blueprint..." loading />
+  if (!blueprint && !notFound && !error) {
+    return <div className="min-h-full bg-kumo-base" />
   }
 
   if (notFound) {
@@ -1096,9 +1085,10 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
             <Button
               variant="destructive"
               onClick={canDeleteOwnedBlueprint ? handleDeleteOwnedBlueprint : handleRemoveFromLibrary}
-              loading={removingFromLibrary}
+              disabled={removingFromLibrary}
+              aria-busy={removingFromLibrary}
             >
-              Delete
+              {removingFromLibrary ? 'Deleting…' : 'Delete'}
             </Button>
           </div>
         </Dialog>
@@ -1165,13 +1155,11 @@ function BlueprintScreenshotHero({
 function BlueprintStatePage({
   title,
   message,
-  loading = false,
   actionLabel,
   onAction,
 }: {
   title: string
   message?: string
-  loading?: boolean
   actionLabel?: string
   onAction?: () => void
 }) {
@@ -1179,9 +1167,6 @@ function BlueprintStatePage({
     <div className="min-h-full bg-kumo-base">
       <div className="mx-auto flex min-h-[60vh] w-full max-w-[1040px] items-center justify-center px-4 py-12 sm:px-8">
         <div className="themed-compact-shadow w-full max-w-md rounded-2xl border border-kumo-line bg-kumo-base px-6 py-8 text-center">
-          {loading && (
-            <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-kumo-brand border-t-transparent" />
-          )}
           <h1 className="m-0 text-[20px] leading-7 font-semibold tracking-[-0.35px] text-kumo-default">
             {title}
           </h1>
