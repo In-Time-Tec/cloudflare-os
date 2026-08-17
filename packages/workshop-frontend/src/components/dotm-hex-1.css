@@ -1,0 +1,13 @@
+.dmx-root {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+
+.dmx-dot {
+  display: block;
+  border-radius: 999px;
+  background: currentColor;
+  transform-origin: center;
+}

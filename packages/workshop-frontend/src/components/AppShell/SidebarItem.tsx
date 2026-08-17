@@ -1,5 +1,6 @@
-import { Link, useRouterState, type LinkProps } from '@tanstack/react-router'
+import { Link, useMatchRoute, useRouterState, type LinkProps } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
+import { PendingIcon } from '../PendingIcon'
 
 /**
  * A single nav row in the sidebar. Renders as a TanStack <Link>. Active state is computed from the
@@ -30,6 +31,7 @@ export default function SidebarItem({
   // Resolve the active path manually so we can style the icon as well as the row. For parameterized
   // routes (e.g. "/gatekeepers/$appId"), substitute the params so the resolved path can match.
   const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const matchRoute = useMatchRoute()
   let target = typeof to === 'string' ? to : ''
   if (params) {
     for (const [key, value] of Object.entries(params as Record<string, string>)) {
@@ -39,14 +41,15 @@ export default function SidebarItem({
   const isActive = matchPrefix
     ? pathname === target || pathname.startsWith(target + '/')
     : pathname === target
+  const pending = !!matchRoute({ to, params, pending: true } as Parameters<typeof matchRoute>[0])
 
-  // Kept loose: the generated route-tree union is stricter than is convenient for a generic row.
   const linkProps = { to, params } as unknown as LinkProps
 
   return (
     <Link
       {...linkProps}
       title={collapsed ? label : undefined}
+      aria-busy={pending}
       className={[
         'group relative flex h-7 items-center rounded-md text-[12.5px] leading-[18px] tracking-[-0.1px] transition-colors',
         collapsed ? 'justify-center' : 'gap-1.5 px-2.5',
@@ -61,7 +64,7 @@ export default function SidebarItem({
           isActive ? 'text-kumo-brand' : 'text-kumo-subtle group-hover:text-kumo-default',
         ].join(' ')}
       >
-        {icon}
+        <PendingIcon pending={pending} size={14}>{icon}</PendingIcon>
       </span>
       {!collapsed && (
         <>

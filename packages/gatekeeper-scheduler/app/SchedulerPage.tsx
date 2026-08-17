@@ -62,13 +62,18 @@ export type ScheduleManagementClient = {
   list(options?: ManagementListOptions): Promise<ManagementSchedulePage>;
 };
 
+export type SchedulerSnapshot = {
+  schedules: ManagementSchedule[];
+  titles?: [string, string | null][];
+};
+
 type Props = {
   api: ScheduleManagementClient;
   openWorkspace: (workspaceId: string, gadgetId?: number) => void | Promise<void>;
   openPrompt: (prompt: string) => void | Promise<void>;
-  // Resolves the live title of each workspace ID, or null when the user can no longer see it. The
-  // schedule rows hold only IDs, so titles are never a stale snapshot.
   resolveWorkspaceTitles: (ids: string[]) => Promise<(string | null)[]>;
+  persistSnapshot?: (snapshot: SchedulerSnapshot) => void | Promise<void>;
+  initialSnapshot?: SchedulerSnapshot;
 };
 
 export default function SchedulerPage({
@@ -76,21 +81,26 @@ export default function SchedulerPage({
   openWorkspace,
   openPrompt,
   resolveWorkspaceTitles,
+  persistSnapshot,
+  initialSnapshot,
 }: Props) {
+  const boot = initialSnapshot
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [schedules, setSchedules] = useState<ManagementSchedule[]>([]);
+  const [schedules, setSchedules] = useState<ManagementSchedule[]>(() => boot?.schedules ?? []);
   const [cursor, setCursor] = useState<string>();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => boot?.schedules === undefined);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string>();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [workspaceTitles, setWorkspaceTitles] = useState<Map<string, string | null>>(
-    () => new Map(),
+    () => new Map(boot?.titles ?? []),
   );
   const [now, setNow] = useState(Date.now());
   const request = useRef(0);
+  const hasRows = useRef(schedules.length > 0);
+  hasRows.current = schedules.length > 0;
   const statuses = useMemo(() => statusesForFilter(filter), [filter]);
 
   useEffect(() => {
@@ -107,7 +117,7 @@ export default function SchedulerPage({
     async (nextCursor?: string) => {
       const epoch = ++request.current;
       if (nextCursor) setLoadingMore(true);
-      else setLoading(true);
+      else if (!hasRows.current) setLoading(true);
       setError(undefined);
       try {
         const page = await api.list({
@@ -130,6 +140,14 @@ export default function SchedulerPage({
     },
     [api, debouncedQuery, statuses],
   );
+
+  useEffect(() => {
+    if (loading || error || debouncedQuery || filter !== "all" || !persistSnapshot) return;
+    void persistSnapshot({
+      schedules,
+      titles: [...workspaceTitles.entries()],
+    });
+  }, [debouncedQuery, error, filter, loading, persistSnapshot, schedules, workspaceTitles]);
 
   useEffect(() => {
     setExpanded(new Set());

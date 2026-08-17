@@ -190,6 +190,27 @@ describe("SchedulerPage", () => {
     expect(container!.textContent).toContain("Workspace 100");
   });
 
+  it("paints persisted schedules before the list RPC resolves", async () => {
+    const result = deferred<{ schedules: ManagementSchedule[] }>();
+    const list = vi.fn<ScheduleManagementClient["list"]>(() => result.promise);
+    await render(
+      <SchedulerPage
+        api={{ list }}
+        {...hostProps()}
+        initialSnapshot={{
+          schedules: [active],
+          titles: [[BRIEF_WORKSPACE, "Daily Brief"]],
+        }}
+      />,
+    );
+
+    expect(container!.textContent).toContain("Morning brief");
+    expect(container!.textContent).toContain("Daily Brief");
+    expect(container!.textContent).not.toContain("Loading scheduled tasks");
+    await act(async () => result.resolve({ schedules: [active, dead] }));
+    expect(container!.textContent).toContain("Weekly roundup");
+  });
+
   it("drops the search and tabs when the account has no schedules at all", async () => {
     const result = deferred<{ schedules: ManagementSchedule[] }>();
     const list = vi.fn<ScheduleManagementClient["list"]>(() => result.promise);

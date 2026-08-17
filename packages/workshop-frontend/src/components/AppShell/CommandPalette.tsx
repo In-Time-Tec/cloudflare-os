@@ -12,6 +12,7 @@ import type { OutputFormatOffer } from '@gadgets/workshop-shared/api'
 import { FormatGlyph } from '../format/FormatVisuals'
 import { createFromFormat } from '../format/useOutputFormats'
 import { useGadgets, useLibraryBlueprints, useOutputFormatsQuery, useOwnBlueprints } from '../../query/hooks'
+import { asTime } from '../../query/time'
 
 // A ⌘K command palette: jump to a workspace or a primary destination. Because it's keyboard-driven
 // and opened many times a day, it deliberately has *no* open/close animation (instant feels faster
@@ -210,7 +211,7 @@ export default function CommandPalette({
     ]
 
     const wsBase: Command[] = gadgets
-      .toSorted((a, b) => b.lastActive.getTime() - a.lastActive.getTime())
+      .toSorted((a, b) => asTime(b.lastActive) - asTime(a.lastActive))
       .map((g) => ({
         id: `ws-${g.id}`,
         label: g.title || 'Untitled workspace',

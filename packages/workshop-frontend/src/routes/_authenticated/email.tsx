@@ -9,6 +9,7 @@ import {
   emailsOptions,
   useEmailDetailQuery,
 } from '../../query/conversations'
+import { emailPreview } from '../../conversations/hoverPreviews'
 import { Avatar, ListRow, PaneHeader, formatTime } from '../../conversations/primitives'
 import { useDocumentTitle } from '../../useDocumentTitle'
 
@@ -68,6 +69,7 @@ function EmailPage() {
               meta={formatTime(email.received)}
               preview={email.subject}
               unread={!email.isRead}
+              hoverPreview={emailPreview(email)}
             />
           ))}
         </div>

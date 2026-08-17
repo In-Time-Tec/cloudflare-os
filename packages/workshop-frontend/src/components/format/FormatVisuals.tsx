@@ -10,6 +10,7 @@
 // content, which is when the user is deciding what to make.
 
 import type { BlueprintOutput } from '@gadgets/workshop-shared/api'
+import { PendingIcon } from '../PendingIcon'
 import { FORMAT_ICONS, formatOf, wireframeOf, type FormatWireframe } from './formats'
 
 // ─── glyph ───────────────────────────────────────────────────────────────────
@@ -44,17 +45,22 @@ export function FormatTile({
   output,
   size = 'md',
   className = '',
+  pending = false,
 }: {
   output?: BlueprintOutput
   size?: keyof typeof TILE_SIZES
   className?: string
+  pending?: boolean
 }) {
   const { box, glyph } = TILE_SIZES[size]
+  const spinner = size === 'sm' ? 16 : size === 'lg' ? 22 : 20
   return (
     <div
       className={`grid ${box} shrink-0 place-items-center bg-kumo-fill text-kumo-subtle ${className}`}
     >
-      <FormatGlyph output={output} size={glyph} />
+      <PendingIcon pending={pending} size={spinner}>
+        <FormatGlyph output={output} size={glyph} />
+      </PendingIcon>
     </div>
   )
 }

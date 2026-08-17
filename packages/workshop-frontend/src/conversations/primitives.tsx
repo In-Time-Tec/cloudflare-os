@@ -1,5 +1,8 @@
 import { Link, useMatchRoute, type LinkProps } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
+import { PendingIcon } from '../components/PendingIcon'
+import { HoverFadeLabel, bindRowRef, useRowPreview } from '../components/AppShell/SidebarHoverRow'
+import type { SidebarHoverPreview } from '../components/AppShell/sidebarHover'
 
 export function monogram(title: string): string {
   const words = title.trim().split(/\s+/).filter(Boolean)
@@ -48,28 +51,34 @@ type ListRowProps = {
   meta?: string
   preview?: string
   unread?: boolean
+  hoverPreview?: SidebarHoverPreview
 }
 
-export function ListRow({ selected, to, search, onClick, avatar, title, meta, preview, unread }: ListRowProps) {
+export function ListRow({
+  selected, to, search, onClick, avatar, title, meta, preview, unread, hoverPreview,
+}: ListRowProps) {
   const matchRoute = useMatchRoute()
   const pending = to ? !!matchRoute({ to, search, pending: true } as Parameters<typeof matchRoute>[0]) : false
-  const className = `flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-kumo-elevated ${
-    selected ? 'bg-kumo-elevated' : ''
-  } ${pending ? 'opacity-70' : ''}`
+  const { rowRef, previewBind, previewPortal } = useRowPreview(hoverPreview)
+  const className = [
+    'group/hover-row relative flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition-colors',
+    selected ? 'bg-kumo-elevated' : 'hover:bg-kumo-elevated',
+    pending ? 'opacity-70' : '',
+  ].join(' ')
   const body = (
     <>
-      {avatar}
+      {avatar ? <PendingIcon pending={pending} size={32}>{avatar}</PendingIcon> : null}
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
-          <span className={`text-[13px] ${unread ? 'font-semibold' : 'font-medium'} text-kumo-default`}>
+          <HoverFadeLabel className={`text-[13px] ${unread ? 'font-semibold' : 'font-medium'} text-kumo-default`}>
             {title}
-          </span>
+          </HoverFadeLabel>
           {meta !== undefined && (
             <span className="shrink-0 text-[10.5px] text-kumo-inactive">{meta}</span>
           )}
         </span>
         {preview !== undefined && (
-          <span className={`text-[12px] ${unread ? 'text-kumo-subtle' : 'text-kumo-inactive'}`}>
+          <span className={`line-clamp-1 text-[12px] ${unread ? 'text-kumo-subtle' : 'text-kumo-inactive'}`}>
             {preview}
           </span>
         )}
@@ -78,15 +87,35 @@ export function ListRow({ selected, to, search, onClick, avatar, title, meta, pr
   )
   if (to) {
     return (
-      <Link to={to} search={search} aria-busy={pending} className={className}>
-        {body}
-      </Link>
+      <>
+        <Link
+          ref={bindRowRef(rowRef)}
+          to={to}
+          search={search}
+          aria-busy={pending}
+          className={className}
+          {...previewBind}
+        >
+          {body}
+        </Link>
+        {previewPortal}
+      </>
     )
   }
   return (
-    <button type="button" onClick={onClick} aria-busy={pending} className={className}>
-      {body}
-    </button>
+    <>
+      <button
+        ref={(el) => { rowRef.current = el }}
+        type="button"
+        onClick={onClick}
+        aria-busy={pending}
+        className={className}
+        {...previewBind}
+      >
+        {body}
+      </button>
+      {previewPortal}
+    </>
   )
 }
 

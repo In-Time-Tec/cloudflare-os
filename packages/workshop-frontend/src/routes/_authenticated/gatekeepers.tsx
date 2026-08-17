@@ -2,7 +2,8 @@ import { logRpcFailure } from '../../rpcErrors'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useAddableGatekeepers, useGatekeeperVendors, addableGatekeepersKey } from '../../query/hooks'
+import { useAddableGatekeepers, useGatekeeperVendors, addableGatekeepersKey, addableGatekeepersOptions, gatekeeperVendorsOptions } from '../../query/hooks'
+import { connectedAccountsKey, connectedAccountsOptions, useConnectedAccounts, type ConnectedAccountSnapshot } from '../../query/accounts'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import {
   MagnifyingGlass,
@@ -17,7 +18,6 @@ import { refreshGatekeeperApps } from '../../useGatekeeperApps'
 import { EmptyState } from '../../components/EmptyState'
 import ConnectConnectorModal from '../../components/ConnectConnectorModal'
 import {
-  AccountDescription,
   SupportedResource,
   VendorDescription,
 } from '@gadgets/workshop-shared/gatekeeper'
@@ -27,16 +27,24 @@ import PageChrome from '../../components/AppShell/PageChrome'
 
 export const Route = createFileRoute('/_authenticated/gatekeepers')({
   component: ConnectorsPage,
+  loader: ({ context }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData({
+        ...gatekeeperVendorsOptions(context.session),
+        revalidateIfStale: true,
+      }),
+      context.queryClient.ensureQueryData({
+        ...addableGatekeepersOptions(context.session),
+        revalidateIfStale: true,
+      }),
+      context.queryClient.ensureQueryData({
+        ...connectedAccountsOptions(context.session),
+        revalidateIfStale: true,
+      }),
+    ]),
 })
 
-interface AccountEntry {
-  id: number
-  accountDescription: AccountDescription
-  vendorId: string
-  vendorDescription: VendorDescription
-  supportedResources: SupportedResource[]
-  credentialsValid: boolean
-}
+type AccountEntry = ConnectedAccountSnapshot
 
 interface VendorEntry {
   id: string
@@ -270,14 +278,15 @@ function ConnectorsPage() {
   const queryClient = useQueryClient()
   const { data: addable = [] } = useAddableGatekeepers()
   const { data: rawVendors, isError: vendorsError } = useGatekeeperVendors()
+  const { data: accountList, isError: accountsError } = useConnectedAccounts()
+  const accounts = accountList ?? []
   const vendors = useMemo(() =>
     (rawVendors ?? []).filter((v) => !v.unavailable).map((v) => ({
       id: v.id, description: v.description, supportedResources: v.supportedResources,
     })), [rawVendors])
   const vendorsLoaded = rawVendors !== undefined
-  const loadError = vendorsError
-  const [accounts, setAccounts] = useState<AccountEntry[]>([])
-  const [accountsLoaded, setAccountsLoaded] = useState(false)
+  const accountsLoaded = accountList !== undefined
+  const loadError = vendorsError || accountsError
 
   const [modalTarget, setModalTarget] = useState<ModalTarget>(null)
   const [connecting, setConnecting] = useState(false)
@@ -292,13 +301,18 @@ function ConnectorsPage() {
 
   useEffect(() => {
     let cancelled = false
-    const accountMap = new Map<number, AccountEntry>()
+    const accountMap = new Map<number, AccountEntry>(
+      (queryClient.getQueryData<AccountEntry[]>(connectedAccountsKey()) ?? []).map((account) => [account.id, account]),
+    )
 
-    setAccountsLoaded(false)
+    const flush = () => {
+      if (!cancelled) {
+        queryClient.setQueryData(connectedAccountsKey(), Array.from(accountMap.values()))
+      }
+    }
 
     const subscriber = new AccountsSubscriberAdapter({
       add({ id, description, vendor, supportedResources, credentialsValid, vendorId }) {
-        if (cancelled) return
         accountMap.set(id, {
           id,
           accountDescription: description,
@@ -307,14 +321,11 @@ function ConnectorsPage() {
           supportedResources,
           credentialsValid,
         })
-        setAccounts(Array.from(accountMap.values()))
+        flush()
       },
       remove(id) {
         accountMap.delete(id)
-        if (!cancelled) setAccounts(Array.from(accountMap.values()))
-      },
-      ready() {
-        if (!cancelled) setAccountsLoaded(true)
+        flush()
       },
     })
 
@@ -322,14 +333,13 @@ function ConnectorsPage() {
     subscription.catch((err) => {
       if (cancelled) return
       logRpcFailure('Failed to subscribe to connected accounts:', err)
-      /* accounts subscribe failed */
     })
 
     return () => {
       cancelled = true
       subscription[Symbol.dispose]()
     }
-  }, [authenticatedApi])
+  }, [authenticatedApi, queryClient])
 
   const handleOpenConnect = (vendorId: string) => {
     setModalTarget({ kind: 'connect', vendorId })

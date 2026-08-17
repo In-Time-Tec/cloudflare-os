@@ -17,6 +17,7 @@ import {
 } from '@gadgets/workshop-shared/api'
 import { useAuthenticatedApi } from '../../AuthContext'
 import { useGadgets, useWhoami } from '../../query/hooks'
+import { asTime } from '../../query/time'
 import { useGadgetMutations } from '../../query/useGadgetMutations'
 import ShareModal from '../../ShareModal'
 import DeleteConfirmationDialog from '../DeleteConfirmationDialog'
@@ -99,7 +100,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
       else rest.push(g)
     }
     const byActive = (a: GadgetMetadataWithTimestamps, b: GadgetMetadataWithTimestamps) =>
-      b.lastActive.getTime() - a.lastActive.getTime()
+      asTime(b.lastActive) - asTime(a.lastActive)
     favs.sort(byActive)
     rest.sort(byActive)
     return { favorites: favs, recent: rest }

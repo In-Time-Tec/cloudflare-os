@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { QueryClient, dehydrate } from '@tanstack/react-query'
 import type { PersistedClient } from '@tanstack/query-persist-client-core'
-import { cacheStoreKey, createAccountPersister, shouldDehydrateQuery } from './client'
+import { cacheStoreKey, createAccountPersister, persistQueryData, shouldDehydrateQuery } from './client'
 
 describe('query persistence', () => {
   const store = new Map<string, unknown>()
@@ -77,6 +77,23 @@ describe('query persistence', () => {
     const received = restored?.clientState.queries[0]?.state.data as { received: Date }
     expect(received.received).toBeInstanceOf(Date)
     expect(received.received.getTime()).toBe(when.getTime())
+  })
+
+  it('marks set snapshots as persistable', async () => {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        dehydrate: {
+          shouldDehydrateQuery,
+          shouldDehydrateMutation: () => false,
+        },
+      },
+    })
+    await persistQueryData(client, ['account', 'a', 'gatekeeperAppSnapshot', 'scheduler'], {
+      schedules: [{ title: 'Morning brief' }],
+    })
+    const state = dehydrate(client)
+    expect(state.queries.some((query) => query.queryKey[2] === 'gatekeeperAppSnapshot')).toBe(true)
   })
 
   it('scopes stores per account', () => {

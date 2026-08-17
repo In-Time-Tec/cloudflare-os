@@ -828,3 +828,63 @@ html {
 body:has([role="dialog"], [role="alertdialog"]) .app-header {
   z-index: 0;
 }
+
+.sidebar-hover-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.group\/hover-row.sidebar-hover-has-actions:hover .sidebar-hover-label,
+.group\/hover-row.sidebar-hover-has-actions:focus-within .sidebar-hover-label {
+  text-overflow: clip;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - var(--sidebar-hover-fade, 4.5rem)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - var(--sidebar-hover-fade, 4.5rem)),
+    transparent
+  );
+}
+
+.sidebar-hover-actions {
+  opacity: 0;
+  transform: translateX(4px);
+  pointer-events: none;
+  transition:
+    opacity 140ms var(--ease-out-strong),
+    transform 140ms var(--ease-out-strong);
+}
+
+.group\/hover-row:hover .sidebar-hover-actions,
+.group\/hover-row:focus-within .sidebar-hover-actions {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.sidebar-hover-preview {
+  opacity: 0;
+  transform: translateX(-6px);
+  animation: sidebar-hover-preview-in 180ms var(--ease-out-strong) forwards;
+}
+
+@keyframes sidebar-hover-preview-in {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-hover-actions,
+  .sidebar-hover-preview {
+    transition: none;
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

@@ -4,7 +4,10 @@ import type {
   GatekeeperAppTheme,
   GatekeeperAppThemeReceiver,
 } from "@gadgets/workshop-shared/theme";
-import SchedulerPage, { type ScheduleManagementClient } from "./SchedulerPage";
+import SchedulerPage, {
+  type ScheduleManagementClient,
+  type SchedulerSnapshot,
+} from "./SchedulerPage";
 import ErrorBoundary from "./ErrorBoundary";
 import { installErrorReporting, reportIssue } from "./error-reporting";
 import { applyAppTheme } from "./theme";
@@ -24,6 +27,12 @@ interface HostCapability extends RpcTarget {
   openWorkspace(workspaceId: string, gadgetId?: number): Promise<void>;
   resolveWorkspaceTitles(ids: string[]): Promise<(string | null)[]>;
   openPrompt(prompt: string): Promise<void>;
+  readPersistedSnapshot(): Promise<SchedulerSnapshot | null>;
+  writePersistedSnapshot(data: SchedulerSnapshot): Promise<void>;
+}
+
+function readBootSnapshot(): SchedulerSnapshot | undefined {
+  return (window as Window & { __GADGETS_PERSISTED__?: SchedulerSnapshot }).__GADGETS_PERSISTED__;
 }
 
 function main() {
@@ -53,6 +62,8 @@ function main() {
         openWorkspace={(workspaceId, gadgetId) => host.openWorkspace(workspaceId, gadgetId)}
         resolveWorkspaceTitles={(ids) => host.resolveWorkspaceTitles(ids)}
         openPrompt={(prompt) => host.openPrompt(prompt)}
+        persistSnapshot={(snapshot) => host.writePersistedSnapshot(snapshot)}
+        initialSnapshot={readBootSnapshot()}
       />
     </ErrorBoundary>,
   );

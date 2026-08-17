@@ -104,3 +104,16 @@ export function createAccountPersistOptions(
     dehydrateOptions: queryDehydrateOptions,
   }
 }
+
+export function persistQueryData<T>(
+  client: QueryClient,
+  queryKey: readonly unknown[],
+  data: T,
+): Promise<T> {
+  return client.fetchQuery({
+    queryKey,
+    queryFn: () => data,
+    meta: persistedQueryMeta,
+    staleTime: Infinity,
+  })
+}

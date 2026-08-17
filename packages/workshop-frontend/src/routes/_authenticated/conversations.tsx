@@ -9,6 +9,7 @@ import {
   conversationsOptions,
   messagesOptions,
 } from '../../query/conversations'
+import { conversationPreview } from '../../conversations/hoverPreviews'
 import { Avatar, ListRow, formatTime } from '../../conversations/primitives'
 import { useDocumentTitle } from '../../useDocumentTitle'
 
@@ -78,6 +79,7 @@ function Page() {
                 preview={conversation.lastMessage
                   ? `${conversation.lastMessage.from ? conversation.lastMessage.from + ': ' : ''}${conversation.lastMessage.preview}`
                   : conversation.subtitle}
+                hoverPreview={conversationPreview(conversation)}
               />
             )
           })}

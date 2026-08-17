@@ -15,6 +15,7 @@ import { useSiteName } from '../../ServerConfigContext'
 import SiteLogo from '../SiteLogo'
 import { useGatekeeperApps } from '../../useGatekeeperApps'
 import { openCommandPalette } from './commandPaletteBus'
+import { PendingIcon, useLinkPending } from '../PendingIcon'
 import SidebarItem from './SidebarItem'
 import {
   SidebarWorkspacesProvider,
@@ -43,10 +44,15 @@ export default function Sidebar({
   onToggleCollapsed: () => void
 }) {
   const siteName = useSiteName()
-  // Gatekeeper-served management apps the user can reach now (one per gatekeeper that provides a UI
-  // and is connected / enabled for everyone). Disabled or not-yet-connected ones aren't returned, so
-  // they simply don't appear. The set is fully dynamic — no gatekeeper is hardcoded.
+  const homePending = useLinkPending({ to: '/' })
   const gatekeeperApps = useGatekeeperApps()
+  const brand = (
+    <PendingIcon pending={homePending} size={20}>
+      <SiteLogo size={20} className="shrink-0">
+        <Hexagon size={20} weight="bold" className="text-kumo-brand shrink-0" />
+      </SiteLogo>
+    </PendingIcon>
+  )
 
   return (
     <aside
@@ -79,19 +85,16 @@ export default function Sidebar({
             <Link
               to="/"
               aria-label={siteName}
+              aria-busy={homePending}
               className="flex items-center justify-center group-hover/sidebar:invisible peer-focus-visible:invisible"
             >
-              <SiteLogo size={20} className="shrink-0">
-                <Hexagon size={20} weight="bold" className="text-kumo-brand shrink-0" />
-              </SiteLogo>
+              {brand}
             </Link>
           </div>
         ) : (
           <>
-            <Link to="/" aria-label={siteName} className="flex min-w-0 items-center gap-2">
-              <SiteLogo size={20} className="shrink-0">
-                <Hexagon size={20} weight="bold" className="text-kumo-brand shrink-0" />
-              </SiteLogo>
+            <Link to="/" aria-label={siteName} aria-busy={homePending} className="flex min-w-0 items-center gap-2">
+              {brand}
               <span className="truncate text-[14px] leading-5 font-semibold tracking-[-0.25px] text-kumo-default">
                 {siteName}
               </span>

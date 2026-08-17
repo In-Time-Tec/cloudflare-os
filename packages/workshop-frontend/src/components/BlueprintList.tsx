@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router'
+import { PendingIcon, useLinkPending } from './PendingIcon'
 import {
   Blueprint as BlueprintIcon,
   Clock,
@@ -62,15 +63,18 @@ function BlueprintRow({
   onTogglePin: (b: BlueprintItem) => void
   onRemoveFromLibrary: (b: BlueprintItem) => void
 }) {
+  const pending = useLinkPending({ to: '/blueprint/$id', params: { id: item.id } })
   return (
     <Link
       to="/blueprint/$id"
       params={{ id: item.id }}
+      aria-busy={pending}
       className="group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint"
     >
-      {/* Neutral monogram */}
       <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-kumo-fill text-kumo-subtle">
-        <BlueprintIcon size={16} weight="regular" />
+        <PendingIcon pending={pending} size={20}>
+          <BlueprintIcon size={16} weight="regular" />
+        </PendingIcon>
       </div>
 
       <div className="min-w-0 flex-1">

@@ -1,5 +1,6 @@
 import { Plus } from '@phosphor-icons/react'
 import { Link } from '@tanstack/react-router'
+import { PendingIcon, useLinkPending } from './PendingIcon'
 import { useAuthenticatedApi } from '../AuthContext'
 import { useState, useEffect } from 'react'
 import { logoComponents } from './ConnectionLogos'
@@ -17,6 +18,7 @@ export default function ConnectionChips() {
   const { authenticatedApi } = useAuthenticatedApi()
   const { resolvedThemeMode } = useTheme()
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([])
+  const pending = useLinkPending({ to: '/gatekeepers' })
 
   useEffect(() => {
     let cancelled = false
@@ -76,9 +78,12 @@ export default function ConnectionChips() {
       })}
       <Link
         to="/gatekeepers"
+        aria-busy={pending}
         className="flex items-center gap-1 pl-2 pr-2.5 py-1 rounded-full border border-kumo-line text-sm text-kumo-subtle hover:text-kumo-brand hover:border-kumo-brand transition-colors"
       >
-        <Plus size={14} />
+        <PendingIcon pending={pending} size={14}>
+          <Plus size={14} />
+        </PendingIcon>
       </Link>
     </div>
   )

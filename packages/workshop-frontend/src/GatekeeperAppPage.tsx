@@ -3,6 +3,7 @@ import type { GatekeeperUiFrame } from '@gadgets/workshop-shared/gatekeeper'
 import { useAuthenticatedApi } from './AuthContext'
 import SandboxedGatekeeperApp from './SandboxedGatekeeperApp'
 import { reportIssue } from './errorReporting'
+import { persistGatekeeperAppHtml, readGatekeeperAppHtml } from './query/gatekeeper-app'
 
 // The frame's `ui` is an RPC stub at runtime; dispose it to release the server-side capability.
 function disposeFrame(frame: GatekeeperUiFrame | null) {
@@ -35,6 +36,7 @@ export default function GatekeeperAppPage({ appId }: { appId: string }) {
           return
         }
         acquired = frame
+        persistGatekeeperAppHtml(appId, frame.iframeHtml)
         setState({ frame })
       })
       .catch((err) => {
@@ -55,14 +57,18 @@ export default function GatekeeperAppPage({ appId }: { appId: string }) {
       <div className="mx-auto max-w-md px-4 py-16 text-center text-sm text-kumo-subtle">{error}</div>
     )
   }
-  if (!state) {
+  const cachedHtml = readGatekeeperAppHtml(appId)
+  const iframeHtml = state?.frame.iframeHtml ?? cachedHtml
+  if (!iframeHtml) {
     return <div className="h-full min-h-0" />
   }
 
-  // Fill the viewport below the header so the embedded app can manage its own internal layout.
   return (
     <div className="h-full min-h-0">
-      <SandboxedGatekeeperApp frame={state.frame} gatekeeperVendorId={appId} />
+      <SandboxedGatekeeperApp
+        frame={{ iframeHtml, ui: state?.frame.ui }}
+        gatekeeperVendorId={appId}
+      />
     </div>
   )
 }

@@ -14,7 +14,8 @@ import {
 } from '@phosphor-icons/react'
 import { RpcStub, RpcTarget } from 'capnweb'
 import { useAuthenticatedApi } from './AuthContext'
-import { useWhoami } from './query/hooks'
+import { useGadgets, useWhoami } from './query/hooks'
+import { persistWorkspaceWorkpieces, readCachedWorkpieces } from './query/workpieces'
 import {
   GadgetClient,
   ConsoleLogSubscriber,
@@ -427,8 +428,10 @@ export default function GadgetEditor() {
   // ── core state ──────────────────────────────────────────────────────────────
   // The workspace's workpiece list (gadget-type workpieces only in v1), kept live via
   // subscribeToWorkpieces(). `workpiecesReady` flips once the initial listing has arrived.
-  const [workpieces, setWorkpieces] = useState<Map<WorkpieceId, WorkpieceSummary>>(new Map())
-  const [workpiecesReady, setWorkpiecesReady] = useState(false)
+  const cachedWorkpieces = id ? readCachedWorkpieces(id) : undefined
+  const [workpieces, setWorkpieces] = useState<Map<WorkpieceId, WorkpieceSummary>>(() =>
+    cachedWorkpieces ? new Map(cachedWorkpieces.map(item => [item.id, item])) : new Map())
+  const [workpiecesReady, setWorkpiecesReady] = useState(() => cachedWorkpieces !== undefined)
   const knownWorkpieceIdsRef = useRef<Set<WorkpieceId> | null>(null)
   // GadgetClient stub for the currently-selected gadget workpiece. Per-gadget operations (UI
   // bundle, RPC connection, bindings, blueprints) go through this stub. Null while the workspace
@@ -463,6 +466,9 @@ export default function GadgetEditor() {
     },
   })
   const { data: userInfo = null } = useWhoami()
+  const { data: gadgetList } = useGadgets()
+  const cachedMetadata = gadgetList?.find(item => item.id === id) ?? null
+  const displayMetadata = metadata ?? cachedMetadata
 
   // ── role gating ────────────────────────────────────────────────────────────────
   // "use"-role collaborators receive a restricted overseer that only permits rendering and
@@ -983,8 +989,9 @@ export default function GadgetEditor() {
     activityReturnViewRef.current = null
     setActivityClosing(false)
     setWorkspaceTransitionEnabled(false)
-    setWorkpieces(new Map())
-    setWorkpiecesReady(false)
+    const seeded = id ? readCachedWorkpieces(id) : undefined
+    setWorkpieces(seeded ? new Map(seeded.map(item => [item.id, item])) : new Map())
+    setWorkpiecesReady(seeded !== undefined)
     knownWorkpieceIdsRef.current = null
     turnOutputRef.current = null
     setUserNavigatedToList(false)
@@ -1094,10 +1101,15 @@ export default function GadgetEditor() {
     let sub: RpcStub<{}> | null = null
     let cancelled = false
     const subscriber = new WorkpiecesSubscriberImpl(
-      update => setWorkpieces(update),
+      update => setWorkpieces(prev => {
+        const next = update(prev)
+        if (id) persistWorkspaceWorkpieces(id, next.values())
+        return next
+      }),
       initial => {
         setWorkpieces(initial)
         setWorkpiecesReady(true)
+        if (id) persistWorkspaceWorkpieces(id, initial.values())
       },
     )
     overseer.stub
@@ -1112,7 +1124,7 @@ export default function GadgetEditor() {
       subscriber.cancel()
       sub?.[Symbol.dispose]()
     }
-  }, [overseer])
+  }, [overseer, id])
 
   // ── selected gadget stub ────────────────────────────────────────────────────────
   // Open a GadgetClient for the selected workpiece. getGadget() pipelines on the overseer stub,
@@ -1280,7 +1292,17 @@ export default function GadgetEditor() {
   if (!metadata || !overseer || !workpiecesReady ||
       (selectedGadgetId !== null && gadget === null)) {
     return (
-      <div className="h-full bg-kumo-base">
+      <div className="relative flex h-full flex-col overflow-hidden bg-kumo-base">
+        {displayMetadata && (
+          <div
+            className="relative flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-4 sm:px-6"
+            style={{ height: TOPBAR_H }}
+          >
+            <span className="min-w-0 truncate text-[14px] leading-5 font-medium tracking-[-0.25px] text-kumo-default">
+              {displayMetadata.title}
+            </span>
+          </div>
+        )}
         {observerConfig && (
           <ObserverConfigModal
             needs={observerConfig.needs}

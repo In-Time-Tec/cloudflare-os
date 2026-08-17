@@ -344,8 +344,8 @@ function CollectionIconTile({
   );
 }
 
-function formatRelativeTime(date: Date): string {
-  const diff = Date.now() - date.getTime();
+function formatRelativeTime(date: Date | string | number): string {
+  const diff = Date.now() - new Date(date).getTime();
   const minutes = Math.floor(diff / 60000);
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m ago`;
@@ -925,7 +925,17 @@ function CreateCollectionView({
 // Main page
 // ---------------------------------------------------------------------------
 
-export default function ContextLibraryPage() {
+export type ContextLibrarySnapshot = {
+  enabled: EnabledCollectionInfo[];
+};
+
+export default function ContextLibraryPage({
+  initialSnapshot,
+  persistSnapshot,
+}: {
+  initialSnapshot?: ContextLibrarySnapshot;
+  persistSnapshot?: (snapshot: ContextLibrarySnapshot) => void | Promise<void>;
+} = {}) {
   const context = useContextApi();
 
   // Iframe-local selection state (no router/URL).
@@ -943,8 +953,10 @@ export default function ContextLibraryPage() {
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
 
-  const [enabled, setEnabled] = useState<EnabledCollectionInfo[]>([]);
-  const [enabledLoaded, setEnabledLoaded] = useState(false);
+  const [enabled, setEnabled] = useState<EnabledCollectionInfo[]>(
+    () => initialSnapshot?.enabled ?? [],
+  );
+  const [enabledLoaded, setEnabledLoaded] = useState(() => initialSnapshot?.enabled !== undefined);
 
   const loadAll = useCallback(async () => {
     const enabledResult = await context
@@ -953,8 +965,9 @@ export default function ContextLibraryPage() {
     if (enabledResult) {
       setEnabled(enabledResult);
       setEnabledLoaded(true);
+      if (persistSnapshot) void persistSnapshot({ enabled: enabledResult });
     }
-  }, [context]);
+  }, [context, persistSnapshot]);
 
   useEffect(() => {
     loadAll();

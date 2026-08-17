@@ -1,4 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router'
+import { PendingIcon, useLinkPending } from '../PendingIcon'
 import { Desktop, Moon, Plug, Sun } from '@phosphor-icons/react'
 import { Tooltip } from '@cloudflare/kumo'
 import UserMenu from '../UserMenu'
@@ -54,12 +55,14 @@ function StripLink({
   children: React.ReactNode
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const pending = useLinkPending({ to })
   const active = pathname === to
   return (
     <Tooltip content={label}>
       <Link
         to={to}
         aria-label={label}
+        aria-busy={pending}
         className={[
           'flex h-8 w-8 items-center justify-center rounded-md transition-colors',
           active
@@ -67,7 +70,7 @@ function StripLink({
             : 'text-kumo-inactive hover:bg-kumo-tint hover:text-kumo-default',
         ].join(' ')}
       >
-        {children}
+        <PendingIcon pending={pending} size={15}>{children}</PendingIcon>
       </Link>
     </Tooltip>
   )

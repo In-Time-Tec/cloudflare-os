@@ -175,7 +175,7 @@ function OutputCard({
         <FormatThumbnail output={output.output} />
       </div>
       <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <FormatTile output={output.output} size="sm" />
+        <FormatTile output={output.output} size="sm" pending={pending} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-medium leading-[18px] tracking-[-0.25px] text-kumo-default">
             {output.title || 'Untitled'}
@@ -209,7 +209,7 @@ function OutputRow({
       aria-busy={pending}
       className={`group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint ${pending ? 'opacity-70' : ''}`}
     >
-      <FormatTile output={output.output} />
+      <FormatTile output={output.output} pending={pending} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium tracking-[-0.25px] text-kumo-default">
           {output.title || 'Untitled'}

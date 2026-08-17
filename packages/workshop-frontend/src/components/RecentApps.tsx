@@ -1,7 +1,9 @@
 import { Link } from '@tanstack/react-router'
+import { PendingIcon, useLinkPending } from './PendingIcon'
 import { Clock, ArrowRight } from '@phosphor-icons/react'
 import { useMemo } from 'react'
 import { useGadgets } from '../query/hooks'
+import { asTime } from '../query/time'
 import { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
 
 // A simple deterministic gradient based on the gadget ID
@@ -20,9 +22,9 @@ function getGradient(id: string): string {
   return gradients[idx]
 }
 
-function formatRelativeTime(date: Date): string {
+function formatRelativeTime(date: Date | string | number): string {
   const now = Date.now()
-  const diff = now - date.getTime()
+  const diff = now - asTime(date)
   const minutes = Math.floor(diff / 60000)
   if (minutes < 1) return 'just now'
   if (minutes < 60) return `${minutes}m ago`
@@ -34,17 +36,22 @@ function formatRelativeTime(date: Date): string {
 
 function AppRow({ gadget }: { gadget: GadgetMetadataWithTimestamps }) {
   const gradient = getGradient(gadget.id)
+  const pending = useLinkPending({ to: '/workspace/$id', params: { id: gadget.id } })
 
   return (
     <Link
       to="/workspace/$id"
       params={{ id: gadget.id }}
+      aria-busy={pending}
       className="group flex items-center gap-4 p-3 rounded-xl border border-kumo-line bg-kumo-base hover:border-kumo-fill transition-all cursor-pointer"
     >
-      {/* Gradient swatch */}
       <div
-        className={`w-10 h-10 rounded-lg bg-gradient-to-br ${gradient} flex-shrink-0`}
-      />
+        className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${gradient}`}
+      >
+        <PendingIcon pending={pending} size={24}>
+          <span className="block size-full" aria-hidden="true" />
+        </PendingIcon>
+      </div>
 
       {/* Info */}
       <div className="flex-1 min-w-0">
@@ -71,12 +78,12 @@ function AppRow({ gadget }: { gadget: GadgetMetadataWithTimestamps }) {
 }
 
 export default function RecentApps() {
-  const { data: rawGadgets = [], isLoading: loading, isError: loadError } = useGadgets()
+  const { data: rawGadgets, isError: loadError } = useGadgets()
   const gadgets = useMemo(
-    () => [...rawGadgets].toSorted((a, b) => b.lastActive.getTime() - a.lastActive.getTime()).slice(0, 4),
+    () => [...(rawGadgets ?? [])].toSorted((a, b) => asTime(b.lastActive) - asTime(a.lastActive)).slice(0, 4),
     [rawGadgets])
 
-  if (loading) {
+  if (rawGadgets === undefined && !loadError) {
     return null
   }
 

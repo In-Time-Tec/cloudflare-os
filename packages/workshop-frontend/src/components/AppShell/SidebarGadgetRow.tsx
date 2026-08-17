@@ -1,9 +1,11 @@
 import { Link } from '@tanstack/react-router'
-import { DotsThree, Star, ShareNetwork, Trash, Pencil } from '@phosphor-icons/react'
-import { DropdownMenu } from '@cloudflare/kumo'
-import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER, MENU_POSITIONER_STYLE } from '../menuStyles'
+import { Star, ShareNetwork, Trash, Pencil } from '@phosphor-icons/react'
 import { useState, useEffect, useRef } from 'react'
 import type { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
+import { PendingIcon, useLinkPending } from '../PendingIcon'
+import { workspacePreview } from '../../conversations/hoverPreviews'
+import { hoverRowClassName } from './sidebarHover'
+import { HoverActionBar, HoverFadeLabel, bindRowRef, hoverRowStyle, useRowPreview } from './SidebarHoverRow'
 
 function initials(title: string | undefined): string {
   const t = (title || 'Untitled').trim()
@@ -12,11 +14,6 @@ function initials(title: string | undefined): string {
   return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || t.slice(0, 2).toUpperCase()
 }
 
-/**
- * One row in the sidebar's Favorites / Recent list. Compact, with a monogram avatar, a truncated
- * title, and an overflow menu (favorite, rename, share, delete). Favorite/rename/share/delete
- * callbacks are passed in by the parent so this row stays a pure presentational component.
- */
 export default function SidebarGadgetRow({
   gadget,
   collapsed = false,
@@ -35,6 +32,9 @@ export default function SidebarGadgetRow({
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(gadget.title || '')
   const inputRef = useRef<HTMLInputElement>(null)
+  const preview = collapsed || renaming ? undefined : workspacePreview(gadget)
+  const { rowRef, previewBind, previewPortal } = useRowPreview(preview)
+  const pending = useLinkPending({ to: '/workspace/$id', params: { id: gadget.id } })
 
   useEffect(() => {
     if (renaming) inputRef.current?.focus()
@@ -46,100 +46,100 @@ export default function SidebarGadgetRow({
     setRenaming(false)
   }
 
-  const startRename = () => {
-    setRenameValue(gadget.title || '')
-    setRenaming(true)
-  }
+  const title = gadget.title || 'Untitled workspace'
+  const rowClass = hoverRowClassName({
+    hasActions: !collapsed && !renaming,
+    className: 'h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default',
+  })
+  const activeClass = hoverRowClassName({
+    active: true,
+    hasActions: !collapsed && !renaming,
+    className: 'h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-strong',
+  })
 
   return (
-    <Link
-      to="/workspace/$id"
-      params={{ id: gadget.id }}
-      className="group flex h-7 items-center gap-1.5 rounded-md pl-1.5 pr-1 text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default transition-colors hover:bg-kumo-tint"
-      activeProps={{ className: 'flex h-7 items-center gap-1.5 rounded-md pl-1.5 pr-1 text-[12.5px] leading-[18px] tracking-[-0.1px] bg-kumo-fill text-kumo-strong font-medium' }}
-      onClick={(e) => {
-        if (renaming) e.preventDefault()
-      }}
-      title={collapsed ? gadget.title || 'Untitled workspace' : undefined}
-    >
-      <div
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-fill text-[10px] font-medium text-kumo-subtle"
-        aria-hidden="true"
+    <>
+      <Link
+        ref={bindRowRef(rowRef)}
+        to="/workspace/$id"
+        params={{ id: gadget.id }}
+        className={rowClass}
+        style={hoverRowStyle(renaming || collapsed ? 0 : 4)}
+        activeProps={{ className: activeClass }}
+        onClick={(event) => {
+          if (renaming) event.preventDefault()
+        }}
+        title={collapsed ? title : undefined}
+        aria-busy={pending}
+        {...(renaming || collapsed ? {} : previewBind)}
       >
-        {initials(gadget.title)}
-      </div>
+        <div
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-fill text-[10px] font-medium text-kumo-subtle"
+          aria-hidden="true"
+        >
+          <PendingIcon pending={pending} size={16}>
+            {initials(gadget.title)}
+          </PendingIcon>
+        </div>
 
-      {!collapsed && (
-        <>
-          {renaming ? (
-            <input
-              ref={inputRef}
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onBlur={commit}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commit()
-                if (e.key === 'Escape') setRenaming(false)
-              }}
-              className="min-w-0 flex-1 bg-transparent text-[12.5px] leading-[18px] tracking-[-0.1px] outline-none border-b border-kumo-brand text-kumo-default"
-              onClick={(e) => e.preventDefault()}
-            />
-          ) : (
-            <span className="min-w-0 flex-1 truncate">{gadget.title || 'Untitled workspace'}</span>
-          )}
-
-          {/* Inside the row's <Link>: stopPropagation blocks the Link's SPA handler, so preventDefault
-              is needed to stop the native <a> from navigating. */}
-          <div onClick={(e) => { e.stopPropagation(); e.preventDefault() }}>
-            <DropdownMenu>
-              <DropdownMenu.Trigger
-                render={
-                  <button
-                    type="button"
-                    aria-label="Workspace actions"
-                    className="flex h-6 w-6 items-center justify-center rounded-md text-kumo-subtle opacity-0 transition-[opacity,color,background-color] group-hover:opacity-100 hover:bg-kumo-fill hover:text-kumo-default focus:opacity-100"
-                  >
-                    <DotsThree size={14} weight="bold" />
-                  </button>
-                }
+        {!collapsed && (
+          <>
+            {renaming ? (
+              <input
+                ref={inputRef}
+                value={renameValue}
+                onChange={(event) => setRenameValue(event.target.value)}
+                onBlur={commit}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') commit()
+                  if (event.key === 'Escape') setRenaming(false)
+                }}
+                className="min-w-0 flex-1 border-b border-kumo-brand bg-transparent text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default outline-none"
+                onClick={(event) => event.preventDefault()}
+                onDoubleClick={(event) => event.preventDefault()}
               />
-              <DropdownMenu.Content className={MENU_CONTENT} style={MENU_POSITIONER_STYLE}>
-                <DropdownMenu.Item
-                  onClick={startRename}
-                  className={MENU_ITEM}
-                >
-                  <Pencil size={13} className="mr-2" /> Rename
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  onClick={() => onTogglePin(gadget)}
-                  className={MENU_ITEM}
-                >
-                  <Star size={13} className="mr-2" weight={gadget.pinned ? 'fill' : 'regular'} />
-                  {gadget.pinned ? 'Unfavorite' : 'Favorite'}
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  onClick={() => onShare(gadget)}
-                  className={MENU_ITEM}
-                >
-                  <ShareNetwork size={13} className="mr-2" /> Share
-                </DropdownMenu.Item>
-                <DropdownMenu.Separator />
-                <DropdownMenu.Item
-                  variant="danger"
-                  onClick={() => onDelete(gadget)}
-                  className={MENU_ITEM_DANGER}
-                >
-                  <Trash size={13} className="mr-2" />
-                  {gadget.owner ? 'Dismiss' : 'Delete'}
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu>
-          </div>
-        </>
-      )}
+            ) : (
+              <HoverFadeLabel className="text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default">
+                {title}
+              </HoverFadeLabel>
+            )}
 
-      {/* Collapsed rows show only the monogram (aria-hidden), so name the link for screen readers. */}
-      {collapsed && <span className="sr-only">{gadget.title || 'Untitled workspace'}</span>}
-    </Link>
+            {!renaming && (
+              <HoverActionBar
+                actions={[
+                  {
+                    label: gadget.pinned ? 'Unfavorite' : 'Favorite',
+                    icon: <Star size={12} weight={gadget.pinned ? 'fill' : 'regular'} />,
+                    onSelect: () => onTogglePin(gadget),
+                  },
+                  {
+                    label: 'Rename',
+                    icon: <Pencil size={12} />,
+                    onSelect: () => {
+                      setRenameValue(gadget.title || '')
+                      setRenaming(true)
+                    },
+                  },
+                  {
+                    label: 'Share',
+                    icon: <ShareNetwork size={12} />,
+                    onSelect: () => onShare(gadget),
+                  },
+                  {
+                    label: gadget.owner ? 'Dismiss' : 'Delete',
+                    icon: <Trash size={12} />,
+                    onSelect: () => onDelete(gadget),
+                    danger: true,
+                  },
+                ]}
+              />
+            )}
+          </>
+        )}
+
+        {collapsed && <span className="sr-only">{title}</span>}
+      </Link>
+      {previewPortal}
+    </>
   )
 }

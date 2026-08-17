@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { PendingIcon, useLinkPending } from "./PendingIcon";
 import {
   Hexagon,
   Robot,
@@ -116,6 +117,7 @@ export function BlueprintCard({
   vendorDescriptions?: Map<string, VendorDescription>;
 }) {
   const badges = uniqueBindingBadges(metadata.bindings);
+  const pending = useLinkPending({ to: "/blueprint/$id", params: { id } });
 
   return (
     <div className="themed-card-hover-shadow group relative isolate flex min-h-[150px] flex-col overflow-hidden rounded-2xl border border-kumo-line bg-kumo-base text-left transition-[border-color,transform,box-shadow] duration-150 ease-out hover:-translate-y-px hover:border-kumo-fill active:scale-[0.995]">
@@ -130,6 +132,7 @@ export function BlueprintCard({
         to="/blueprint/$id"
         params={{ id }}
         aria-label={`Open blueprint ${metadata.title}`}
+        aria-busy={pending}
         className="absolute inset-0 z-10 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kumo-brand"
       />
       <div className="pointer-events-none relative z-20 flex flex-1 flex-col p-4">
@@ -137,7 +140,9 @@ export function BlueprintCard({
           <div
             className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br ${getGradient(id)}`}
           >
-            <Hexagon size={16} className="text-white/75" weight="bold" />
+            <PendingIcon pending={pending} size={18}>
+              <Hexagon size={16} className="text-white/75" weight="bold" />
+            </PendingIcon>
           </div>
           <div className="min-w-0 flex-1">
             <p className="m-0 line-clamp-2 text-[15px] leading-5 font-medium tracking-[-0.25px] text-kumo-default">

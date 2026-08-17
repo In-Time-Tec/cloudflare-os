@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { PendingIcon, useLinkPending } from "./components/PendingIcon";
 import { useKumoToastManager } from "@cloudflare/kumo";
 import {
   Blueprint as BlueprintIcon,
@@ -142,6 +143,7 @@ function FeaturedBlueprintCard({
   vendorDescriptions: VendorMap;
 }) {
   const badges = uniqueBindingBadges(blueprint.metadata.bindings).slice(0, 2);
+  const pending = useLinkPending({ to: "/blueprint/$id", params: { id: blueprint.id } });
 
   return (
     <div className="themed-card-hover-shadow press group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base text-left transition-[border-color,box-shadow] duration-150 ease-out hover:border-kumo-fill">
@@ -149,6 +151,7 @@ function FeaturedBlueprintCard({
         to="/blueprint/$id"
         params={{ id: blueprint.id }}
         aria-label={`Open featured blueprint ${blueprint.metadata.title}`}
+        aria-busy={pending}
         className="absolute inset-0 z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kumo-brand"
       />
 
@@ -156,7 +159,9 @@ function FeaturedBlueprintCard({
 
       <div className="flex flex-1 items-start gap-2.5 px-3 py-2.5">
         <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-kumo-fill text-kumo-subtle">
-          <BlueprintIcon size={15} weight="regular" />
+          <PendingIcon pending={pending} size={16}>
+            <BlueprintIcon size={15} weight="regular" />
+          </PendingIcon>
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-medium leading-[18px] tracking-[-0.25px] text-kumo-default">
@@ -194,15 +199,19 @@ function FeaturedBlueprintRow({
   vendorDescriptions: VendorMap;
 }) {
   const badges = uniqueBindingBadges(blueprint.metadata.bindings).slice(0, 3);
+  const pending = useLinkPending({ to: "/blueprint/$id", params: { id: blueprint.id } });
 
   return (
     <Link
       to="/blueprint/$id"
       params={{ id: blueprint.id }}
+      aria-busy={pending}
       className="group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint"
     >
       <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-kumo-fill text-kumo-subtle">
-        <BlueprintIcon size={16} weight="regular" />
+        <PendingIcon pending={pending} size={20}>
+          <BlueprintIcon size={16} weight="regular" />
+        </PendingIcon>
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium tracking-[-0.25px] text-kumo-default">

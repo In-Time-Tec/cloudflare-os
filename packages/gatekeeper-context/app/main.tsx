@@ -10,7 +10,7 @@ import type {
   GatekeeperAppTheme,
   GatekeeperAppThemeReceiver,
 } from '@gadgets/workshop-shared/theme'
-import ContextLibraryPage from './ContextLibraryPage'
+import ContextLibraryPage, { type ContextLibrarySnapshot } from './ContextLibraryPage'
 import { ContextApiProvider, PresentationProvider, type PresentAck } from './bridge'
 import { applyAppTheme } from './theme'
 import './styles.css'
@@ -28,10 +28,14 @@ class AppIframe extends RpcTarget implements GatekeeperAppThemeReceiver {
 
 interface HostCapability extends RpcTarget {
   readonly ui: RpcStub<ContextApi>
-  // Grow the iframe to a full-viewport overlay for app-level modals (`true`) or restore it (`false`).
   setPresenting(active: boolean): Promise<PresentAck>
-  // Returns the current theme and calls back on `receiver` whenever it changes.
   subscribeTheme(receiver: GatekeeperAppThemeReceiver): Promise<GatekeeperAppTheme>
+  readPersistedSnapshot(): Promise<ContextLibrarySnapshot | null>
+  writePersistedSnapshot(data: ContextLibrarySnapshot): Promise<void>
+}
+
+function readBootSnapshot(): ContextLibrarySnapshot | undefined {
+  return (window as Window & { __GADGETS_PERSISTED__?: ContextLibrarySnapshot }).__GADGETS_PERSISTED__
 }
 
 function main() {
@@ -56,7 +60,10 @@ function main() {
       <PresentationProvider setPresenting={(active) => host.setPresenting(active)}>
         <TooltipProvider>
           <Toasty>
-            <ContextLibraryPage />
+            <ContextLibraryPage
+              initialSnapshot={readBootSnapshot()}
+              persistSnapshot={(snapshot) => host.writePersistedSnapshot(snapshot)}
+            />
           </Toasty>
         </TooltipProvider>
       </PresentationProvider>

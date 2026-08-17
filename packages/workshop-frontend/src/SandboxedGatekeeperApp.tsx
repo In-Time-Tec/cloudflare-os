@@ -18,6 +18,11 @@ import {
   parseGatekeeperAppWorkspaceTarget,
   type GatekeeperAppWorkspaceTarget,
 } from './gatekeeperAppNavigation'
+import {
+  persistGatekeeperAppSnapshot,
+  readGatekeeperAppSnapshot,
+  withPersistedSnapshot,
+} from './query/gatekeeper-app'
 
 // The content-pane rect, in viewport coordinates, that the app pins its page to while the iframe
 // is full-viewport.
@@ -82,10 +87,10 @@ class GatekeeperAppHostImpl extends RpcTarget {
   readonly #openTarget: OpenTarget
   readonly #openPrompt: OpenPrompt
   readonly #resolveWorkspaceTitles: ResolveWorkspaceTitles
+  readonly #appId: string
   #presenting = false
   #theme: GatekeeperAppTheme
   #themeReceiver: RpcStub<GatekeeperAppThemeReceiver> | null = null
-  // Presentation changes are coalesced to a single apply per animation frame (see #applyPending).
   #pendingActive: boolean | null = null
   #pendingResolvers: ((ack: PresentAck) => void)[] = []
   #frameId: number | null = null
@@ -97,9 +102,11 @@ class GatekeeperAppHostImpl extends RpcTarget {
     openTarget: OpenTarget,
     openPrompt: OpenPrompt,
     resolveWorkspaceTitles: ResolveWorkspaceTitles,
+    appId: string,
   ) {
     super()
     this.#theme = theme
+    this.#appId = appId
     const { capability: ui, dispose } = createRateLimitedCapability(capability, {
       maxConcurrency: 8,
       maxCallsPerMinute: 600,
@@ -113,6 +120,14 @@ class GatekeeperAppHostImpl extends RpcTarget {
     this.#openTarget = openTarget
     this.#openPrompt = openPrompt
     this.#resolveWorkspaceTitles = resolveWorkspaceTitles
+  }
+
+  readPersistedSnapshot(): unknown {
+    return readGatekeeperAppSnapshot(this.#appId) ?? null
+  }
+
+  writePersistedSnapshot(data: unknown): void {
+    persistGatekeeperAppSnapshot(this.#appId, data)
   }
 
   get ui(): RpcStub<RpcTarget> {
@@ -214,7 +229,7 @@ class GatekeeperAppHostImpl extends RpcTarget {
  * The iframe fills its parent container.
  */
 export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
-  frame: GatekeeperUiFrame,
+  frame: Pick<GatekeeperUiFrame, 'iframeHtml'> & { ui?: GatekeeperUiFrame['ui'] },
   gatekeeperVendorId: string,
 }) {
   const navigate = useNavigate()
@@ -294,6 +309,11 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
   // The gatekeeper capability is `any`: its method shape is gatekeeper-defined and opaque to us.
   const capabilityRef = useRef<any>(null)
   capabilityRef.current = frame.ui
+  const pendingPortRef = useRef<MessagePort | null>(null)
+  const srcDocRef = useRef<string | undefined>(undefined)
+  if (srcDocRef.current === undefined) {
+    srcDocRef.current = withPersistedSnapshot(frame.iframeHtml, readGatekeeperAppSnapshot(gatekeeperVendorId))
+  }
 
   useEffect(() => {
     connectedRef.current = false
@@ -301,7 +321,6 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
 
     const connect = (port: MessagePort) => {
       if (connectedRef.current) {
-        // A second handshake (e.g. iframe reloaded) invalidates the session.
         invalidatedRef.current = true
         port.close()
         sessionRef.current?.[Symbol.dispose]?.()
@@ -311,8 +330,12 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
         setOverlayPhase(null)
         return
       }
-      if (invalidatedRef.current || !capabilityRef.current) {
+      if (invalidatedRef.current) {
         port.close()
+        return
+      }
+      if (!capabilityRef.current) {
+        pendingPortRef.current = port
         return
       }
       const host = new GatekeeperAppHostImpl(
@@ -322,10 +345,17 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
         openTarget,
         openPrompt,
         resolveWorkspaceTitles,
+        gatekeeperVendorId,
       )
       hostRef.current = host
       sessionRef.current = newMessagePortRpcSession(port, host)
       connectedRef.current = true
+    }
+
+    if (pendingPortRef.current && capabilityRef.current && !connectedRef.current) {
+      const queued = pendingPortRef.current
+      pendingPortRef.current = null
+      connect(queued)
     }
 
     const handleMessage = (event: MessageEvent) => {
@@ -360,7 +390,7 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
   return (
     <iframe
       ref={iframeRef}
-      srcDoc={frame.iframeHtml}
+      srcDoc={srcDocRef.current}
       // allow-scripts: run the app's JS. allow-modals: its beforeunload unsaved-changes guard. Not
       // allow-same-origin (the frame stays an opaque origin), and the app's CSP keeps connect-src 'none'.
       sandbox="allow-scripts allow-modals"

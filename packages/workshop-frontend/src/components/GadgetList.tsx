@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router'
+import { PendingIcon, useLinkPending } from './PendingIcon'
 import { Clock, MagnifyingGlass, Hexagon, DotsThreeVertical, ShareNetwork, Trash, Info, Star, Pencil, ArrowRight } from '@phosphor-icons/react'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { DropdownMenu, Dialog, Button, useKumoToastManager } from '@cloudflare/kumo'
@@ -6,6 +7,7 @@ import { RpcStub } from 'capnweb'
 import { useAuthenticatedApi } from '../AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
 import { gadgetsKey, useFeaturedBlueprints, useGadgets, useWhoami } from '../query/hooks'
+import { asTime } from '../query/time'
 import { useGadgetMutations } from '../query/useGadgetMutations'
 import { GadgetMetadataWithTimestamps, BlueprintPublicInfo, Overseer } from '@gadgets/workshop-shared/api'
 import ShareModal from '../ShareModal'
@@ -22,8 +24,8 @@ function initials(title: string | undefined): string {
   return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || t.slice(0, 2).toUpperCase()
 }
 
-function formatRelativeTime(date: Date): string {
-  const diff = Date.now() - date.getTime()
+function formatRelativeTime(date: Date | string | number): string {
+  const diff = Date.now() - asTime(date)
   const minutes = Math.floor(diff / 60000)
   if (minutes < 1) return 'just now'
   if (minutes < 60) return `${minutes}m ago`
@@ -72,11 +74,13 @@ function AppRow({
     setRenameValue(gadget.title || '')
     setIsRenaming(true)
   }
+  const pending = useLinkPending({ to: '/workspace/$id', params: { id: gadget.id } })
 
   return (
     <Link
       to="/workspace/$id"
       params={{ id: gadget.id }}
+      aria-busy={pending}
       className="group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint"
       onClick={(e) => {
         // Prevent navigation when renaming or clicking the menu
@@ -85,7 +89,9 @@ function AppRow({
     >
       {/* Neutral monogram */}
       <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-kumo-fill text-[12px] font-medium text-kumo-subtle">
-        {initials(gadget.title)}
+        <PendingIcon pending={pending} size={20}>
+          {initials(gadget.title)}
+        </PendingIcon>
       </div>
 
       {/* Info */}
@@ -173,13 +179,13 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
   const queryClient = useQueryClient()
-  const { data: rawGadgets = [], isError: loadError } = useGadgets()
+  const { data: rawGadgets, isError: loadError } = useGadgets()
   const { data: userInfo = null } = useWhoami()
   const { togglePin, renameGadget, deleteGadget, remove } = useGadgetMutations()
-  const gadgets = useMemo(() => [...rawGadgets].toSorted((a, b) => {
+  const gadgets = useMemo(() => [...(rawGadgets ?? [])].toSorted((a, b) => {
     if (a.pinned && !b.pinned) return -1
     if (!a.pinned && b.pinned) return 1
-    return b.lastActive.getTime() - a.lastActive.getTime()
+    return asTime(b.lastActive) - asTime(a.lastActive)
   }), [rawGadgets])
   const [search, setSearch] = useState('')
 
@@ -262,7 +268,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
           <h2 className="text-lg font-semibold text-kumo-default">
             Your workspaces
           </h2>
-          {gadgets.length === 0 && !loadError && (
+          {rawGadgets !== undefined && gadgets.length === 0 && !loadError && (
             <p className="mt-1 text-sm text-kumo-inactive">
               You haven&apos;t created any workspaces yet
             </p>
@@ -299,6 +305,8 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
             <p className="text-kumo-danger">Something went wrong loading your workspaces.</p>
             <button onClick={loadGadgets} className="text-kumo-brand mt-1 underline">Try again</button>
           </div>
+        ) : rawGadgets === undefined ? (
+          null
         ) : filtered.length === 0 ? (
           search ? (
             <div className="text-center py-12 text-kumo-inactive text-sm">
@@ -408,6 +416,7 @@ function HomeFeaturedBlueprintCard({
   blueprint: BlueprintPublicInfo
 }) {
   const badges = uniqueBindingBadges(blueprint.metadata.bindings).slice(0, 1)
+  const pending = useLinkPending({ to: '/blueprint/$id', params: { id: blueprint.id } })
 
   return (
     <div className="themed-card-hover-shadow group relative isolate flex min-h-[190px] flex-col overflow-hidden rounded-2xl border border-kumo-line bg-kumo-base text-left transition-[border-color,box-shadow,transform] duration-150 ease-out hover:-translate-y-px hover:border-kumo-fill active:scale-[0.995]">
@@ -415,6 +424,7 @@ function HomeFeaturedBlueprintCard({
         to="/blueprint/$id"
         params={{ id: blueprint.id }}
         aria-label={`Open blueprint ${blueprint.metadata.title}`}
+        aria-busy={pending}
         className="absolute inset-0 z-10 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kumo-brand"
       />
       <div className="pointer-events-none relative z-20 flex flex-1 flex-col p-2.5">
@@ -426,7 +436,9 @@ function HomeFeaturedBlueprintCard({
         />
         <div className="flex min-w-0 items-start gap-2 px-1 pb-1">
           <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br ${getBlueprintGradient(blueprint.id)}`}>
-            <Hexagon size={13} className="text-white/75" weight="bold" />
+            <PendingIcon pending={pending} size={16}>
+              <Hexagon size={13} className="text-white/75" weight="bold" />
+            </PendingIcon>
           </div>
           <div className="min-w-0 flex-1">
             <p className="m-0 truncate text-[13px] leading-[18px] font-semibold tracking-[-0.25px] text-kumo-default">

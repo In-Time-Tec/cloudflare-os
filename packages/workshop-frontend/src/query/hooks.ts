@@ -73,6 +73,7 @@ export function addableGatekeepersOptions(session: WorkshopSession) {
   return queryOptions({
     queryKey: accountKey(session.cacheScope, 'addableGatekeepers'),
     queryFn: async () => [...await api(session).listAddableGatekeepers()],
+    meta: persistedQueryMeta,
   })
 }
 
@@ -80,6 +81,7 @@ export function gatekeeperVendorsOptions(session: WorkshopSession, filter?: Gate
   return queryOptions({
     queryKey: accountKey(session.cacheScope, 'gatekeeperVendors', filter ?? null),
     queryFn: async () => [...await api(session).listGatekeeperVendors(filter)],
+    meta: persistedQueryMeta,
   })
 }
 
