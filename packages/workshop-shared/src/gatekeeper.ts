@@ -474,19 +474,14 @@ export type ResolveRequestedResourceResult =
   | { ok: false; reason: string };
 
 /**
- * Determines which SupportedResource an agent connection request would pre-select in the accept
- * modal, using the exact same precedence the modal uses:
+ * Determines which SupportedResource a resource-URL need resolves to, using the precedence the
+ * connect UI uses:
  *   1. the resource whose urlPattern matches `resourceUrl` (ignoring the catch-all), else
  *   2. the whole-instance catch-all ("https://*") if the vendor offers one, else
  *   3. the sole resource, if the vendor offers exactly one.
  *
- * If none of those apply, the modal would open with nothing pre-selected (a bare "create new
- * connection" screen). Rather than let that happen, this returns { ok: false } with a
- * human-readable `reason` the backend surfaces to the agent so it can correct the request (e.g.
- * supply a resourceUrl matching one of the listed patterns) and retry.
- *
- * This is the single source of truth shared by the backend (which enforces it at request time)
- * and the frontend (which pre-seeds from the resolved resource), so the two cannot diverge.
+ * If none of those apply, this returns { ok: false } with a human-readable `reason` naming the
+ * patterns the caller could supply instead.
  */
 export function resolveRequestedResource(
     supportedResources: SupportedResource[],
@@ -510,8 +505,7 @@ export function resolveRequestedResource(
       `option, so a resourceUrl is required to identify which one.`;
   return {
     ok: false,
-    reason: `${lead} Call listConnectableResources to see the patterns, then retry with a ` +
-      `resourceUrl matching one of:\n${available}`,
+    reason: `${lead} Choose a resourceUrl matching one of:\n${available}`,
   };
 }
 
@@ -828,7 +822,7 @@ export interface GatekeeperUser extends WorkerEntrypoint {
    * its session to the agent as an unnamed capsule. Because it is a normal Gatekeeper, the session
    * (Gatekeeper.startSession) and catalog (Gatekeeper.getAgentCatalog) run gadget-side in the
    * gatekeeper's own worker with no round-trip back through this account DO; every read is still
-   * authorized as an observation via the ApprovalQueue, exactly like any gatekeeper.
+   * authorized as an observation via the ActionRecorder, exactly like any gatekeeper.
    *
    * The returned class is imbued (via `ctx.props`) with whatever the account needs to serve the
    * singleton (e.g. the account id and sharing domain).
@@ -886,30 +880,24 @@ export interface Gatekeeper<Session> extends DurableObject {
   getTypeScriptTypes(): Promise<string>;
 
   /**
-   * Catalog of action kinds this gatekeeper MAY auto-apply without per-action review, for
-   * pre-approval UIs that must list them before any action has been submitted. Each entry is the
-   * {tag, label} an action of that kind carries on its ActionDescription.actionKind. This is the
-   * *potential* set; the per-action `autoApprovable` verdict is still the binding gate at apply
-   * time. Gatekeepers with no auto-approvable actions return [].
+   * The complete set of side-effecting operations this gatekeeper may perform on the granted
+   * resource. Shown to the user at connect time as the scope of their consent, and to an
+   * administrator as the set of kinds they may disable deployment-wide. This is a contract: the
+   * gatekeeper must not record an action whose kind is absent from this catalog. Gatekeepers with
+   * no side-effecting operations return [].
    */
-  getAutoApprovableActions(): Promise<ActionKind[]>;
+  getActionCatalog(): Promise<ActionCapability[]>;
 
   /**
    * Get the capability representing this resource's RPC interface which will be provided to the
    * Gadget.
    *
-   * Every operation performed through this session must be submitted to the approval queue.
-   * Observations (read-only operations) must be authorized before data is returned to the caller.
-   * Side-effecting actions must not actually be performed until they are approved.
-   *
-   * It is suggested that the gatekeeper "simulate" actions that have not been approved yet, that
-   * is, the `Session` interface should reflect the state of the resource as if all actions had
-   * been applied. This allows the Gadget to keep working, potentially queuing up additional
-   * dependent actions. That said, there is no strict requirement that a gatekeeper does such
-   * simulation -- it is really up to the gatekeeper author to decide what is appropriate for the
-   * particular API.
+   * Every operation performed through this session must be recorded. Observations (read-only
+   * operations) must be authorized before data is returned to the caller. Side-effecting actions
+   * must be authorized via `authorizeAction()` before they are performed, and their outcome
+   * reported on the returned handle.
    */
-  startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<Session>;
+  startSession(recorder: RpcStub<ActionRecorder>): Promise<Session>;
 
   /**
    * Bounded, user-specific metadata the agent uses to discover entries reachable through this
@@ -972,58 +960,6 @@ export interface Gatekeeper<Session> extends DurableObject {
   getSlashCommandProvider?(): Promise<SlashCommandProvider>;
 
   // ---------------------------------------------------------------------------
-  // Callbacks invoked by the overseer to apply (or reject) actions that were previously queued
-  // for approval via the ApprovalQueue.
-  //
-  // Each action is identified by a sequential integer action ID, assigned by the gatekeeper when
-  // it submits the action for approval. The action ID is passed back to these methods so the
-  // gatekeeper can look up the action details in its own storage.
-
-  /**
-   * Action was approved. This call should apply the action (or schedule it to be applied).
-   *
-   * If this throws an exception, the user will be informed that the action failed and given the
-   * opportunity to retry or discard.
-   *
-   * Depending on policy conditions, an action may be approved and applied automatically. However,
-   * the gatekeeper is nevertheless expected to submit all actions for approval; there is no mode
-   * in which it's OK to skip the check.
-   */
-  applyAction(action: number): Promise<void>;
-
-  /**
-   * Indicates that an action was rejected by the user. The gatekeeper should clean up any
-   * associated storage.
-   *
-   * If the returned `restart` flag is true, rejecting this action requires restarting the Gadget.
-   * This is sometimes needed by gatekeepers that simulate actions as if they had been approved --
-   * the session may be in a state that is difficult to roll back without confusing the Gadget.
-   * The Overseer will take care of the restart, possibly after rejecting other actions.
-   */
-  rejectAction(action: number): Promise<void | {restart?: boolean}>;
-
-  /**
-   * Attempts to revert an action that was already applied.
-   *
-   * Gatekeepers are not required to implement this. If unimplemented, the user will be instructed
-   * that they need to perform the revert manually based on the action description. High-quality
-   * gatekeepers should almost always implement this, though.
-   *
-   * If the returned `message` is non-null, it is Markdown to be displayed to the user. This may
-   * be used, for example:
-   * - To give the user additional instructions on how to complete the revert, if not all of it
-   *   could be done automatically.
-   * - To explain to the user why a revert is not possible, e.g. if other stacked modifications
-   *   have been made on top which must be reverted first. (`canRetry` may be true in this case.)
-   *
-   * `canRetry` should be true if the revert failed (for a reason described in `message`), but
-   * it could make sense to retry later. In this case the UI will continue to give the user the
-   * option to revert.
-   *
-   * `restart` has the same meaning as for `rejectAction()`.
-   */
-  revertAction(action: number):
-      Promise<void | {message?: string, canRetry?: boolean, restart?: boolean}>;
 }
 
 export interface ObservationAuthorizer extends RpcTarget {
@@ -1100,35 +1036,28 @@ export interface SlashCommandProvider extends RpcTarget {
 }
 
 /**
- * Used by a gatekeeper to request an action that has side effects (is not read-only). Any such
- * action may be subject to human-in-the-loop approval and audit logging. Whether or not review is
- * actually required, the gatekeeper must still submit all actions and wait for apply() to be
- * called before applying them.
+ * Used by a gatekeeper to record an action that has side effects (is not read-only). Every such
+ * action must be authorized before it is performed, and its outcome reported afterwards, so that
+ * the workspace activity log is a complete record of what the agent did.
  */
-export interface ApprovalQueue extends ObservationAuthorizer {
+export interface ActionRecorder extends ObservationAuthorizer {
   // TODO: Method to indicate that the gadget tried to perform an action that the gatekeeper itself
   //   hasn't been authorized to do (e.g. the user hasn't authorized the right OAuth scopes). The
   //   system should direct the user to the right UI to authorize the action.
 
   /**
-   * Submit an action for approval.
+   * Authorize a side-effecting action and open its activity-log record.
    *
-   * Unlike `authorizeObservation()`, `submitAction()` is fully asynchronous. It returns
-   * immediately (that is, the returned Promise resolves quickly), but the action may not actually
-   * be carried out until much later. It's intended that the user might not approve actions until
-   * hours or days later, but this shouldn't cause any problems.
+   * Like `authorizeObservation()`, this is a synchronous gate: it returns normally when the action
+   * is permitted, or throws when it is not (the workspace is in sharing lockdown, an administrator
+   * has disabled the action's kind, or the turn's action budget is exhausted). The exception
+   * should propagate through to the gadget.
    *
-   * `action` is a sequential integer action ID assigned by the gatekeeper. It will be passed back
-   * to the Gatekeeper's applyAction() or rejectAction() when the action is later approved or
-   * rejected.
-   *
-   * `description` describes the action in a way that can direct UI representation and policy
-   * enforcement details.
-   *
-   * TODO: It would be nice if we can link this with the output gate so that if the submission
-   *   does not complete, any SQL writes performed just before submit() are rolled back...
+   * The gatekeeper must call this *before* performing the action, then perform it, then report the
+   * result on the returned handle exactly once. `description.actionKind` is required and must name
+   * a kind present in `getActionCatalog()`.
    */
-  submitAction(action: number, description: ActionDescription): Promise<void>;
+  authorizeAction(description: ActionDescription): Promise<RpcStub<ActionHandle>>;
 
   /**
    * Notifies the overseer that the gadget (or an agent) has requested to register a persistent
@@ -1139,9 +1068,9 @@ export interface ApprovalQueue extends ObservationAuthorizer {
    * should NOT try to store it on its own; it should always pass it to `bindHook` for the overseer
    * to store. Why? Because the callback needs to be bound to a particular gatekeeper *session*.
    * At the time you are calling `bindHook()`, the callback is tied to the session that is tied
-   * to the `ApprovalQueue`. But that session will end at some point, after which the callback stub
+   * to the `ActionRecorder`. But that session will end at some point, after which the callback stub
    * you received is revoked. When you call HookInitiator.startHook() later on, that actually
-   * initiates a *new* session (returning a new `ApprovalQueue`), and the callback returned then
+   * initiates a *new* session (returning a new `ActionRecorder`), and the callback returned then
    * is tied to that session instead.
    *
    * `controller` is an object implemented by the gatekeeper which allows the overseer to enable
@@ -1168,8 +1097,8 @@ export interface ApprovalQueue extends ObservationAuthorizer {
    * `HookInitiator` object and stores it somewhere where it can be invoked whenever "SomeEvent"
    * occurs. When the event occurs, first the gatekeeper calls `hookInitiator.startHook()` to
    * notify the overseer that a hook is incoming. The overseer returns back the original `callback`
-   * stub along with an `ApprovalQueue`. Next the gatekeeper calls `authorizeObservation()` on the
-   * `ApprovalQueue` -- since a hook invocation is almost always an observation of some sort.
+   * stub along with an `ActionRecorder`. Next the gatekeeper calls `authorizeObservation()` on the
+   * `ActionRecorder` -- since a hook invocation is almost always an observation of some sort.
    * Finally, it invokes the `callback` object to deliver the event to the gadget.
    *
    * Persistent stubs are (as of this writing) a relatively new feature of the Workers Runtime.
@@ -1294,6 +1223,53 @@ export type ActionKind = {
 };
 
 /**
+ * Handle for one authorized action, used to report its outcome to the activity log. Exactly one of
+ * `succeeded()` or `failed()` must be called after the gatekeeper attempts the action.
+ */
+export interface ActionHandle extends RpcTarget {
+  /** The action completed. `detail`, when present, is Markdown recorded alongside the entry. */
+  succeeded(detail?: string): Promise<void>;
+
+  /**
+   * The action did not complete. `mayHaveTakenEffect` is true when the failure leaves the outcome
+   * genuinely unknown -- for instance a network error after the request was already sent -- so the
+   * activity log can say so rather than implying nothing happened.
+   */
+  failed(error: string, mayHaveTakenEffect: boolean): Promise<void>;
+}
+
+/**
+ * One side-effecting operation a gatekeeper may perform, as declared by `getActionCatalog()`. The
+ * user sees these at connect time as the scope of what they are granting; an administrator sees
+ * them as the set of kinds they may disable deployment-wide.
+ */
+export type ActionCapability = {
+  /** The kind actions of this capability carry on `ActionDescription.actionKind`. */
+  kind: ActionKind;
+
+  /** One user-facing line, e.g. "Send mail as you" or "Delete files in the granted folder". */
+  summary: string;
+
+  /** Structured risk, so consent and deployment policy can be decided without prose parsing. */
+  risk: ActionRisk;
+};
+
+/** The risk profile of an action capability. */
+export type ActionRisk = {
+  /** Whether the effect can be undone, and whether undoing it needs a human. */
+  reversible: "automatic" | "manual" | "no";
+
+  /** Whether the action adds content, changes existing content, or acts on the world. */
+  reach: "creates-content" | "modifies-content" | "acts-on-world";
+
+  /** Who can see the effect: only the account owner, the workspace, or people outside it. */
+  audience: "private" | "shared" | "external";
+
+  /** True when the action can carry free-form content, and so can leak data. */
+  freeform: boolean;
+};
+
+/**
  * Describes an action submitted to the action approval queue. This contains all the information
  * needed to:
  * - Decide whether the action needs to be approved and who can approve it.
@@ -1305,82 +1281,18 @@ export type ActionDescription = {
   title: string;
 
   /**
-   * A complete description of the action to be taken, in Markdown-formatted natural language.
-   * This will be displayed to the approver. It must include all details that might be relevant to
-   * consider before approving.
+   * A complete description of the action taken, in Markdown-formatted natural language. This is
+   * the activity log's record of what happened, so it must include every detail someone auditing
+   * the workspace afterwards would need.
    */
   description: string;
 
   /**
-   * Does the Gatekeeper implement `revertAction()` for this action?
-   *
-   * It is recommended that all actions implement automatic revert. But, if an action is not able
-   * to do so, it should at least use this flag to let the UI know not to offer the option to the
-   * user.
-   *
-   * Note that this being true doesn't necessarily mean that reverting will always work. E.g. by
-   * the time the user tries to revert, too many other changes may have been made, making it hard
-   * to revert cleanly.
+   * The action's kind: a stable tag policy decides on, plus a display label. The tag must name a
+   * capability the gatekeeper declares in `getActionCatalog()`; an administrator may disable a kind
+   * deployment-wide, in which case `authorizeAction()` throws instead of permitting it.
    */
-  implementsRevert: boolean;
-
-  /**
-   * Hint that an agent should not keep working until this action has been approved or denied.
-   *
-   * Set this for actions whose effects the gatekeeper does NOT simulate. Because a not-yet-approved
-   * action isn't reflected by later reads, an agent that keeps going would observe a world where
-   * its action "didn't happen" — and tends to get confused: re-trying, second-guessing, or undoing
-   * its own work. When this is set, the harness driving the agent should suspend the current turn
-   * once the action is submitted and resume it after the user decides (or leave it ended on deny),
-   * rather than letting the agent proceed against state the action hasn't been applied to.
-   *
-   * This is an advisory hint, not an enforcement mechanism: the action is still submitted and the
-   * approval/security semantics are unchanged. Gatekeepers that fully simulate their actions (so
-   * reads already reflect pending changes) should leave this unset, so the agent keeps working
-   * seamlessly.
-   */
-  awaitDecision?: boolean;
-
-  /**
-   * Author's verdict that this specific action is safe to auto-apply without human review, IF the
-   * user has opted in to auto-approving this action's kind (see `actionKind`). Only the gatekeeper
-   * author knows whether a given edit is benign vs. destructive, so this gate is set per-action.
-   * Absent -> never auto-approvable, even if a matching rule exists.
-   *
-   * TODO: A single opaque boolean isn't the ideal long-term shape. Eventually the gatekeeper should
-   * describe the *nature* of the action -- e.g. destructive vs. additive, reversible vs. not,
-   * posting arbitrary content (possible data leak) vs. flipping a switch -- and let a security
-   * policy decide whether auto-approval is allowed, rather than the gatekeeper author hard-coding
-   * that judgement here.
-   */
-  autoApprovable?: boolean;
-
-  // ----------------------------------------------------------------------------
-  // Policy hints
-  //
-  // TODO: Define policy hints that might allow a policy engine to make better decisions. A policy
-  // engine might want to know things like:
-  // - Which human users are allowed to perform this action directly? Can be used to detect if
-  //   the gadget might be influenced by humans to perform actions that said humans couldn't
-  //   perform directly.
-  // - Which human users might observe the effects of this action? Can be used to track possibility
-  //   of leaking secrets.
-  // - Is this action reversible? Does reversing require manual intervention or is it fully
-  //   automatic?
-  // - Does this action strictly create content to be viewed (e.g. creating a Jira ticket), or does
-  //   it actively manipulate the world (e.g. flipping a light switch, or deploying a release)?
-  // - Does this action include writing free-form content (e.g. text), or only boolean/numeric
-  //   content (e.g. flipping a light switch)? Affects the risk of data leaks.
-  // - Does this action modify existing content or only create new content? The former is somewhat
-  //   riskier since it could damage existing information whereas posting new content is at worst
-  //   an annoyance.
-
-  /**
-   * The action's kind (stable tag + display label), or absent for actions that can't be matched by
-   * any tag-keyed rule -- those always require manual approval. `actionKind.tag` is what auto-
-   * approval rules and the future policy engine key on; `actionKind.label` is shown in the UI.
-   */
-  actionKind?: ActionKind;
+  actionKind: ActionKind;
 }
 
 /**
@@ -1412,7 +1324,7 @@ export type HookTargetMetadata = {
 }
 
 /**
- * Object passed to `ApprovalQueue.bindHook()`, providing the overseer with callbacks to enable
+ * Object passed to `ActionRecorder.bindHook()`, providing the overseer with callbacks to enable
  * or disable a hook.
  */
 export interface HookController<Hook extends RpcTarget> extends WorkerEntrypoint {
@@ -1448,10 +1360,10 @@ export interface HookInitiator<Hook extends RpcTarget> extends WorkerEntrypoint 
   /**
    * Indicates that the hook is about to be invoked.
    *
-   * This returns an ApprovalQueue which the gatekeeper may use to register observations and
+   * This returns an ActionRecorder which the gatekeeper may use to register observations and
    * actions resulting from this hook invocation. Most (but not necessarily all) hooks involve an
    * observation. Some hooks may even pass callbacks or interpret the return value in a way that
    * causes side effects, which should be registered as actions.
    */
-  startHook(): Promise<{callback: RpcStub<Hook>, approvalQueue: RpcStub<ApprovalQueue>}>;
+  startHook(): Promise<{callback: RpcStub<Hook>, recorder: RpcStub<ActionRecorder>}>;
 }
