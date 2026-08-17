@@ -13,13 +13,13 @@ vi.mock('./SandboxedGatekeeperApp', () => ({
     frame: { iframeHtml: string }
     gatekeeperVendorId: string
   }) => (
-    <iframe data-app={gatekeeperVendorId} srcDoc={frame.iframeHtml} title="Gatekeeper app" />
+    <iframe data-app={gatekeeperVendorId} srcDoc={frame.iframeHtml} title="Gatekeeper app" sandbox="" />
   ),
 }))
 
 const { getGatekeeperApp, authenticatedApi } = vi.hoisted(() => {
-  const getGatekeeperApp = vi.fn<(id: string) => Promise<GatekeeperUiFrame | null>>()
-  return { getGatekeeperApp, authenticatedApi: { getGatekeeperApp } }
+  const fetchApp = vi.fn<(id: string) => Promise<GatekeeperUiFrame | null>>()
+  return { getGatekeeperApp: fetchApp, authenticatedApi: { getGatekeeperApp: fetchApp } }
 })
 
 vi.mock('./AuthContext', () => ({

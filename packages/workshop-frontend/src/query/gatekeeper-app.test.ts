@@ -61,7 +61,7 @@ describe('resolveGatekeeperAppHtml', () => {
 describe('ensureGatekeeperAppHtml', () => {
   it('returns cached html without fetching', async () => {
     await persistGatekeeperAppHtml('scheduler', '<!doctype html><title>Scheduler</title>')
-    const fetchFrame = vi.fn(async () => frame('<!doctype html><title>Fresh</title>'))
+    const fetchFrame = vi.fn<() => Promise<GatekeeperUiFrame>>(async () => frame('<!doctype html><title>Fresh</title>'))
     await expect(ensureGatekeeperAppHtml('scheduler', fetchFrame)).resolves.toBe(
       '<!doctype html><title>Scheduler</title>',
     )
@@ -70,7 +70,7 @@ describe('ensureGatekeeperAppHtml', () => {
 
   it('fetches, persists, and stashes when the cache is empty', async () => {
     const next = frame('<!doctype html><title>Context</title>')
-    const fetchFrame = vi.fn(async () => next)
+    const fetchFrame = vi.fn<() => Promise<GatekeeperUiFrame>>(async () => next)
     await expect(ensureGatekeeperAppHtml('context', fetchFrame)).resolves.toBe(
       '<!doctype html><title>Context</title>',
     )
