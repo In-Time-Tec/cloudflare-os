@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import GatekeeperAppPage from '../../GatekeeperAppPage'
 import { useDocumentTitle } from '../../useDocumentTitle'
 import { useGatekeeperApps } from '../../useGatekeeperApps'
+import { ensureGatekeeperAppHtml } from '../../query/gatekeeper-app'
 
 /**
  * Generic host for any gatekeeper-served management app (VendorDescription.providesUi). The set of
@@ -12,6 +13,10 @@ import { useGatekeeperApps } from '../../useGatekeeperApps'
  * nesting inside the /gatekeepers connectors page's component.
  */
 export const Route = createFileRoute('/_authenticated/gatekeepers_/$appId')({
+  loader: ({ context, params }) =>
+    ensureGatekeeperAppHtml(params.appId, () =>
+      context.session.requireAuthenticatedApi().getGatekeeperApp(params.appId),
+    ),
   component: GatekeeperApp,
 })
 

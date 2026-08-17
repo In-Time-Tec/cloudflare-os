@@ -310,9 +310,12 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
   const capabilityRef = useRef<any>(null)
   capabilityRef.current = frame.ui
   const pendingPortRef = useRef<MessagePort | null>(null)
-  const srcDocRef = useRef<string | undefined>(undefined)
-  if (srcDocRef.current === undefined) {
-    srcDocRef.current = withPersistedSnapshot(frame.iframeHtml, readGatekeeperAppSnapshot(gatekeeperVendorId))
+  const srcDocRef = useRef<{ appId: string; html: string } | undefined>(undefined)
+  if (srcDocRef.current?.appId !== gatekeeperVendorId) {
+    srcDocRef.current = {
+      appId: gatekeeperVendorId,
+      html: withPersistedSnapshot(frame.iframeHtml, readGatekeeperAppSnapshot(gatekeeperVendorId)),
+    }
   }
 
   useEffect(() => {
@@ -390,7 +393,7 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
   return (
     <iframe
       ref={iframeRef}
-      srcDoc={srcDocRef.current}
+      srcDoc={srcDocRef.current.html}
       // allow-scripts: run the app's JS. allow-modals: its beforeunload unsaved-changes guard. Not
       // allow-same-origin (the frame stays an opaque origin), and the app's CSP keeps connect-src 'none'.
       sandbox="allow-scripts allow-modals"

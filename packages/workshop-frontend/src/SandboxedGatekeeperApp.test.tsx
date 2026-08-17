@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /* eslint-disable react/react-in-jsx-scope */
 
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
   createMemoryHistory,
@@ -153,5 +153,58 @@ describe("SandboxedGatekeeperApp navigation", () => {
       await vi.waitFor(() => expect(router.state.location.pathname).toBe("/"));
     });
     expect(router.state.location.search).toEqual({ prompt: "Create a daily brief." });
+  });
+
+  it("rebuilds srcDoc when the gatekeeper app id changes", async () => {
+    const { persistGatekeeperAppSnapshot } = await import("./query/gatekeeper-app");
+    await persistGatekeeperAppSnapshot("scheduler", { schedules: [{ title: "Morning brief" }] });
+    await persistGatekeeperAppSnapshot("context", { enabled: [{ title: "Handbook" }] });
+
+    const scheduler = {
+      iframeHtml: "<!doctype html><html><head></head><body>Scheduler</body></html>",
+      ui: new RpcStub(new EmptyUi()),
+    } as unknown as GatekeeperUiFrame;
+    const context = {
+      iframeHtml: "<!doctype html><html><head></head><body>Context</body></html>",
+      ui: new RpcStub(new EmptyUi()),
+    } as unknown as GatekeeperUiFrame;
+
+    function Harness() {
+      const [id, setId] = useState<"scheduler" | "context">("scheduler");
+      return (
+        <>
+          <button type="button" onClick={() => setId("context")}>
+            next
+          </button>
+          <SandboxedGatekeeperApp
+            frame={id === "scheduler" ? scheduler : context}
+            gatekeeperVendorId={id}
+          />
+        </>
+      );
+    }
+
+    const rootRoute = createRootRoute({
+      component: Harness,
+    });
+    const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/" });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([indexRoute]),
+    });
+
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root!.render(<RouterProvider router={router} />));
+    expect(container.querySelector("iframe")?.getAttribute("srcdoc")).toContain("Morning brief");
+
+    await act(async () => {
+      container!.querySelector("button")!.click();
+    });
+    const srcDoc = container.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
+    expect(srcDoc).toContain("Handbook");
+    expect(srcDoc).toContain("Context");
+    expect(srcDoc).not.toContain("Morning brief");
   });
 });
