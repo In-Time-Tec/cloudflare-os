@@ -8,6 +8,7 @@ import Sidebar from './Sidebar'
 import { ConversationsProvider } from '../../conversations/ConversationsContext'
 import CommandPalette from './CommandPalette'
 import { OPEN_COMMAND_PALETTE_EVENT } from './commandPaletteBus'
+import { useSidebarReady } from './useSidebarReady'
 
 const STORAGE_KEY_COLLAPSED = 'gadgets:sidebar-collapsed'
 
@@ -29,10 +30,19 @@ function readCollapsed(): boolean {
  * is simpler and matches how the rest of the app handles small screens.
  */
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <ConversationsProvider>
+      <AppShellInner>{children}</AppShellInner>
+    </ConversationsProvider>
+  )
+}
+
+function AppShellInner({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState<boolean>(readCollapsed)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const connectionLost = useConnectionLost()
+  const sidebarReady = useSidebarReady()
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -78,8 +88,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  // The rail renders complete or not at all — see useSidebarReady. Until then the app frame is on
+  // screen (so the window isn't blank and the chrome doesn't move afterwards) with an empty rail.
+  if (!sidebarReady) {
+    return (
+      <div className="h-screen min-h-screen w-screen overflow-hidden bg-app-frame p-0 md:p-3">
+        <div className="flex h-full w-full overflow-hidden bg-kumo-base md:rounded-2xl md:border md:border-kumo-line md:shadow-app-shell">
+          <div className="hidden w-[260px] shrink-0 border-r border-kumo-line bg-kumo-elevated md:block" />
+          <div className="relative flex min-w-0 flex-1 flex-col" />
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <ConversationsProvider>
     <div className="h-screen min-h-screen w-screen overflow-hidden bg-app-frame p-0 md:p-3">
       <div className="flex h-full w-full overflow-hidden bg-kumo-base md:rounded-2xl md:border md:border-kumo-line md:shadow-app-shell">
         {/* Desktop sidebar — hidden on mobile in favor of the drawer. */}
@@ -130,6 +152,5 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       </div>
     </div>
-    </ConversationsProvider>
   )
 }

@@ -46,6 +46,10 @@ type ConversationsState = {
   onEvent(listener: (event: LiveEvent) => void): () => void
   /** Tell the live socket which conversation is on screen (push suppression). */
   setViewing(key: string | null): void
+  /** Whether each list has data (a cache hit counts). The sidebar gate waits on these. */
+  conversationsReady: boolean
+  channelsReady: boolean
+  emailsReady: boolean
 }
 
 export type LiveEvent = {
@@ -100,9 +104,10 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   }, [authenticatedApi])
 
   // Shared list queries (the sidebar and pages read the same cache entries).
-  const { data: conversations = [], isLoading: loading } = useConversationsQuery()
-  const { data: channels = [] } = useChannelsQuery()
-  const { data: emails = [], isLoading: emailsLoading } = useEmailsQuery()
+  const { data: conversations = [], isLoading: loading, isSuccess: conversationsReady } =
+      useConversationsQuery()
+  const { data: channels = [], isSuccess: channelsReady } = useChannelsQuery()
+  const { data: emails = [], isLoading: emailsLoading, isSuccess: emailsReady } = useEmailsQuery()
 
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['conversations'] })
@@ -218,8 +223,10 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({
     available, conversations, channels, loading, refresh, api, avatarFor, onEvent, setViewing,
     emails, emailsLoading, refreshEmails,
+    conversationsReady, channelsReady, emailsReady,
   }), [available, conversations, channels, loading, refresh, api, avatarFor, onEvent, setViewing,
-       emails, emailsLoading, refreshEmails])
+       emails, emailsLoading, refreshEmails,
+       conversationsReady, channelsReady, emailsReady])
 
   return <Context.Provider value={value}>{children}</Context.Provider>
 }

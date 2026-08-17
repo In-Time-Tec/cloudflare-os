@@ -21,7 +21,6 @@ import { gadgetsKey, useGadgets, useWhoami } from '../../query/hooks'
 import ShareModal from '../../ShareModal'
 import DeleteConfirmationDialog from '../DeleteConfirmationDialog'
 import SidebarGadgetRow from './SidebarGadgetRow'
-import { Skeleton, SkeletonRows } from '../Skeleton'
 
 // Cap on items shown in the Recent list before the user clicks through to /workspaces.
 const RECENT_INITIAL_LIMIT = 6
@@ -237,18 +236,58 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
   )
 }
 
-export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: boolean }) {
+/**
+ * The Favorites section. Split from Recent so it can sit directly under the primary nav, above the
+ * communications sections — both read the same memoized arrays from the provider, so the split
+ * costs no extra state and no extra fetch.
+ *
+ * Collapsed, the rail shows one merged strip of workspaces owned by SidebarRecentWorkspaces; this
+ * renders nothing so that strip stays exactly as it was.
+ */
+export function SidebarFavorites({ collapsed = false }: { collapsed?: boolean }) {
+  const { favorites, onTogglePin, onRename, onShare, onDelete } = useWorkspacesContext()
+  const [favOpen, setFavOpen] = useState(true)
+
+  // With nothing pinned the section is just a header reading "Favorites 0" directly beneath the
+  // nav, which is noise rather than information.
+  if (collapsed || favorites.length === 0) return null
+
+  return (
+    <div className="flex flex-col">
+      <SidebarSection
+        label="Favorites"
+        count={favorites.length}
+        open={favOpen}
+        onToggle={() => setFavOpen((o) => !o)}
+      >
+        <div className="flex flex-col">
+          {favorites.map((g) => (
+            <SidebarGadgetRow
+              key={g.id}
+              gadget={g}
+              onTogglePin={onTogglePin}
+              onRename={onRename}
+              onShare={onShare}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+      </SidebarSection>
+    </div>
+  )
+}
+
+/** Recent workspaces, plus the collapsed rail's merged strip of favorites and recents. */
+export function SidebarRecentWorkspaces({ collapsed = false }: { collapsed?: boolean }) {
   const {
     favorites,
     recent,
-    gadgetsLoading,
     onTogglePin,
     onRename,
     onShare,
     onDelete,
   } = useWorkspacesContext()
 
-  const [favOpen, setFavOpen] = useState(true)
   const [recentOpen, setRecentOpen] = useState(true)
 
   if (collapsed) {
@@ -272,55 +311,17 @@ export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: bool
 
   const recentShown = recent.slice(0, RECENT_INITIAL_LIMIT)
 
+  // No loading branch: the shell holds the rail back until the workspace list is in hand
+  // (see useSidebarReady), so this renders the real rows or nothing at all.
   return (
     <div className="flex flex-col pb-3">
-      <SidebarSection
-        label="Favorites"
-        count={favorites.length}
-        open={favOpen}
-        onToggle={() => setFavOpen((o) => !o)}
-      >
-        {favorites.length > 0 && (
-          <div className="flex flex-col">
-            {favorites.map((g) => (
-              <SidebarGadgetRow
-                key={g.id}
-                gadget={g}
-                onTogglePin={onTogglePin}
-                onRename={onRename}
-                onShare={onShare}
-                onDelete={onDelete}
-              />
-            ))}
-          </div>
-        )}
-      </SidebarSection>
-
       <SidebarSection
         label="Recent workspaces"
         count={recent.length}
         open={recentOpen}
         onToggle={() => setRecentOpen((o) => !o)}
       >
-        {gadgetsLoading ? (
-          // No gap and no inset: SidebarGadgetRow rows stack flush, and the "Show all" link below
-          // is part of the loaded height too.
-          <>
-            <div className="flex flex-col">
-              <SkeletonRows count={5}>
-                {(i) => (
-                  <div key={i} className="flex h-7 items-center gap-1.5 pl-1.5 pr-1">
-                    <Skeleton className="h-6 w-6 rounded-md" />
-                    <Skeleton className="h-[1lh] flex-1 text-[12.5px] leading-[18px]" />
-                  </div>
-                )}
-              </SkeletonRows>
-            </div>
-            <div className="mt-0.5 flex h-7 items-center px-2.5">
-              <Skeleton className="h-[1lh] w-14 text-[12px]" />
-            </div>
-          </>
-        ) : recent.length > 0 ? (
+        {recent.length > 0 ? (
           <>
             <div className="flex flex-col">
               {recentShown.map((g) => (
@@ -347,7 +348,7 @@ export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: bool
   )
 }
 
-// A collapsible group header used by SidebarWorkspacesLists.
+// A collapsible group header used by the sidebar's workspace sections.
 function SidebarSection({
   label,
   count,

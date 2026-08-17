@@ -18,7 +18,8 @@ import { openCommandPalette } from './commandPaletteBus'
 import SidebarItem from './SidebarItem'
 import {
   SidebarWorkspacesProvider,
-  SidebarWorkspacesLists,
+  SidebarFavorites,
+  SidebarRecentWorkspaces,
 } from './SidebarWorkspaces'
 import SidebarConversations from '../../conversations/SidebarConversations'
 import SidebarUtilityStrip from './SidebarUtilityStrip'
@@ -216,9 +217,12 @@ export default function Sidebar({
           </nav>
         </div>
 
+        {/* Favorites leads the sections: it is the user's own shortlist, so it sits directly
+            under the nav rather than below the communications sections. */}
         <div className="mt-1 pb-2">
+          <SidebarFavorites collapsed={collapsed} />
           <SidebarConversations collapsed={collapsed} />
-          <SidebarWorkspacesLists collapsed={collapsed} />
+          <SidebarRecentWorkspaces collapsed={collapsed} />
         </div>
         </SidebarScrollRegion>
       </SidebarWorkspacesProvider>
