@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CalendarEntry } from '@gadgets/workshop-shared/gatekeeper'
+import { Skeleton } from '../components/Skeleton'
 
 // A Kumo-styled week calendar: a time gutter plus day columns over an hour grid, events positioned
 // by time. The day header, the all-day band and the hour grid share one grid template inside a
@@ -34,10 +35,14 @@ function hourLabel(hour: number): string {
   return `${hour % 12 === 0 ? 12 : hour % 12} ${hour < 12 ? 'AM' : 'PM'}`
 }
 
-export default function WeekCalendar({ anchor, entries, selectedId, onSelect, onAnchorChange }: {
+export default function WeekCalendar({
+  anchor, entries, selectedId, loading = false, onSelect, onAnchorChange,
+}: {
   anchor: Date
   entries: CalendarEntry[]
   selectedId?: string
+  /** The week hasn't arrived yet: draw the grid with placeholder chips instead of events. */
+  loading?: boolean
   onSelect(id: string): void
   /** Focus a day — the mobile strip's day picker; the week itself is owned by the page. */
   onAnchorChange(day: Date): void
@@ -101,6 +106,17 @@ export default function WeekCalendar({ anchor, entries, selectedId, onSelect, on
     : null
   const nowPercent = offsetPercent(now)
   const showNow = nowPercent >= 0 && nowPercent <= 100
+
+  // Placeholder meetings for the loading grid: real clock times, so each chip is positioned and
+  // sized by exactly the same percentage math as a real event and occupies a plausible slot.
+  const placeholders = useMemo(() => loading
+    ? [
+        { day: 1, from: 9, to: 9.5 }, { day: 1, from: 13, to: 14 },
+        { day: 2, from: 11, to: 12 }, { day: 3, from: 10, to: 10.5 },
+        { day: 3, from: 15, to: 16 }, { day: 4, from: 9.5, to: 10.5 },
+        { day: 5, from: 14, to: 15 },
+      ]
+    : [], [loading])
 
   // Mobile renders only the anchored day; from md up every column is shown. Class names are
   // written out in full — Tailwind scans source statically, so an interpolated variant never
@@ -206,7 +222,7 @@ export default function WeekCalendar({ anchor, entries, selectedId, onSelect, on
                 </span>
               ))}
             </div>
-            {days.map(day => {
+            {days.map((day, dayIndex) => {
               const isToday = sameDay(day, now)
               return (
                 <div key={day.toISOString()}
@@ -223,6 +239,19 @@ export default function WeekCalendar({ anchor, entries, selectedId, onSelect, on
                       <span className="h-px flex-1 bg-kumo-danger" />
                     </div>
                   )}
+                  {placeholders
+                    .filter(slot => slot.day === dayIndex)
+                    .map(slot => {
+                      const top = ((slot.from - startHour) / span) * 100
+                      const height = ((slot.to - slot.from) / span) * 100
+                      return (
+                        <Skeleton
+                          key={`${slot.from}-${slot.to}`}
+                          className="absolute inset-x-1 rounded-md"
+                          style={{ top: `${top}%`, height: `${height}%`, minHeight: 20 }}
+                        />
+                      )
+                    })}
                   {(timed.get(day.toDateString()) ?? []).map(entry => {
                     const from = new Date(entry.start!)
                     const to = entry.end ? new Date(entry.end) : new Date(from.valueOf() + 1_800_000)

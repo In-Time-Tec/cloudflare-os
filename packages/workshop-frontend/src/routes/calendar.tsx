@@ -88,17 +88,13 @@ function CalendarPage() {
 
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col border-kumo-line md:border-r">
-          {agendaLoading && agenda.length === 0 ? (
-            <div className="flex flex-1 flex-col gap-px p-4">
-              {[0, 1, 2, 3, 4].map(i => (
-                <div key={i} className="h-10 shrink-0 animate-pulse rounded-md bg-kumo-tint" />
-              ))}
-            </div>
-          ) : (
-            <WeekCalendar anchor={anchor} entries={agenda} selectedId={selectedId}
-                onSelect={id => navigate({ search: { e: id } })}
-                onAnchorChange={day => setAnchor(day)} />
-          )}
+          {/* The grid itself is the placeholder: it draws the same gutter, day header and hour
+              rules with no events in them, so nothing about the page moves when the week arrives —
+              only the chips appear. */}
+          <WeekCalendar anchor={anchor} entries={agenda} selectedId={selectedId}
+              loading={agendaLoading && agenda.length === 0}
+              onSelect={id => navigate({ search: { e: id } })}
+              onAnchorChange={day => setAnchor(day)} />
         </div>
 
         {/* Event details — an overlay on phones, a fixed column from md up. */}

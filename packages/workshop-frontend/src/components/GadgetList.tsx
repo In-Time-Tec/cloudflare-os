@@ -12,6 +12,7 @@ import { BindingBadge, getGradient as getBlueprintGradient, uniqueBindingBadges 
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './menuStyles'
 import { BlueprintPreviewImage } from './BlueprintPreviewImage'
 import DeleteConfirmationDialog from './DeleteConfirmationDialog'
+import { Skeleton, SkeletonListRow, SkeletonRows } from './Skeleton'
 
 // Neutral monogram for a workspace — matches the sidebar treatment (no per-item color noise).
 function initials(title: string | undefined): string {
@@ -320,7 +321,13 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
         </div>
       )}
 
-      {/* Search — hidden when the user has no gadgets */}
+      {/* Search — hidden when the user has no gadgets. While loading, the row is reserved (below)
+          rather than hidden, so resolving the list doesn't shove it down by the row's height. */}
+      {loading && (
+        <div className="mb-4 px-3">
+          <Skeleton className="h-9 w-full rounded-lg" />
+        </div>
+      )}
       {!loading && gadgets.length > 0 && (
         <div className="mb-4 px-3">
           <div className="relative">
@@ -344,11 +351,9 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
           horizontal padding, so the scrollbar sits just past the aligned content (not far out). */}
       <div className="chat-panel flex flex-1 min-h-0 flex-col gap-0.5 overflow-y-auto pt-1">
         {loading ? (
-          <>
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-[56px] rounded-xl bg-kumo-elevated animate-pulse" />
-            ))}
-          </>
+          <SkeletonRows count={6}>
+            {(i) => <SkeletonListRow key={i} subtitle={false} trailing />}
+          </SkeletonRows>
         ) : loadError ? (
           <div className="text-center py-12 text-sm">
             <p className="text-kumo-danger">Something went wrong loading your workspaces.</p>
@@ -526,12 +531,25 @@ function FeaturedBlueprintsGallery() {
   }, [authenticatedApi])
 
   if (loading) {
+    // Matches HomeFeaturedBlueprintCard: min-h-[190px], rounded-2xl and a border, under the same
+    // mb-5 heading. The old 108px block left every card 82px short of its loaded height.
     return (
-      <div className="px-2 py-8">
+      <div className="py-4 pr-4 sm:pr-6">
+        <div className="mb-5">
+          <Skeleton className="h-[1lh] w-40 text-[13px] leading-[18px]" />
+        </div>
         <div className="grid grid-cols-2 gap-3">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-[108px] rounded-xl bg-kumo-base animate-pulse" />
-          ))}
+          <SkeletonRows count={4}>
+            {(i) => (
+              <div key={i} aria-hidden="true"
+                  className="flex min-h-[190px] flex-col rounded-2xl border border-kumo-line bg-kumo-base p-2.5">
+                <Skeleton className="mb-3 aspect-[16/9] w-full rounded-lg" />
+                <Skeleton className="h-8 w-8 rounded-lg" />
+                <Skeleton className="mt-1.5 h-[1lh] w-2/3 text-[13px] leading-[18px]" />
+                <Skeleton className="mt-0.5 h-8 w-full text-[12px] leading-4" />
+              </div>
+            )}
+          </SkeletonRows>
         </div>
       </div>
     )

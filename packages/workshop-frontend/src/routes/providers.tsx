@@ -4,6 +4,7 @@ import { DropdownMenu, useKumoToastManager } from '@cloudflare/kumo'
 import { useAuthenticatedApi } from '../AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAiConfig, useModels, useQuickModel, quickModelKey } from '../query/hooks'
+import { Skeleton, SkeletonListRow, SkeletonRows } from '../components/Skeleton'
 import {
   AiChatAuthorInfo,
   AiGatewayInfo,
@@ -229,7 +230,13 @@ function ProvidersPage() {
       }
     >
 
-      {/* Search — hidden when the user has no models */}
+      {/* Search — hidden when the user has no models; reserved while loading so the list below
+          keeps its position when the models arrive. */}
+      {loading && (
+        <div className="mb-3 px-3">
+          <Skeleton className="h-9 w-full rounded-lg" />
+        </div>
+      )}
       {!loading && !loadError && models.length > 0 && (
         <div className="mb-3 px-3">
           <div className="relative">
@@ -278,11 +285,7 @@ function ProvidersPage() {
 
         {/* Model list */}
         {loading ? (
-          <div className="flex flex-col gap-0.5 px-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-[56px] animate-pulse rounded-xl bg-kumo-elevated" />
-            ))}
-          </div>
+          <SkeletonRows count={6}>{(i) => <SkeletonListRow key={i} />}</SkeletonRows>
         ) : loadError ? (
           <div className="py-12 text-center text-sm">
             <p className="text-kumo-danger">Something went wrong loading your providers.</p>

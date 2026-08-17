@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { Skeleton, SkeletonListRow, SkeletonRows } from './components/Skeleton'
 import { useKumoToastManager } from "@cloudflare/kumo";
 import {
   Blueprint as BlueprintIcon,
@@ -235,29 +236,32 @@ function LoadingSkeleton({ view }: { view: "grid" | "list" }) {
   if (view === "list") {
     return (
       <div className="flex flex-col gap-0.5">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="h-[58px] animate-pulse rounded-lg bg-kumo-elevated" />
-        ))}
+        <SkeletonRows count={6}>{(i) => <SkeletonListRow key={i} trailing />}</SkeletonRows>
       </div>
     );
   }
   return (
     <div className="grid grid-cols-1 gap-4 px-3 sm:grid-cols-2 lg:grid-cols-3">
-      {[1, 2, 3, 4, 5, 6].map((i) => (
-        <div
-          key={i}
-          className="overflow-hidden rounded-xl border border-kumo-line bg-kumo-base"
-        >
-          <div className="aspect-[16/9] w-full animate-pulse bg-kumo-elevated" />
-          <div className="flex items-start gap-2.5 px-3 py-2.5">
-            <div className="h-8 w-8 shrink-0 animate-pulse rounded-lg bg-kumo-elevated" />
-            <div className="flex-1 space-y-2 py-1">
-              <div className="h-2.5 w-2/3 animate-pulse rounded bg-kumo-elevated" />
-              <div className="h-2 w-full animate-pulse rounded bg-kumo-elevated" />
+      <SkeletonRows count={6}>
+        {(i) => (
+          <div key={i} aria-hidden="true"
+              className="flex flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base">
+            <Skeleton className="aspect-[16/9] w-full rounded-none border-b border-kumo-line" />
+            <div className="flex flex-1 items-start gap-2.5 px-3 py-2.5">
+              <Skeleton className="h-8 w-8 rounded-lg" />
+              <div className="min-w-0 flex-1">
+                <Skeleton className="h-[1lh] w-2/3 text-[13px] leading-[18px]" />
+                <Skeleton className="mt-0.5 h-[1lh] w-full text-[12px] leading-4" />
+                {/* The badge row the loaded card carries; without it every card grows on load. */}
+                <div className="mt-2 flex gap-1">
+                  <Skeleton className="h-[18px] w-14 rounded-full" />
+                  <Skeleton className="h-[18px] w-10 rounded-full" />
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        )}
+      </SkeletonRows>
     </div>
   );
 }

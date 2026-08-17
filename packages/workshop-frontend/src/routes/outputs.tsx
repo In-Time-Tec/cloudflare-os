@@ -20,6 +20,7 @@ import { OutputSummary } from '@gadgets/workshop-shared/api'
 import { useAuthenticatedApi } from '../AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOutputs, outputsKey } from '../query/hooks'
+import { SkeletonListRow, SkeletonRows, SkeletonThumbnailCard } from '../components/Skeleton'
 import { useDocumentTitle } from '../useDocumentTitle'
 import PageChrome from '../components/AppShell/PageChrome'
 import ViewToggle from '../components/ViewToggle'
@@ -594,11 +595,17 @@ function OutputsPage() {
 
       <div className="chat-panel min-h-0 flex-1 overflow-y-auto pb-8 pt-1">
         {loading ? (
-          <div className="grid grid-cols-2 gap-4 px-3 sm:grid-cols-3 lg:grid-cols-4">
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="aspect-[4/3] animate-pulse rounded-xl bg-kumo-elevated" />
-            ))}
-          </div>
+          // Placeholders follow the restored view, and a card placeholder carries the same meta
+          // strip the real card has below its thumbnail — otherwise every card grew 56px on load.
+          view === 'grid' ? (
+            <div className="grid grid-cols-2 gap-4 px-3 sm:grid-cols-3 lg:grid-cols-4">
+              <SkeletonRows count={8}>{(i) => <SkeletonThumbnailCard key={i} />}</SkeletonRows>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-0.5">
+              <SkeletonRows count={8}>{(i) => <SkeletonListRow key={i} trailing />}</SkeletonRows>
+            </div>
+          )
         ) : loadError ? (
           <div className="py-12 text-center text-sm">
             <p className="text-kumo-danger">Something went wrong loading your outputs.</p>

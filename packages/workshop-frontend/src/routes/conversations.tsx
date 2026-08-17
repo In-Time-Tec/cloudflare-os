@@ -5,6 +5,7 @@ import CommsLayout from '../conversations/CommsLayout'
 import ThreadView from '../conversations/ThreadView'
 import { refKey, useConversations } from '../conversations/ConversationsContext'
 import { Avatar, ListRow, formatTime } from '../conversations/primitives'
+import { SkeletonRows } from '../components/Skeleton'
 import { useDocumentTitle } from '../useDocumentTitle'
 
 // The Conversations page: 1:1 and group Teams chats only — the list pane is scoped to this section.
@@ -62,11 +63,7 @@ function Page() {
             )
           })}
           {loading && items.length === 0 && (
-            <div className="flex flex-col gap-1 p-3">
-              {[0, 1, 2, 3].map(i => (
-                <div key={i} className="h-9 animate-pulse rounded-md bg-kumo-elevated" />
-              ))}
-            </div>
+            <SkeletonRows count={8}>{i => <ListRow key={i} />}</SkeletonRows>
           )}
         </div>
       }

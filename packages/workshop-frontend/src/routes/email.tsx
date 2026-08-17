@@ -5,6 +5,7 @@ import CommsLayout from '../conversations/CommsLayout'
 import { useConversations } from '../conversations/ConversationsContext'
 import { useEmailDetailQuery } from '../query/conversations'
 import { Avatar, ListRow, PaneHeader, formatTime } from '../conversations/primitives'
+import { Skeleton, SkeletonRows } from '../components/Skeleton'
 import { useDocumentTitle } from '../useDocumentTitle'
 
 // The Email page: the connected mailbox's inbox in the section-scoped list pane, with a reading
@@ -56,11 +57,7 @@ function EmailPage() {
             />
           ))}
           {emailsLoading && emails.length === 0 && (
-            <div className="flex flex-col gap-1 p-3">
-              {[0, 1, 2, 3].map(i => (
-                <div key={i} className="h-9 animate-pulse rounded-md bg-kumo-elevated" />
-              ))}
-            </div>
+            <SkeletonRows count={8}>{i => <ListRow key={i} />}</SkeletonRows>
           )}
         </div>
       }
@@ -94,11 +91,18 @@ function EmailPage() {
             </div>
           </>
         ) : detailLoading || (selectedId && selectedSummary) ? (
-          <div className="flex flex-col gap-2 p-6">
-            {[0, 1, 2].map(i => (
-              <div key={i} className="h-10 w-2/3 animate-pulse rounded-md bg-kumo-elevated" />
-            ))}
-          </div>
+          // The same header band and body padding as the loaded mail, so the body doesn't drop by
+          // the header's height (and grow a hairline) the moment the record arrives.
+          <>
+            <PaneHeader />
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+              <div className="flex flex-col gap-2">
+                <Skeleton className="h-[1lh] w-full text-[13.5px]" />
+                <Skeleton className="h-[1lh] w-11/12 text-[13.5px]" />
+                <Skeleton className="h-[1lh] w-4/5 text-[13.5px]" />
+              </div>
+            </div>
+          </>
         ) : (
           <Empty text="Select an email" />
         )

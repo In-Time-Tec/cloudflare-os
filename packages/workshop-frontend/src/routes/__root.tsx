@@ -141,20 +141,16 @@ function AuthenticatedShell({
     return () => { cancelled = true }
   }, [authenticatedApi])
 
-  // Still checking onboarding status
-  if (onboardingNeeded === null) {
-    return (
-      <div className="min-h-screen flex items-center justify-center flex-col gap-4 bg-kumo-base">
-        <div className="w-8 h-8 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
-  }
-
   // Show onboarding wizard
   if (onboardingNeeded) {
     return <OnboardingWizard onComplete={() => setOnboardingNeeded(false)} />
   }
 
+  // While the onboarding check is in flight (onboardingNeeded === null) the shell renders anyway.
+  // The rail and the page chrome are static, the check has already been preceded by a successful
+  // authentication, and the only outcome that changes what's on screen is the rare "needs
+  // onboarding" one — so blocking on it costs every returning user a full-page spinner to prevent
+  // a wizard flash almost nobody sees.
   return (
     <>
       <AccountSelectionModal />

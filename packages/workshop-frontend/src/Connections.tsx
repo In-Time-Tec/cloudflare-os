@@ -10,6 +10,7 @@ import {
 import { RpcStub } from 'capnweb'
 import { Overseer, GadgetClient, GadgetBindingInfo, BoundHookInfo, AuthenticatedApi, WorkpieceId } from '@gadgets/workshop-shared/api'
 import GatekeeperModal from './GatekeeperModal'
+import { Skeleton, SkeletonRows } from './components/Skeleton'
 import { GatekeeperIcon } from './components/GatekeeperIcon'
 import { HookToggle } from './components/HookToggle'
 import { useVendorBranding } from './useVendorBranding'
@@ -224,8 +225,20 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
           </div>
 
           {loading ? (
-            <div className="rounded-xl border border-kumo-line bg-kumo-base px-4 py-6 text-center text-[13px] leading-[18px] font-normal tracking-[-0.25px] text-kumo-subtle">
-              Loading connections...
+            // The bordered container the bindings render into, with placeholder rows inside it.
+            <div className="overflow-hidden rounded-xl border border-kumo-line bg-kumo-base">
+              <SkeletonRows count={3}>
+                {(i) => (
+                  <div key={i} aria-hidden="true"
+                      className={`flex items-center gap-3 px-3 py-3 ${i > 0 ? 'border-t border-kumo-line' : ''}`}>
+                    <Skeleton className="h-8 w-8 rounded-lg" />
+                    <div className="min-w-0 flex-1">
+                      <Skeleton className="h-[1lh] w-32 text-[13px] leading-[18px]" />
+                      <Skeleton className="mt-0.5 h-[1lh] w-24 text-[11px] leading-4" />
+                    </div>
+                  </div>
+                )}
+              </SkeletonRows>
             </div>
           ) : bindings.length === 0 ? (
             <EmptyState

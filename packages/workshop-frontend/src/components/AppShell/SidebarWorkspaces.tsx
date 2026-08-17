@@ -21,6 +21,7 @@ import { gadgetsKey, useGadgets, useWhoami } from '../../query/hooks'
 import ShareModal from '../../ShareModal'
 import DeleteConfirmationDialog from '../DeleteConfirmationDialog'
 import SidebarGadgetRow from './SidebarGadgetRow'
+import { Skeleton, SkeletonRows } from '../Skeleton'
 
 // Cap on items shown in the Recent list before the user clicks through to /workspaces.
 const RECENT_INITIAL_LIMIT = 6
@@ -302,11 +303,23 @@ export function SidebarWorkspacesLists({ collapsed = false }: { collapsed?: bool
         onToggle={() => setRecentOpen((o) => !o)}
       >
         {gadgetsLoading ? (
-          <div className="flex flex-col gap-1 px-1">
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="h-7 rounded-md bg-kumo-elevated animate-pulse" />
-            ))}
-          </div>
+          // No gap and no inset: SidebarGadgetRow rows stack flush, and the "Show all" link below
+          // is part of the loaded height too.
+          <>
+            <div className="flex flex-col">
+              <SkeletonRows count={5}>
+                {(i) => (
+                  <div key={i} className="flex h-7 items-center gap-1.5 pl-1.5 pr-1">
+                    <Skeleton className="h-6 w-6 rounded-md" />
+                    <Skeleton className="h-[1lh] flex-1 text-[12.5px] leading-[18px]" />
+                  </div>
+                )}
+              </SkeletonRows>
+            </div>
+            <div className="mt-0.5 flex h-7 items-center px-2.5">
+              <Skeleton className="h-[1lh] w-14 text-[12px]" />
+            </div>
+          </>
         ) : recent.length > 0 ? (
           <>
             <div className="flex flex-col">

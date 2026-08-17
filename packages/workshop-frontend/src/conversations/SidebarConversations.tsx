@@ -4,6 +4,7 @@ import { EnvelopeSimple } from '@phosphor-icons/react'
 import type { ConversationSummary, EmailSummary } from '@gadgets/workshop-shared/gatekeeper'
 import { refKey, useConversations } from './ConversationsContext'
 import { Avatar } from './primitives'
+import { Skeleton, SkeletonRows } from '../components/Skeleton'
 
 // Sidebar sections for the communications surfaces — Conversations, Channels, Email —
 // styled to match Favorites / Recent workspaces (label, hairline, count). Each row deep-links
@@ -83,10 +84,37 @@ function EmailRows({ items }: { items: EmailSummary[] }) {
   )
 }
 
+/** Placeholder rows at the row geometry, for a section whose list hasn't arrived. */
+function SkeletonRowsBlock({ count }: { count: number }) {
+  return (
+    <SkeletonRows count={count}>
+      {i => (
+        <div key={i} className="flex h-7 items-center gap-1.5 px-2.5">
+          <Skeleton className="size-4.5 rounded-full" />
+          <Skeleton className="h-[1lh] flex-1 text-[12.5px] leading-[18px]" />
+        </div>
+      )}
+    </SkeletonRows>
+  )
+}
+
 /** Sidebar sections; renders nothing when no connected account provides conversations. */
 export default function SidebarConversations({ collapsed }: { collapsed: boolean }) {
-  const { available, conversations, channels, emails } = useConversations()
-  if (collapsed || !available) return null
+  const { available, conversations, channels, emails, loading } = useConversations()
+  if (collapsed || available === false) return null
+
+  // While the account is still being probed (available === null) or its lists are in flight, the
+  // sections hold their space. They otherwise appear all at once below the primary nav and push
+  // Favorites and Recent workspaces down by several hundred pixels.
+  if (available === null || (loading && conversations.length === 0 && channels.length === 0)) {
+    return (
+      <>
+        <Section label="Conversations" count={0}><SkeletonRowsBlock count={4} /></Section>
+        <Section label="Channels" count={0}><SkeletonRowsBlock count={3} /></Section>
+      </>
+    )
+  }
+
   return (
     <>
       {conversations.length > 0 && (

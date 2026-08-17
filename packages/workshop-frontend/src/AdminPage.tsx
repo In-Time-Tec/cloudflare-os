@@ -7,6 +7,7 @@ import { AdminApi, AdminFormat, AdminResourceVendor, AmbientGatekeeperMode, MAX_
 import { applyAccentColor, DEFAULT_ACCENT_COLOR } from './theme'
 import { cacheBustSiteLogoUrl, prepareSiteLogo } from './siteLogoUtils'
 import SiteLogo from './components/SiteLogo'
+import { Skeleton, SkeletonRows } from './components/Skeleton'
 import { useDocumentTitle } from './useDocumentTitle'
 import AdminFormatsPanel from './components/format/AdminFormatsPanel'
 import PageChrome from './components/AppShell/PageChrome'
@@ -373,8 +374,17 @@ export default function AdminPage() {
   if (loading) {
     return (
       <PageChrome title="Admin">
-        <div className="flex min-h-[40vh] items-center justify-center">
-          <p className="text-kumo-subtle">Loading admin settings...</p>
+        <div className="space-y-6">
+          <Skeleton className="h-8 w-64 rounded-lg" />
+          <SkeletonRows count={4}>
+            {(i) => (
+              <div key={i} aria-hidden="true"
+                  className="rounded-xl border border-kumo-line bg-kumo-base px-5 py-4">
+                <Skeleton className="h-[1lh] w-40 text-sm" />
+                <Skeleton className="mt-2 h-9 w-full rounded-lg" />
+              </div>
+            )}
+          </SkeletonRows>
         </div>
       </PageChrome>
     )

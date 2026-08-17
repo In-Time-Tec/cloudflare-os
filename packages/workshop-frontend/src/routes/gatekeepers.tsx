@@ -24,6 +24,7 @@ import {
 import { useDocumentTitle } from '../useDocumentTitle'
 import { AccountsSubscriberAdapter } from '../accountsSubscriber'
 import PageChrome from '../components/AppShell/PageChrome'
+import { Skeleton, SkeletonListRow, SkeletonRows } from '../components/Skeleton'
 
 export const Route = createFileRoute('/gatekeepers')({
   component: ConnectorsPage,
@@ -528,9 +529,29 @@ function ConnectorsPage() {
         )}
 
         {initialLoading && (
-          <div className="rounded-2xl border border-kumo-line bg-kumo-base px-4 py-8 text-center text-[13px] leading-[18px] font-normal tracking-[-0.25px] text-kumo-subtle">
-            Loading gatekeepers...
-          </div>
+          // A section of placeholder connectors in the active view, rather than one centred line of
+          // text that a grid of cards then replaces.
+          <section className="mb-10">
+            <SectionEyebrow label="Connected" count={0} />
+            <div className={sectionGridClass}>
+              <SkeletonRows count={view === 'list' ? 6 : 4}>
+                {(i) => view === 'list'
+                  ? <SkeletonListRow key={i} />
+                  : (
+                    <div key={i} aria-hidden="true"
+                        className="grid grid-cols-[48px_1fr_auto] items-center gap-4 rounded-2xl border border-kumo-line bg-kumo-base px-5 py-5">
+                      <Skeleton className="h-12 w-12 rounded-2xl" />
+                      <div className="min-w-0">
+                        <Skeleton className="h-[1lh] w-32 text-[15px] leading-5" />
+                        <Skeleton className="mt-0.5 h-[1lh] w-20 text-[12px] leading-4" />
+                        <Skeleton className="mt-2 h-[1lh] w-full text-[13px] leading-[18px]" />
+                      </div>
+                      <Skeleton className="h-7 w-7 rounded-md" />
+                    </div>
+                  )}
+              </SkeletonRows>
+            </div>
+          </section>
         )}
 
         {filteredAccounts.length > 0 && (

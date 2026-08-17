@@ -5,6 +5,7 @@ import type { ConversationMessage, ConversationSummary } from '@gadgets/workshop
 import { parseRefKey, refKey, useConversations } from './ConversationsContext'
 import { useMessagesQuery, messagesKey } from '../query/conversations'
 import { Avatar, PaneHeader, formatTime } from './primitives'
+import { Skeleton } from '../components/Skeleton'
 import { registerConversationsPush } from './push'
 
 // The conversation thread pane: header (avatar + title), message history, composer with
@@ -12,6 +13,14 @@ import { registerConversationsPush } from './push'
 // and channels pages.
 
 type PendingSend = { key: string; text: string; status: 'sending' | 'failed' | 'unknown' }
+
+/** A plausible opening exchange, so the placeholder thread has a thread's shape. */
+const SKELETON_BUBBLES = [
+  { fromSelf: false, width: 'w-52' },
+  { fromSelf: true, width: 'w-36' },
+  { fromSelf: false, width: 'w-44' },
+  { fromSelf: true, width: 'w-28' },
+] as const
 
 export default function ThreadView({ conversation }: { conversation: ConversationSummary | null }) {
   const { api, avatarFor, onEvent, setViewing } = useConversations()
@@ -93,9 +102,25 @@ export default function ThreadView({ conversation }: { conversation: Conversatio
       />
       <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {messagesLoading && messages.length === 0 ? (
-          <div className="flex flex-col gap-2">
-            {[0, 1, 2].map(i => (
-              <div key={i} className="h-12 w-2/3 animate-pulse rounded-md bg-kumo-elevated" />
+          // Same gap, same avatar column, same bubble box as MessageBubble — and alternating sides,
+          // because a thread that loads all-left then re-flows half its bubbles right is the shift
+          // a placeholder is supposed to prevent.
+          <div className="flex flex-col gap-3">
+            {SKELETON_BUBBLES.map(({ fromSelf, width }, i) => (
+              <div key={i} className={`flex gap-2 ${fromSelf ? 'justify-end' : ''}`}>
+                {!fromSelf && <Avatar size="md" />}
+                <div className={`max-w-[70%] rounded-lg px-3 py-2 ${
+                  fromSelf ? 'bg-kumo-brand/10' : 'bg-kumo-elevated'
+                }`}>
+                  {!fromSelf && (
+                    <p className="mb-0.5 flex items-baseline gap-2">
+                      <Skeleton className="h-[1lh] w-20 text-[12px]" />
+                      <Skeleton className="h-[1lh] w-8 text-[10px]" />
+                    </p>
+                  )}
+                  <Skeleton className={`h-[1lh] text-[13px] ${width}`} />
+                </div>
+              </div>
             ))}
           </div>
         ) : (
