@@ -23,6 +23,8 @@ import {
   persistGatekeeperAppSnapshot,
   readGatekeeperAppPaint,
   readGatekeeperAppSnapshot,
+  readHostBaseColor,
+  withHostTheme,
   withPersistedSnapshot,
 } from './query/gatekeeper-app'
 
@@ -57,13 +59,17 @@ const overlayZIndex = 2147483000
 
 const baseIframeStyle: CSSProperties = {
   border: 0,
-  background: 'transparent',
+  background: 'var(--color-kumo-base)',
 }
 
-function iframeStyleForOverlay(overlay: OverlayState): CSSProperties {
+function iframeStyleForOverlay(overlay: OverlayState, mode: 'light' | 'dark'): CSSProperties {
+  const themed = {
+    ...baseIframeStyle,
+    colorScheme: mode,
+  }
   if (overlay === 'full') {
     return {
-      ...baseIframeStyle,
+      ...themed,
       position: 'fixed',
       inset: 0,
       width: '100vw',
@@ -72,7 +78,7 @@ function iframeStyleForOverlay(overlay: OverlayState): CSSProperties {
     }
   }
   return {
-    ...baseIframeStyle,
+    ...themed,
     display: 'block',
     width: '100%',
     height: '100%',
@@ -321,10 +327,13 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
     const snapshot = readGatekeeperAppSnapshot(gatekeeperVendorId)
     srcDocRef.current = {
       appId: gatekeeperVendorId,
-      html: withPersistedSnapshot(
-        frame.iframeHtml,
-        snapshot,
-        snapshot === undefined ? undefined : readGatekeeperAppPaint(gatekeeperVendorId),
+      html: withHostTheme(
+        withPersistedSnapshot(
+          frame.iframeHtml,
+          snapshot,
+          snapshot === undefined ? undefined : readGatekeeperAppPaint(gatekeeperVendorId),
+        ),
+        { mode: resolvedThemeMode, baseColor: readHostBaseColor(resolvedThemeMode) },
       ),
     }
   }
@@ -410,7 +419,7 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
       sandbox="allow-scripts allow-modals"
       allow="clipboard-write"
       title="Gatekeeper app"
-      style={iframeStyleForOverlay(overlay)}
+      style={iframeStyleForOverlay(overlay, resolvedThemeMode)}
     />
   )
 }

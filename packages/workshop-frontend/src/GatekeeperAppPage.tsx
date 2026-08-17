@@ -72,7 +72,7 @@ export default function GatekeeperAppPage({ appId }: { appId: string }) {
     state ? { appId: state.appId, iframeHtml: state.frame.iframeHtml } : null,
   )
   if (!iframeHtml) {
-    return <div className="h-full min-h-0" />
+    return <div className="h-full min-h-0 bg-kumo-base" />
   }
 
   return (

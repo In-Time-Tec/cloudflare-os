@@ -9,6 +9,7 @@ import {
   resolveGatekeeperAppHtml,
   stashGatekeeperFrame,
   takeGatekeeperFrame,
+  withHostTheme,
   withPersistedSnapshot,
 } from './gatekeeper-app'
 
@@ -48,6 +49,26 @@ describe('withPersistedSnapshot', () => {
     const next = withPersistedSnapshot(html, { enabled: [] }, '<h1>Context &amp; Skills</h1>')
     expect(next).toContain('<div id="root"><h1>Context &amp; Skills</h1></div>')
     expect(withPersistedSnapshot(html, undefined, '<h1>Nope</h1>')).toBe(html)
+  })
+})
+
+describe('withHostTheme', () => {
+  it('stamps the host mode onto html before first paint', () => {
+    const html = '<!doctype html><html lang="en"><head></head><body><div id="root"></div></body></html>'
+    const next = withHostTheme(html, { mode: 'dark', baseColor: '#0e1516' })
+    expect(next).toContain('data-mode="dark"')
+    expect(next).toContain('color-scheme:dark')
+    expect(next).toContain('background:#0e1516')
+    expect(next.indexOf('data-mode="dark"')).toBeLessThan(next.indexOf('</head>'))
+  })
+
+  it('rejects non-color base values', () => {
+    const next = withHostTheme('<html><head></head></html>', {
+      mode: 'dark',
+      baseColor: 'url(javascript:alert(1))',
+    })
+    expect(next).toContain('background:#0e1516')
+    expect(next).not.toContain('javascript')
   })
 })
 

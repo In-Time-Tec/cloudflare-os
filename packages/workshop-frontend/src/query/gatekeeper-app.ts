@@ -109,3 +109,40 @@ export function withPersistedSnapshot(html: string, snapshot: unknown, paintHtml
   }
   return next
 }
+
+export type GatekeeperAppBootTheme = {
+  mode: 'light' | 'dark'
+  baseColor: string
+}
+
+const FALLBACK_BASE = { light: '#fafdf7', dark: '#0e1516' } as const
+
+export function safeThemeBaseColor(value: string, mode: 'light' | 'dark'): string {
+  const v = value.trim()
+  if (/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v)) return v
+  if (/^rgba?\(\s*[\d.]+\s*(,\s*[\d.]+\s*){2}(,\s*[\d.]+\s*)?\)$/.test(v)) return v
+  return FALLBACK_BASE[mode]
+}
+
+export function readHostBaseColor(mode: 'light' | 'dark'): string {
+  if (typeof document === 'undefined') return FALLBACK_BASE[mode]
+  return safeThemeBaseColor(
+    getComputedStyle(document.documentElement).getPropertyValue('--color-kumo-base'),
+    mode,
+  )
+}
+
+export function withHostTheme(html: string, theme: GatekeeperAppBootTheme): string {
+  const mode = theme.mode === 'dark' ? 'dark' : 'light'
+  const base = safeThemeBaseColor(theme.baseColor, mode)
+  const boot = `<style>html,body,#root{background:${base}!important;color-scheme:${mode}}</style><script>document.documentElement.dataset.mode=${JSON.stringify(mode)};document.documentElement.style.colorScheme=${JSON.stringify(mode)}</script>`
+  const next = html.replace(/<html\b([^>]*)>/i, (_all, attrs: string) => {
+    const cleaned = String(attrs)
+      .replace(/\sdata-mode\s*=\s*(['"]).*?\1/i, '')
+      .replace(/\sstyle\s*=\s*(['"]).*?\1/i, '')
+    return `<html${cleaned} data-mode="${mode}" style="color-scheme:${mode};background:${base}">`
+  })
+  const headClose = next.search(/<\/head>/i)
+  if (headClose >= 0) return `${next.slice(0, headClose)}${boot}${next.slice(headClose)}`
+  return `${boot}${next}`
+}

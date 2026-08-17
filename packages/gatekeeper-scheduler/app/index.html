@@ -16,19 +16,20 @@
         margin: 0;
         background: var(--color-kumo-base, #fcfcfb);
       }
-      @media (prefers-color-scheme: dark) {
-        html,
-        body,
-        #root {
-          background: var(--color-kumo-base, #16141d);
-        }
+      html[data-mode="dark"],
+      html[data-mode="dark"] body,
+      html[data-mode="dark"] #root {
+        background: var(--color-kumo-base, #0e1516);
       }
     </style>
     <script>
-      document.documentElement.dataset.mode = window.matchMedia("(prefers-color-scheme: dark)")
-        .matches
-        ? "dark"
-        : "light";
+      if (!document.documentElement.dataset.mode) {
+        document.documentElement.dataset.mode = window.matchMedia("(prefers-color-scheme: dark)")
+          .matches
+          ? "dark"
+          : "light";
+      }
+      document.documentElement.style.colorScheme = document.documentElement.dataset.mode;
     </script>
   </head>
   <body>
