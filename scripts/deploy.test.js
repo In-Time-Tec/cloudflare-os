@@ -89,6 +89,7 @@ test("generates the workers.dev composition", async () => {
     { binding: "GATEKEEPER_MICROSOFT", service: "acme-os-microsoft" },
   ]);
   assert.equal(generated.router.assets.directory, "../workshop-frontend/dist");
+  assert.ok(generated.router.assets.run_worker_first.includes("/orb-api/*"));
 
   assert.equal(generated.backend.workers_dev, false);
   assert.deepEqual(generated.backend.vars.ADMINS, ["password:admin"]);

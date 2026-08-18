@@ -24,6 +24,8 @@
     "run_worker_first": [
       "/api",
       "/api/*",
+      "/orb-api",
+      "/orb-api/*",
       "/template-screenshot",
       "/template-screenshot/*",
       "/gatekeeper/*"
