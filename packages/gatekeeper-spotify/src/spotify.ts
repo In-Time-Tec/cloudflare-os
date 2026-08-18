@@ -27,7 +27,6 @@ import {
   type SpotifyArtistResponse,
   type SpotifyDeviceResponse,
   type SpotifyPlaybackStateResponse,
-  type SpotifyPlaylistItemResponse,
   type SpotifyPlaylistResponse,
   type SpotifyTrackResponse,
   type SpotifyUserResponse,
@@ -852,23 +851,10 @@ const ACTION_CATALOG: ActionCapability[] = [
 ];
 
 // A track as it sits in a playlist.
-type PlaylistEntry = {
-  uri: string;
-  track: SpotifyTrack | null;
-  addedAt: Date | null;
-  addedBy: SpotifyUserRef | null;
-};
-
 type PlaylistDetailsCache = { fetchedAt: number; summary: SpotifyPlaylistSummary };
 
 const PLAYLIST_CACHE_TTL_MS = 15 * 1000;
-const METADATA_CHUNK = 50;
 const PLAYLIST_WRITE_CHUNK = 100;
-
-function trackUriToId(uri: string): string | null {
-  const m = /^spotify:track:([A-Za-z0-9]+)$/.exec(uri);
-  return m ? m[1] : null;
-}
 
 const trackUri = (id: string) => `spotify:track:${id}`;
 const albumUri = (id: string) => `spotify:album:${id}`;
@@ -1075,15 +1061,6 @@ export class SpotifyGatekeeperImpl extends DurableObject<Env, SpotifyGatekeeperI
     return summary;
   }
 
-  #toPlaylistEntry(item: SpotifyPlaylistItemResponse): PlaylistEntry {
-    const track = item.item ?? item.track ?? null;
-    return {
-      uri: track?.uri ?? "",
-      track: track ? normalizeTrack(track) : null,
-      addedAt: item.added_at ? new Date(item.added_at) : null,
-      addedBy: item.added_by ? normalizeUserRef(item.added_by) : null,
-    };
-  }
 
   /**
    * Verify the connected user may edit this playlist (owns it, or it's collaborative) before
@@ -1103,38 +1080,8 @@ export class SpotifyGatekeeperImpl extends DurableObject<Env, SpotifyGatekeeperI
 
   #playlistCountKey(realId: string): string { return `plcount:${realId}`; }
 
-  async #resolveTrackMetaByUri(uris: Iterable<string>): Promise<Map<string, SpotifyTrack>> {
-    const meta = new Map<string, SpotifyTrack>();
-    const ids: string[] = [];
-    const seen = new Set<string>();
-    for (const uri of uris) {
-      const id = trackUriToId(uri);
-      if (id && !seen.has(id)) { seen.add(id); ids.push(id); }
-    }
-    for (let i = 0; i < ids.length; i += METADATA_CHUNK) {
-      const tracks = await this.#withApi(api => api.getTracks(ids.slice(i, i + METADATA_CHUNK)));
-      for (const track of tracks) if (track) meta.set(track.uri, normalizeTrack(track));
-    }
-    return meta;
-  }
 
-  async #resolveTracksById(ids: string[]): Promise<Map<string, SpotifyTrack>> {
-    const meta = new Map<string, SpotifyTrack>();
-    for (let i = 0; i < ids.length; i += METADATA_CHUNK) {
-      const tracks = await this.#withApi(api => api.getTracks(ids.slice(i, i + METADATA_CHUNK)));
-      for (const track of tracks) if (track) meta.set(track.id, normalizeTrack(track));
-    }
-    return meta;
-  }
 
-  async #resolveAlbumsById(ids: string[]): Promise<Map<string, SpotifyAlbumRef>> {
-    const meta = new Map<string, SpotifyAlbumRef>();
-    for (let i = 0; i < ids.length; i += METADATA_CHUNK) {
-      const albums = await this.#withApi(api => api.getAlbums(ids.slice(i, i + METADATA_CHUNK)));
-      for (const album of albums) if (album) meta.set(album.id, normalizeAlbumRef(album));
-    }
-    return meta;
-  }
 
   // -------------------------------------------------------------------------
   // Reads (with simulation overlay)

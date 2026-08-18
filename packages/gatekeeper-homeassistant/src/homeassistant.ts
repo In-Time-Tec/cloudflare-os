@@ -4,7 +4,6 @@ import {
   stripTrailingSlashes,
   type AccountDescription,
   type ActionCapability,
-  type ActionKind,
   type ActionRecorder,
   type AvatarImage,
   type Gatekeeper,

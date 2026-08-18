@@ -1,24 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Switch, useKumoToastManager } from '@cloudflare/kumo'
-import { CaretRight, Check, Eye, Lightning, ShieldCheck } from '@phosphor-icons/react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { useKumoToastManager } from '@cloudflare/kumo'
+import { CaretRight, Eye, Lightning, ShieldCheck } from '@phosphor-icons/react'
 import { RpcStub } from 'capnweb'
 import { ActionLogEntry, Overseer } from '@gadgets/workshop-shared/api'
-import { ActionKind } from '@gadgets/workshop-shared/gatekeeper'
-import { GatekeeperIcon } from './components/GatekeeperIcon'
 import { HookToggle } from './components/HookToggle'
-import { AlwaysApproveButton, ResolveButton } from './components/ResolveButton'
-import { WorkshopButton } from './components/WorkshopControls'
 import { useActions } from './useActions'
-import { useAutoApproval, autoApprovalKey, type AutoApprovalEntry } from './useAutoApproval'
-import { useAlwaysApproveTag } from './useAlwaysApproveTag'
 import { useAuthenticatedApi } from './AuthContext'
 import { useAvatar } from './useAvatar'
-import { useVendorBranding } from './useVendorBranding'
-import { useResolveAction } from './useResolveAction'
 import { safeExternalUrl } from './utils/safeExternalUrl'
-import AutoApproveConfirmDialog from './components/AutoApproveConfirmDialog'
 
-export type ActivityView = 'review' | 'history' | 'auto'
+export type ActivityView = 'history'
 
 type HistoryFilter = 'all' | ActionLogEntry['type']
 
@@ -26,12 +17,6 @@ const PANE_BAR = 'flex h-9 flex-shrink-0 items-center border-b border-kumo-line'
 
 interface ActivityProps {
   overseer: RpcStub<Overseer>
-  view: ActivityView
-  onViewChange: (view: ActivityView) => void
-  onAutoApproveChange?: () => void
-  // Bumped when a rule is enabled from somewhere else (a pending row in chat), so the rule list
-  // reflects it without being reopened.
-  autoApproveReloadTrigger?: number
 }
 
 const HISTORY_FILTERS: { value: HistoryFilter; label: string }[] = [
@@ -79,6 +64,11 @@ function dayLabel(date: Date): string {
   return value.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' })
 }
 
+/** When an entry happened: an action's outcome time, else when it was recorded. */
+function entryTime(record: ActionLogEntry): Date {
+  return (record.type === 'action' ? record.completedAt : undefined) ?? record.createdAt
+}
+
 function activityStatus(
   record: ActionLogEntry,
 ): { label: string; dotClass: string; textClass: string } {
@@ -93,13 +83,13 @@ function activityStatus(
       ? { label: 'Enabled', dotClass: 'bg-kumo-success', textClass: 'text-kumo-subtle' }
       : { label: 'Disabled', dotClass: 'bg-kumo-inactive', textClass: 'text-kumo-subtle' }
   }
-  if (record.state === 'pending') {
-    return { label: 'Waiting', dotClass: 'bg-kumo-brand', textClass: 'text-kumo-strong' }
+  if (record.state === 'failed') {
+    return { label: 'Failed', dotClass: 'bg-kumo-danger', textClass: 'text-kumo-danger' }
   }
-  if (record.state === 'rejected') {
-    return { label: 'Denied', dotClass: 'bg-kumo-danger', textClass: 'text-kumo-danger' }
+  if (record.state === 'blocked') {
+    return { label: 'Blocked', dotClass: 'bg-kumo-danger', textClass: 'text-kumo-danger' }
   }
-  return { label: 'Approved', dotClass: 'bg-kumo-success', textClass: 'text-kumo-subtle' }
+  return { label: 'Done', dotClass: 'bg-kumo-success', textClass: 'text-kumo-subtle' }
 }
 
 function TypeIcon({ record, className }: { record: ActionLogEntry; className?: string }) {
@@ -109,53 +99,28 @@ function TypeIcon({ record, className }: { record: ActionLogEntry; className?: s
   return <ShieldCheck {...props} />
 }
 
-export default function Activity({
-  overseer,
-  view,
-  onViewChange,
-  onAutoApproveChange,
-  autoApproveReloadTrigger,
-}: ActivityProps) {
+export default function Activity({ overseer }: ActivityProps) {
   const { actionsById, isReady } = useActions(overseer)
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all')
-  const [processingActions, setProcessingActions] = useState<Set<number>>(new Set())
   const [togglingHooks, setTogglingHooks] = useState<Set<number>>(new Set())
   const [expandedActionId, setExpandedActionId] = useState<number | null>(null)
-  const [confirmAutoApprove, setConfirmAutoApprove] = useState<{
-    actionId: number
-    gatekeeperId: number
-    resourceTitle: string
-    actionKind: ActionKind
-    actionLabel: string
-  } | null>(null)
   const toasts = useKumoToastManager()
 
-  const { pendingActions, historyGroups, historyTotal, historyShown } = useMemo(() => {
+  const { historyGroups, historyTotal, historyShown } = useMemo(() => {
     const records = [...actionsById.values()]
-    const pending = records
-      .filter(record => record.state === 'pending')
-      .toSorted((a, b) => timeValue(a.createdAt) - timeValue(b.createdAt) || a.id - b.id)
-    const resolved = records.filter(record => record.state !== 'pending')
-    const filtered = resolved
+    const filtered = records
       .filter(record => historyFilter === 'all' || record.type === historyFilter)
       .toSorted((a, b) =>
-        timeValue(b.appliedAt ?? b.createdAt) - timeValue(a.appliedAt ?? a.createdAt) || b.id - a.id)
+        timeValue(entryTime(b)) - timeValue(entryTime(a)) || b.id - a.id)
     const groups: { label: string; records: ActionLogEntry[] }[] = []
     for (const record of filtered) {
-      const label = dayLabel(record.appliedAt ?? record.createdAt)
+      const label = dayLabel(entryTime(record))
       const last = groups.at(-1)
       if (last?.label === label) last.records.push(record)
       else groups.push({ label, records: [record] })
     }
-    return {
-      pendingActions: pending,
-      historyGroups: groups,
-      historyTotal: resolved.length,
-      historyShown: filtered.length,
-    }
+    return { historyGroups: groups, historyTotal: records.length, historyShown: filtered.length }
   }, [actionsById, historyFilter])
-
-  const resolveAction = useResolveAction(overseer, setProcessingActions)
 
   const handleToggleHook = async (hookId: number, enabled: boolean) => {
     setTogglingHooks(previous => new Set(previous).add(hookId))
@@ -174,9 +139,6 @@ export default function Activity({
     }
   }
 
-  const { alwaysApproveTag, isTagAutoApproved } =
-    useAlwaysApproveTag(overseer, setProcessingActions, onAutoApproveChange)
-
   const toggleExpanded = (id: number) => {
     setExpandedActionId(previous => (previous === id ? null : id))
   }
@@ -187,364 +149,78 @@ export default function Activity({
 
   return (
     <div className="flex h-full flex-col bg-kumo-base">
-      {view === 'review' ? (
-        pendingActions.length === 0 ? (
+        <div className={`${PANE_BAR} gap-1 px-3`}>
+          {HISTORY_FILTERS.map(filter => (
+            <button
+              key={filter.value}
+              type="button"
+              onClick={() => setHistoryFilter(filter.value)}
+              className={`flex h-6 cursor-pointer items-center rounded-md px-2 text-[12.5px] font-medium tracking-[-0.15px] transition-colors ${
+                historyFilter === filter.value
+                  ? 'bg-kumo-tint text-kumo-default'
+                  : 'text-kumo-subtle hover:text-kumo-default'
+              }`}
+            >
+              {filter.label}
+            </button>
+          ))}
+          <span className="ml-auto pr-2 text-[11.5px] leading-[17px] tabular-nums text-kumo-inactive">
+            {historyShown} {historyShown === 1 ? 'event' : 'events'}
+          </span>
+
+        </div>
+
+        {historyTotal === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-kumo-tint text-kumo-subtle">
-              <Check size={17} weight="bold" />
-            </span>
-            <p className="mt-3 text-[13px] font-medium leading-[18px] tracking-[-0.25px] text-kumo-default">
-              Nothing to review
+            <p className="m-0 text-[13px] font-medium leading-[18px] tracking-[-0.25px] text-kumo-default">
+              No activity yet
             </p>
             <p className="mt-1 max-w-xs text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-subtle">
-              Requests that need your approval show up here and in the workspace header.
+              Every resource an agent reads or changes is recorded here.
             </p>
-            <WorkshopButton className="mt-4" onClick={() => onViewChange('history')}>
-              View history
-            </WorkshopButton>
+          </div>
+        ) : historyShown === 0 ? (
+          <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+            <p className="m-0 text-[13px] font-medium text-kumo-default">No matching events</p>
+            <button
+              type="button"
+              onClick={() => setHistoryFilter('all')}
+              className="mt-1.5 cursor-pointer text-[12px] font-medium text-kumo-subtle hover:text-kumo-default"
+            >
+              Show all activity
+            </button>
           </div>
         ) : (
-          <>
-            <div className={`${PANE_BAR} gap-2 px-5`}>
-              <span className="text-[12.5px] font-medium leading-[17px] tracking-[-0.15px] text-kumo-default">
-                {pendingActions.length} {pendingActions.length === 1 ? 'request' : 'requests'} waiting
-              </span>
-              <span className="ml-auto text-[11.5px] leading-[17px] text-kumo-inactive">Oldest first</span>
+          <div className="min-h-0 flex-1 overflow-auto">
+            <div className="grid grid-cols-[54px_minmax(0,1fr)_auto_16px] items-center gap-3 border-b border-kumo-line bg-kumo-elevated/50 px-5 py-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-kumo-inactive">
+              <span>Time</span>
+              <span>Event</span>
+              <span>Status</span>
+              <span />
             </div>
-            <div className="min-h-0 flex-1 overflow-auto">
-              {pendingActions.map(record => {
-                const autoApproveTarget =
-                  record.type === 'action' && record.gatekeeperId !== undefined &&
-                  record.description.actionKind !== undefined &&
-                  record.description.autoApprovable === true
-                    ? {
-                        actionId: record.id,
-                        gatekeeperId: record.gatekeeperId,
-                        resourceTitle: record.resourceTitle,
-                        actionKind: record.description.actionKind,
-                        actionLabel: record.description.title,
-                      }
-                    : undefined
-                return (
-                  <ReviewRequest
+            {historyGroups.map(group => (
+              <section key={group.label}>
+                <h3 className="sticky top-0 m-0 border-b border-kumo-line bg-kumo-base/90 px-5 py-1 text-[11px] font-medium uppercase tracking-[0.06em] text-kumo-inactive backdrop-blur-sm">
+                  {group.label}
+                </h3>
+                {group.records.map(record => (
+                  <HistoryRow
                     key={record.id}
                     record={record}
                     expanded={expandedActionId === record.id}
-                    processing={processingActions.has(record.id)}
                     onToggle={() => toggleExpanded(record.id)}
-                    onApprove={() => void resolveAction(record.id, 'approve')}
-                    onReject={() => void resolveAction(record.id, 'deny')}
-                    onAlwaysApprove={
-                      autoApproveTarget &&
-                      !isTagAutoApproved(autoApproveTarget.gatekeeperId, autoApproveTarget.actionKind.tag)
-                        ? () => setConfirmAutoApprove(autoApproveTarget)
-                        : undefined
-                    }
+                    togglingHook={record.type === 'bindHook' && record.hookId !== undefined
+                      ? togglingHooks.has(record.hookId)
+                      : false}
+                    onToggleHook={handleToggleHook}
                   />
-                )
-              })}
-            </div>
-          </>
-        )
-      ) : view === 'history' ? (
-        <>
-          <div className={`${PANE_BAR} gap-1 px-3`}>
-            {HISTORY_FILTERS.map(filter => (
-              <button
-                key={filter.value}
-                type="button"
-                onClick={() => setHistoryFilter(filter.value)}
-                className={`flex h-6 cursor-pointer items-center rounded-md px-2 text-[12.5px] font-medium tracking-[-0.15px] transition-colors ${
-                  historyFilter === filter.value
-                    ? 'bg-kumo-tint text-kumo-default'
-                    : 'text-kumo-subtle hover:text-kumo-default'
-                }`}
-              >
-                {filter.label}
-              </button>
+                ))}
+              </section>
             ))}
-            <span className="ml-auto pr-2 text-[11.5px] leading-[17px] tabular-nums text-kumo-inactive">
-              {historyShown} {historyShown === 1 ? 'event' : 'events'}
-            </span>
-
           </div>
+        )}
 
-          {historyTotal === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-              <p className="m-0 text-[13px] font-medium leading-[18px] tracking-[-0.25px] text-kumo-default">
-                No activity yet
-              </p>
-              <p className="mt-1 max-w-xs text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-subtle">
-                Every resource an agent reads or changes is recorded here.
-              </p>
-            </div>
-          ) : historyShown === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-              <p className="m-0 text-[13px] font-medium text-kumo-default">No matching events</p>
-              <button
-                type="button"
-                onClick={() => setHistoryFilter('all')}
-                className="mt-1.5 cursor-pointer text-[12px] font-medium text-kumo-subtle hover:text-kumo-default"
-              >
-                Show all activity
-              </button>
-            </div>
-          ) : (
-            <div className="min-h-0 flex-1 overflow-auto">
-              <div className="grid grid-cols-[54px_minmax(0,1fr)_auto_16px] items-center gap-3 border-b border-kumo-line bg-kumo-elevated/50 px-5 py-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-kumo-inactive">
-                <span>Time</span>
-                <span>Event</span>
-                <span>Status</span>
-                <span />
-              </div>
-              {historyGroups.map(group => (
-                <section key={group.label}>
-                  <h3 className="sticky top-0 m-0 border-b border-kumo-line bg-kumo-base/90 px-5 py-1 text-[11px] font-medium uppercase tracking-[0.06em] text-kumo-inactive backdrop-blur-sm">
-                    {group.label}
-                  </h3>
-                  {group.records.map(record => (
-                    <HistoryRow
-                      key={record.id}
-                      record={record}
-                      expanded={expandedActionId === record.id}
-                      onToggle={() => toggleExpanded(record.id)}
-                      togglingHook={record.type === 'bindHook' && record.hookId !== undefined
-                        ? togglingHooks.has(record.hookId)
-                        : false}
-                      onToggleHook={handleToggleHook}
-                    />
-                  ))}
-                </section>
-              ))}
-            </div>
-          )}
-        </>
-      ) : (
-        <AutoApprovalPanel overseer={overseer} reloadTrigger={autoApproveReloadTrigger} />
-      )}
-
-      {confirmAutoApprove && (
-        <AutoApproveConfirmDialog
-          open
-          actionLabel={confirmAutoApprove.actionLabel}
-          resourceTitle={confirmAutoApprove.resourceTitle}
-          isProcessing={processingActions.has(confirmAutoApprove.actionId)}
-          onOpenChange={open => { if (!open) setConfirmAutoApprove(null) }}
-          onConfirm={async () => {
-            const { actionId, gatekeeperId, actionKind } = confirmAutoApprove
-            if (await alwaysApproveTag(actionId, gatekeeperId, actionKind)) {
-              setConfirmAutoApprove(null)
-            }
-          }}
-        />
-      )}
     </div>
-  )
-}
-
-function AutoApprovalPanel({
-  overseer,
-  reloadTrigger,
-}: {
-  overseer: RpcStub<Overseer>
-  reloadTrigger?: number
-}) {
-  const { entries, isLoading, loadError, pending, refresh, setEnabled } = useAutoApproval(overseer)
-  const { authenticatedApi } = useAuthenticatedApi()
-  const vendorBranding = useVendorBranding(authenticatedApi)
-
-  const previousReloadTrigger = useRef(reloadTrigger)
-  useEffect(() => {
-    if (reloadTrigger === previousReloadTrigger.current) return
-    previousReloadTrigger.current = reloadTrigger
-    void refresh()
-  }, [reloadTrigger, refresh])
-
-  const groups = useMemo(() => {
-    const byConnection = new Map<
-      number,
-      { gatekeeperId: number; title: string; vendorId?: string; entries: AutoApprovalEntry[] }
-    >()
-    for (const entry of entries) {
-      const group = byConnection.get(entry.gatekeeperId)
-      if (group) group.entries.push(entry)
-      else {
-        byConnection.set(entry.gatekeeperId, {
-          gatekeeperId: entry.gatekeeperId,
-          title: entry.resourceTitle,
-          vendorId: entry.vendorId,
-          entries: [entry],
-        })
-      }
-    }
-    for (const group of byConnection.values()) {
-      group.title ||= 'Unavailable connection'
-      group.entries = group.entries.toSorted((a, b) =>
-        a.actionKind.label.localeCompare(b.actionKind.label))
-    }
-    return [...byConnection.values()].toSorted((a, b) => a.title.localeCompare(b.title))
-  }, [entries])
-
-  if (isLoading) {
-    return <div className="flex h-full flex-col bg-kumo-base" />
-  }
-
-  if (entries.length === 0) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-        <p className="m-0 text-[13px] font-medium leading-[18px] tracking-[-0.25px] text-kumo-default">
-          {loadError ? 'Could not load auto-approval' : 'Nothing can run automatically'}
-        </p>
-        <p className="mt-1 max-w-xs text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-subtle">
-          {loadError
-            ? 'The current rules may be incomplete. Try loading them again.'
-            : 'Action types appear here once a connected resource offers one its author marked safe to apply without review.'}
-        </p>
-        {loadError && (
-          <WorkshopButton className="mt-4" onClick={() => void refresh()}>
-            Retry
-          </WorkshopButton>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <>
-      <div className={`${PANE_BAR} gap-3 px-5`}>
-        <p className="m-0 min-w-0 flex-1 truncate text-[12.5px] leading-[17px] tracking-[-0.2px] text-kumo-subtle">
-          {loadError
-            ? 'Some auto-approval options could not be loaded.'
-            : 'Actions agents may take without asking. Everything else waits for your review.'}
-        </p>
-        {loadError && (
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            className="cursor-pointer text-[12px] font-medium text-kumo-default hover:text-kumo-default-hover"
-          >
-            Retry
-          </button>
-        )}
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto">
-        {groups.map(group => (
-          <section key={group.gatekeeperId}>
-            <div className="sticky top-0 flex items-center gap-2 border-b border-kumo-line bg-kumo-base/90 px-5 py-1.5 backdrop-blur-sm">
-              <GatekeeperIcon
-                vendorId={group.vendorId}
-                {...(group.vendorId ? vendorBranding.get(group.vendorId) : undefined)}
-                fallbackText={group.title}
-                size={12}
-                className="h-5 w-5 rounded-md [&>img]:p-px"
-              />
-              <h3 className="m-0 min-w-0 truncate text-[12px] font-medium leading-4 tracking-[-0.2px] text-kumo-subtle">
-                {group.title}
-              </h3>
-            </div>
-            {group.entries.map(entry => {
-              const key = autoApprovalKey(entry)
-              const busy = pending.has(key)
-              return (
-                <div
-                  key={key}
-                  className="flex w-full items-center gap-3 border-b border-kumo-line/60 px-5 py-2.5 text-left"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] leading-[18px] font-medium tracking-[-0.25px] text-kumo-default">
-                      {entry.actionKind.label}
-                    </span>
-                    <span className="mt-0.5 block text-[12px] leading-4 tracking-[-0.2px] text-kumo-inactive">
-                      {entry.orphaned
-                        ? 'This connection no longer offers this action; the rule still applies.'
-                        : entry.enabled
-                          ? 'Applied without asking'
-                          : 'Waits for your approval'}
-                    </span>
-                  </span>
-                  <Switch
-                    size="sm"
-                    checked={entry.enabled}
-                    disabled={busy}
-                    aria-label={`${entry.enabled ? 'Disable' : 'Enable'} auto-approval for ${entry.actionKind.label}`}
-                    onCheckedChange={enabled => void setEnabled(entry, enabled)}
-                  />
-                </div>
-              )
-            })}
-          </section>
-        ))}
-      </div>
-    </>
-  )
-}
-
-function ReviewRequest({
-  record,
-  expanded,
-  processing,
-  onToggle,
-  onApprove,
-  onReject,
-  onAlwaysApprove,
-}: {
-  record: ActionLogEntry
-  expanded: boolean
-  processing: boolean
-  onToggle: () => void
-  onApprove: () => void
-  onReject: () => void
-  onAlwaysApprove?: () => void
-}) {
-  const resourceUrl = safeExternalUrl(record.resourceUrl)
-  return (
-    <article className="border-b border-kumo-line px-5 py-3 transition-colors hover:bg-kumo-elevated/50">
-      <div className="flex flex-wrap items-start gap-x-3 gap-y-1.5">
-        <div className="min-w-[8rem] flex-1">
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={expanded}
-            className="flex max-w-full cursor-pointer items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-ring"
-          >
-            <h3 className="m-0 truncate text-[13px] font-medium leading-[18px] tracking-[-0.25px] text-kumo-default">
-              {record.description.title}
-            </h3>
-            <CaretRight
-              size={12}
-              className={`flex-shrink-0 text-kumo-inactive transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}
-            />
-          </button>
-          <p className="mt-0.5 truncate text-[11.5px] leading-4 tracking-[-0.1px] text-kumo-inactive">
-            {resourceUrl ? (
-              <a
-                href={resourceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-kumo-default hover:underline"
-              >
-                {record.resourceTitle}
-              </a>
-            ) : record.resourceTitle}
-            <span className="px-1">·</span>
-            {formatRelativeTime(record.createdAt)}
-          </p>
-        </div>
-        <div className="ml-auto flex flex-shrink-0 items-center gap-0.5">
-          {onAlwaysApprove && (
-            <AlwaysApproveButton onClick={onAlwaysApprove} disabled={processing} />
-          )}
-          <ResolveButton tone="deny" onClick={onReject} disabled={processing} />
-          <ResolveButton tone="approve" onClick={onApprove} disabled={processing} />
-        </div>
-      </div>
-
-      {record.description.description && (
-        <p className={`mt-1.5 max-w-2xl whitespace-pre-wrap text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-subtle ${expanded ? '' : 'line-clamp-2'}`}>
-          {record.description.description}
-        </p>
-      )}
-    </article>
   )
 }
 
@@ -562,9 +238,9 @@ function HistoryRow({
   onToggleHook: (hookId: number, enabled: boolean) => void
 }) {
   const resourceUrl = safeExternalUrl(record.resourceUrl)
-  const resolvedBy = record.type === 'action' ? record.resolvedBy : undefined
-  const autoApproved = record.type === 'action' && record.autoApproved === true
-  const at = record.appliedAt ?? record.createdAt
+  const authorizedBy = record.type === 'action' ? record.authorizedBy : undefined
+  const failure = record.type === 'action' ? record.failure : undefined
+  const at = entryTime(record)
   const status = activityStatus(record)
 
   return (
@@ -607,9 +283,15 @@ function HistoryRow({
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11.5px] text-kumo-inactive">
             <span>{formatFullDate(at)}</span>
             <span className="text-kumo-subtle">{record.resourceTitle}</span>
-            {resolvedBy && (
-              <ResolverBadge profileId={resolvedBy.id}>
-                {autoApproved ? `Auto-approved (${resolvedBy.name}'s rule)` : `By ${resolvedBy.name}`}
+            {failure && (
+              <div className="text-[12px] text-kumo-danger">
+                {failure.message}
+                {failure.mayHaveTakenEffect ? ' (this may still have taken effect)' : ''}
+              </div>
+            )}
+            {authorizedBy && (
+              <ResolverBadge profileId={authorizedBy.id}>
+                {`Under ${authorizedBy.name}'s connection`}
               </ResolverBadge>
             )}
             {resourceUrl && (

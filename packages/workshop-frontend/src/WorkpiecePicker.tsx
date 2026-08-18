@@ -3,7 +3,6 @@ import { CaretLeft, CaretRight, Check, Lightning, PencilSimple, Pulse, X } from 
 import { FormatGlyph } from './components/format/FormatVisuals'
 import { Tooltip } from '@cloudflare/kumo'
 import type { WorkpieceId, WorkpieceSummary } from '@gadgets/workshop-shared/api'
-import { CountBadge } from './components/CountBadge'
 import { WorkshopIconButton, WorkshopInput } from './components/WorkshopControls'
 
 export const WORKPIECE_RAIL_COLLAPSED_WIDTH = 48
@@ -22,7 +21,6 @@ interface WorkpiecePickerProps {
   onExpandedChange: (expanded: boolean) => void
   onSelect: (id: WorkpieceId) => void
   onRename: (id: WorkpieceId, title: string) => void
-  pendingActivityCount: number
   onOpenActivity: () => void
 }
 
@@ -35,7 +33,6 @@ export default function WorkpiecePicker({
   onExpandedChange,
   onSelect,
   onRename,
-  pendingActivityCount,
   onOpenActivity,
 }: WorkpiecePickerProps) {
   const [editing, setEditing] = useState<{ id: WorkpieceId; value: string } | null>(null)
@@ -193,11 +190,6 @@ export default function WorkpiecePicker({
           >
             <Pulse size={expanded ? 15 : 17} className="flex-shrink-0 text-kumo-inactive" />
             {expanded && <span className="min-w-0 flex-1 truncate">View activity</span>}
-            {expanded ? (
-              <CountBadge count={pendingActivityCount} />
-            ) : pendingActivityCount > 0 && (
-              <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-kumo-brand" />
-            )}
           </button>
         </Tooltip>
       </div>

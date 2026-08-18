@@ -5,7 +5,6 @@ import {
   type ActionCapability,
   type ActionDescription,
   type ActionKind,
-  type ActionHandle,
   type ActionRecorder,
   type AccountDescription,
   type Cursor,
@@ -1900,51 +1899,14 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     return this.#readAllPullReviewComments(realId);
   }
 
-  #actionRecordKey(approvalId: number): string {
-    return `action:${approvalId}`;
-  }
 
-  #retiredActionRecordKey(approvalId: number): string {
-    return `retiredAction:${approvalId}`;
-  }
 
-  #getLiveActionRecord(approvalId: number): StoredActionRecord | undefined {
-    return this.ctx.storage.kv.get<StoredActionRecord>(this.#actionRecordKey(approvalId));
-  }
 
-  #getActionRecord(approvalId: number): StoredActionRecord | undefined {
-    return this.#getLiveActionRecord(approvalId)
-      ?? this.ctx.storage.kv.get<StoredActionRecord>(this.#retiredActionRecordKey(approvalId));
-  }
 
-  #requireActionRecord(approvalId: number): StoredActionRecord {
-    const record = this.#getActionRecord(approvalId);
-    if (!record) {
-      throw new Error(`No queued GitHub action exists with id ${approvalId}.`);
-    }
-    return record;
-  }
 
-  #putActionRecord(approvalId: number, record: StoredActionRecord): void {
-    this.ctx.storage.kv.put(this.#actionRecordKey(approvalId), record);
-  }
 
-  #putRetiredActionRecord(approvalId: number, record: StoredActionRecord): void {
-    this.ctx.storage.kv.put(this.#retiredActionRecordKey(approvalId), record);
-  }
 
-  #retireActionRecord(approvalId: number, record: StoredActionRecord): void {
-    this.ctx.storage.kv.delete(this.#actionRecordKey(approvalId));
-    this.#putRetiredActionRecord(approvalId, record);
-  }
 
-  #stageAction(action: GitHubAction): void {
-    this.#putActionRecord(action.approvalId, {
-      action,
-      state: "staged",
-    });
-    this.#pendingActionsCache = undefined;
-  }
 
   #listPendingActions(): GitHubAction[] {
     if (!this.#pendingActionsCache) {
@@ -1958,88 +1920,11 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     return this.#pendingActionsCache;
   }
 
-  #markActionPending(action: GitHubAction): void {
-    const record = this.#requireActionRecord(action.approvalId);
-    record.state = "pending";
-    this.#putActionRecord(action.approvalId, record);
-    this.#pendingActionsCache = undefined;
-    if (action.type === "createIssue" || action.type === "createPullRequest") {
-      this.ctx.storage.kv.put<StoredProvisionalResource>(`provisional:${action.provisionalId}`, {
-        kind: action.type === "createIssue" ? "issue" : "pull",
-      });
-    }
-  }
 
-  #markActionApproved(action: GitHubAction, revertInfo?: GitHubRevertInfo): void {
-    const record = this.#requireActionRecord(action.approvalId);
-    record.state = "approved";
-    record.appliedAt = Date.now();
-    if (revertInfo) {
-      record.revertInfo = revertInfo;
-    }
-    this.#retireActionRecord(action.approvalId, record);
-    this.#pendingActionsCache = undefined;
-  }
 
-  #markActionRejected(action: GitHubAction): void {
-    const record = this.#requireActionRecord(action.approvalId);
-    record.state = "rejected";
-    record.rejectedAt = Date.now();
-    this.#retireActionRecord(action.approvalId, record);
-    this.#pendingActionsCache = undefined;
-  }
 
-  #actionDependsOnResource(action: GitHubAction, kind: EntityKind, provisionalId: string): boolean {
-    switch (action.type) {
-      case "createIssue":
-      case "createPullRequest":
-        return action.provisionalId === provisionalId;
-      case "setTitle":
-      case "setBody":
-      case "addLabels":
-      case "removeLabels":
-      case "changeState":
-      case "postComment":
-        return action.targetKind === kind && action.targetId === provisionalId;
-      case "postReview":
-      case "replyToDiffComment":
-      case "mergePullRequest":
-        return kind === "pull" && action.pullId === provisionalId;
-    }
-  }
 
-  #rejectActionsForResource(kind: EntityKind, provisionalId: string): void {
-    for (const pending of this.#listPendingActions()) {
-      if (this.#actionDependsOnResource(pending, kind, provisionalId)) {
-        this.#markActionRejected(pending);
-      }
-    }
-  }
 
-  #rejectReplyDependencyChain(rootCommentIds: string[]): void {
-    const pendingActions = this.#listPendingActions();
-    const pendingReplies = pendingActions.filter(
-      (action): action is ReplyToDiffCommentAction => action.type === "replyToDiffComment",
-    );
-    const queue = [...rootCommentIds];
-    const seen = new Set<string>(rootCommentIds);
-
-    while (queue.length > 0) {
-      const current = queue.shift();
-      if (!current) {
-        break;
-      }
-      for (const reply of pendingReplies) {
-        if (reply.commentId === current) {
-          this.#markActionRejected(reply);
-          if (!seen.has(reply.provisionalCommentId)) {
-            seen.add(reply.provisionalCommentId);
-            queue.push(reply.provisionalCommentId);
-          }
-        }
-      }
-    }
-  }
 
   #getProvisionalResource(id: string): StoredProvisionalResource | undefined {
     return this.ctx.storage.kv.get<StoredProvisionalResource>(`provisional:${id}`);
@@ -3406,16 +3291,12 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       case "postComment": {
         const realId = action.targetId.startsWith("~") ? this.#resolveProvisionalId(action.targetId) : action.targetId;
         if (!realId) throw new Error(`Target ${action.targetId} has not been created on GitHub yet.`);
-        const response = await this.#withApi(api => api.createIssueComment(
+        await this.#withApi(api => api.createIssueComment(
           action.owner,
           action.repo,
           Number(realId),
           this.#rewriteKnownReferences(action.bodyMarkdown, true),
         ));
-        const revertInfo: GitHubRevertInfo = {
-          type: "issueComment",
-          commentId: response.id,
-        };
         this.#clearCaches();
         return;
       }
@@ -3482,10 +3363,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           this.#rewriteKnownReferences(action.bodyMarkdown, true),
         ));
         this.ctx.storage.kv.put(`diffAlias:${action.provisionalCommentId}`, String(response.id));
-        const revertInfo: GitHubRevertInfo = {
-          type: "reviewComment",
-          commentId: response.id,
-        };
         this.#clearCaches();
         return;
       }

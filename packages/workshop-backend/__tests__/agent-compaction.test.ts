@@ -2,7 +2,7 @@ import {describe, expect, it} from "vitest";
 import {type AiChatAuthorInfo, type AiChatMessage, type AiChatMessageBody}
   from "@gadgets/workshop-shared/api";
 import {
-  buildCompactionState, buildSummaryPrompt, findCompactionBoundary, findProtectedFromSequence,
+  buildCompactionState, buildSummaryPrompt, findCompactionBoundary,
   getModelTokenLimits, isCompactionTurn, protectRetainedReverts, shouldCompactChat, startsAgentTurn,
 } from "../src/agent-compaction";
 import * as Y from "yjs";
@@ -133,21 +133,13 @@ describe("compaction trigger", () => {
 
   // Every one of these produces a `user` model message, so retained context can begin at it. A chat
   // driven only by callbacks would otherwise never find a cut point.
-  it("treats callbacks, nudges and accepted connections as turn starts", () => {
+  it("treats callbacks and nudges as turn starts", () => {
     expect(startsAgentTurn(message(0, user, "hi"))).toBe(true);
     expect(startsAgentTurn(message(0, agent, "reply"))).toBe(false);
     expect(startsAgentTurn(record(0, agent, {
       type: "agentCallback", methodName: "run", argsSummary: "", initiatorModelId: "m",
     }))).toBe(true);
     expect(startsAgentTurn(record(0, agent, {type: "agentNudge", text: "continue"}))).toBe(true);
-    expect(startsAgentTurn(record(0, agent, {
-      type: "connectionRequest", requestId: "1:1", vendorId: "v", vendorName: "V",
-      reason: "Needed", state: "accepted",
-    }))).toBe(true);
-    expect(startsAgentTurn(record(0, agent, {
-      type: "connectionRequest", requestId: "1:1", vendorId: "v", vendorName: "V",
-      reason: "Needed", state: "pending",
-    }))).toBe(false);
   });
 });
 
@@ -168,29 +160,6 @@ describe("compaction boundary", () => {
     expect(findCompactionBoundary(projection(messages), 100_000, 40_000)).toBe(1);
   });
 
-  // The checkpoint records provisional creations, so unlike a pending connection request they need
-  // no protection and the boundary may pass them.
-  it("protects a pending connection request but not a provisional creation", () => {
-    let creation = [
-      message(0, user, "create it"),
-      record(1, agent, {
-        type: "changes", createdGadgets: [{gadgetId: 2, title: "New", bindingName: "NEW"}],
-      }),
-      message(2, user, "continue"),
-    ];
-    expect(findProtectedFromSequence(creation)).toBeUndefined();
-
-    let pending: AiChatMessage[] = [
-      message(0, user, "hi"),
-      message(1, user, "connect"),
-      record(2, agent, {
-        type: "connectionRequest", requestId: "1:1", vendorId: "v", vendorName: "V",
-        reason: "Needed", state: "pending",
-      }),
-    ];
-    expect(findProtectedFromSequence(pending)).toBe(1);
-  });
-
   it("keeps complete recent turns within the 30 percent target", () => {
     let messages = [
       message(0, user, "a".repeat(40_000)),
@@ -203,38 +172,6 @@ describe("compaction boundary", () => {
 
     // Exclusive: everything below 4 is summarized, so the last turn is retained whole.
     expect(findCompactionBoundary(projection(messages), 100_000, 120_000)).toBe(4);
-  });
-
-  it("stops the boundary short of a pending connection request", () => {
-    let messages: AiChatMessage[] = [
-      message(0, user, "hi"),
-      record(1, agent, {
-        type: "connectionRequest", requestId: "1:1", vendorId: "vendor", vendorName: "Vendor",
-        reason: "Needed", state: "pending",
-      }),
-      message(2, user, "a".repeat(240_000)),
-      message(3, agent, "b".repeat(240_000)),
-      message(4, user, "next"),
-      message(5, agent, "done"),
-    ];
-
-    // Without the limit the pending request would move into the summary.
-    expect(findCompactionBoundary(projection(messages), 100_000, 120_000, 0, 1)).toBe(1);
-  });
-
-  it("refuses when the only cut available is the existing boundary", () => {
-    let messages: AiChatMessage[] = [
-      message(0, user, "a".repeat(40_000)),
-      message(1, agent, "b".repeat(40_000)),
-      record(2, agent, {
-        type: "connectionRequest", requestId: "1:1", vendorId: "vendor", vendorName: "Vendor",
-        reason: "Needed", state: "pending",
-      }),
-      message(3, user, "c".repeat(40_000)),
-      message(4, agent, "d".repeat(40_000)),
-    ];
-
-    expect(findCompactionBoundary(projection(messages), 100_000, 120_000, 0, 0)).toBeUndefined();
   });
 
   // One record can fill the whole budget, which walks the cut scan off the front. Falling back to

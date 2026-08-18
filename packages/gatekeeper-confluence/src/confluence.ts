@@ -54,7 +54,6 @@ import {
   spaceToMetadata,
   type AccessibleResource,
   type AtlassianIdentity,
-  type ContentResponse,
 } from "./confluence-api";
 import {
   ACTION_CATALOG,
