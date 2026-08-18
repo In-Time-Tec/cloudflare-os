@@ -1356,6 +1356,33 @@ export default function ThreadEditor() {
               by {metadata.owner.name}
             </span>
           )}
+
+          {/* Orb status chip: the machine backing this thread (running / paused / not started). */}
+          {metadata.orbStatus !== undefined && (
+            <span
+              className="flex flex-shrink-0 items-center gap-1.5 rounded-full border border-kumo-line px-2 py-0.5 text-[11px] leading-4 font-medium text-kumo-subtle"
+              title={
+                metadata.orbStatus === 'running'
+                  ? 'Machine running'
+                  : metadata.orbStatus === 'paused'
+                    ? 'Machine paused — wakes automatically on activity'
+                    : 'Machine starts on first agent task'
+              }
+            >
+              <span
+                aria-hidden
+                className={`h-1.5 w-1.5 rounded-full ${
+                  metadata.orbStatus === 'running'
+                    ? 'bg-emerald-500'
+                    : metadata.orbStatus === 'paused'
+                      ? 'bg-amber-400'
+                      : 'bg-kumo-line'
+                }`}
+              />
+              {metadata.orbStatus === 'running' ? 'Running'
+                : metadata.orbStatus === 'paused' ? 'Paused' : 'Machine'}
+            </span>
+          )}
         </div>
 
         {/* Right: presence, cost, thread, share, templates */}

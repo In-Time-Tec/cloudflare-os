@@ -60,3 +60,26 @@ PHASE 3 NEXT: Pierre UI. Read plans/research-pierre-ui.md §5 for migration step
 - Replace FileSidebar.tsx -> @pierre/trees FileTree (no create/rename/delete)
 - Remove deps: monaco-editor, @monaco-editor/react, y-monaco; delete monacoTheme.ts, getLanguage.ts
 - ArtifactCodeInterface.tsx is the integration point
+
+PHASE 3 COMPLETE (commit 093dcce): Pierre UI in, monaco out. New: FileView/FileDiffView/FileTreePanel
++ fileChangeStatus.ts. ArtifactCodeInterface rewired read-only.
+
+PHASE 4 IN PROGRESS: E2B orb per thread.
+Design (research-e2b-orbs.md §4 + plan D2/D3):
+- workshop-backend/src/orb/ module in Effect TS v4 style (effect@4.0.0-rc.109 via catalog).
+  New dep in workshop-backend package.json: "effect": "catalog:".
+- orb/e2b-api.ts: raw REST client for api.e2b.app (X-API-Key) — createSandbox, connectSandbox
+  (resume-or-touch), pauseSandbox, killSandbox, setTimeout. Effect Services + Schema for responses.
+- orb/orb-manager.ts: DO-facing lifecycle: getOrCreate (lazy), wake (connect), sleep (pause),
+  destroy. Stores orbState in DO storage singleton (added to overseer typed-storage singletons:
+  orbSandboxId, orbStatus, orbLastActivity).
+- overseer.ts hooks: wake before agent turn (runAgent), track activity, alarm-driven pause after
+  idle (reuse existing alarm infra), destroy on thread delete.
+- admin-config.ts: orbSettings { enabled, templateId, idleMinutes } soft setting.
+- env: E2B_API_KEY secret. wrangler.jsonc vars note; scripts/deploy.mjs getDeploymentSecrets
+  backend section reads process.env.E2B_API_KEY (from .env via dotenv at deploy time — check how
+  deploy.mjs loads env; may need explicit dotenv or shell source).
+- agent tool (phase 4b): executeShell tool in agent.ts that runs a command in the orb via envd
+  (POST https://49983-{sandboxId}.e2b.app/commands ConnectRPC JSON). Records observation.
+- Token proxy (D3) deferred to phase 4c/5 (needed before exposing gatekeeper capabilities
+  inside sandbox; plain shell exec doesn't need it).

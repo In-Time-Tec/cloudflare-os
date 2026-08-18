@@ -35,6 +35,10 @@ declare global {
       DEPLOYMENT_AI_DEFAULT_MODEL?: string; // Suggested model ID placed first in model lists
       OPENROUTER_API_TOKEN?: string;        // Backend-only Worker secret
 
+      // E2B control-plane credential for thread orbs (sandboxes). Backend-only Worker secret;
+      // never forwarded to sandboxes, agents, or the frontend. Absent = orbs disabled.
+      E2B_API_KEY?: string;
+
       // Template storage bindings.
       TEMPLATES: KVNamespace;             // Workers KV for template metadata lookup
       TEMPLATE_CONTENT: R2Bucket;         // R2 bucket for template code snapshots

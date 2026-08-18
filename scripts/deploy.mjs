@@ -207,6 +207,14 @@ export function getDeploymentSecrets(config, environment = process.env) {
     backend.OPENROUTER_API_TOKEN = environment.OPENROUTER_API_TOKEN;
   }
 
+  // E2B credential for thread orbs (sandboxes). Optional: without it the deployment runs with
+  // orbs disabled (executeShell tool reports machines unavailable) — no code change to enable.
+  if (environment.E2B_API_KEY) {
+    backend.E2B_API_KEY = environment.E2B_API_KEY;
+  } else {
+    console.warn("E2B_API_KEY is not configured; deploying with thread orbs disabled.");
+  }
+
   // Microsoft Entra is the deployment's only sign-in method. Its app-registration credentials are
   // deploy-time secrets (MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET / MICROSOFT_TENANT_ID);
   // until all three are configured the gatekeeper deploys unconfigured and sign-in shows its
@@ -392,6 +400,21 @@ function build() {
 }
 
 async function main() {
+  // Load repo-root .env (E2B_API_KEY, OPENROUTER_API_TOKEN, ...) into process.env for local
+  // deploys; existing environment variables win. CI sets real env vars and has no .env.
+  try {
+    const envFile = await readFile(join(root, ".env"), "utf8");
+    for (const line of envFile.split("\n")) {
+      const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
+      if (!match || line.trimStart().startsWith("#")) continue;
+      const [, name, rawValue] = match;
+      if (process.env[name] !== undefined) continue;
+      process.env[name] = rawValue.replace(/^["']|["']$/g, "");
+    }
+  } catch {
+    // No .env file — fine.
+  }
+
   const config = validateConfig(await readJsonc(join(root, "deployment/workers-dev.jsonc")));
   // Fold in the secret-configured Entra admin principal (if provided) before generating configs.
   config.auth = { ...config.auth, admins: resolveAdmins(config) };

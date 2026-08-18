@@ -326,6 +326,15 @@ export interface AgentHooks {
                    initiator: AiChatAuthorInfo, initiatorModelId: string,
                    bindings: Record<string, ChatBindingEntry>,
                    onOutputText?: (delta: string) => void): Promise<string>;
+
+  /**
+   * Run one shell command inside the thread's orb (E2B sandbox), waking it first if needed.
+   * Returns collected stdout/stderr/exit code. Throws an agent-readable error when orbs are
+   * disabled for the deployment. Commands are bounded (output size + wall-clock) — long-running
+   * work belongs in background processes.
+   */
+  executeShellInOrb(command: string, timeoutMs: number)
+      : Promise<{stdout: string, stderr: string, exitCode: number}>;
   activeAgentCallbackCount(chatId: number): number;
   rejectAllAgentCallbacks(chatId: number, error: string): void;
   consumeCapturedActions(chatId: number)
@@ -2813,6 +2822,41 @@ export async function runAgent(
           toolCallNotes.set(toolCallId, {
             error: toolErrorText(error)
           });
+          throw error;
+        }
+      }
+    }),
+
+    executeShell: defineTool({
+      name: "executeShell",
+      label: "Run shell command",
+      description:
+          "Runs one shell command inside this thread's machine (a persistent Linux sandbox " +
+          "that belongs to this thread). The machine has a real filesystem, network access, " +
+          "and common tools (bash, git, node, python). State persists across commands and " +
+          "across the machine sleeping/waking, so you can install packages, clone repos, and " +
+          "build multi-step workflows. Output is captured after the command completes; keep " +
+          "individual commands under ~2 minutes and run longer work in the background " +
+          "(`nohup ... &`).",
+      parameters: Type.Object({
+        command: Type.String({
+          description: "The shell command to run (executed with bash -lc).",
+        }),
+      }),
+      execute: async (toolCallId, {command}) => {
+        try {
+          let result = await hooks.executeShellInOrb(command, 120_000);
+          let text = [
+            result.stdout,
+            result.stderr ? `\n[stderr]\n${result.stderr}` : "",
+            result.exitCode !== 0 ? `\n[exit code: ${result.exitCode}]` : "",
+          ].join("");
+          if (text.length > 40_000) {
+            text = text.slice(0, 40_000) + "\n[output truncated]";
+          }
+          return toolResult(text || "(no output)", {output: text} as Partial<AiToolCall>);
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
           throw error;
         }
       }

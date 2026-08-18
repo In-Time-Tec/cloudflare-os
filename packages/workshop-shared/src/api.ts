@@ -1314,6 +1314,13 @@ export type ThreadMetadata = {
   sharingProhibited?: boolean;
 
   /**
+   * State of the thread's orb (the E2B sandbox backing this thread): "none" until first use,
+   * "running" while awake, "paused" once idle-snapshotted. Absent when the deployment has orbs
+   * disabled. Delivered through subscribeToMetadata so the UI status chip updates live.
+   */
+  orbStatus?: "none" | "running" | "paused";
+
+  /**
    * Various objects in the API specify a artifactId, but make the property optional. When omitted,
    * the default artifact ID should be assumed. This is largely for backwards compatibility with
    * records that were stored before threads could have multiple artifacts.

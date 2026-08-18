@@ -46,6 +46,9 @@ import {
   validateChatAttachmentUpload,
 } from "./chat-attachment-validation";
 import { renderArtifactPdf } from "./browser-export";
+import { DEFAULT_ORB_SETTINGS, destroyOrb, orbIdleExpired, sleepOrb, touchOrb, wakeOrb, type OrbSettings, type OrbState, type OrbStatus } from "./orb/orb-manager";
+import { runCommand as runOrbCommand } from "./orb/envd";
+import { Effect } from "effect";
 
 const logger = createWorkshopLogger("workshop.overseer");
 export const AGENT_RUNNING_ERROR_MESSAGE = "Agent is running, wait for it to finish.";
@@ -814,6 +817,10 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
       // True if any past observation was authorized that had the `prohibitAllSharing` flag set
       // in its `ObservationDescription`.
       prohibitAllSharing: false,
+
+      // The thread's orb (E2B sandbox) state. Created lazily on first agent turn when orbs are
+      // enabled; the DO is the single writer of these fields (see src/orb/orb-manager.ts).
+      orbState: <OrbState>{ status: "none", lastActivity: 0 },
     },
 
     collections: {
@@ -1284,6 +1291,76 @@ class OverseerImpl implements AgentHooks {
       // Zero -> one running agents: schedule the keep-alive alarm.
       this.ctx.storage.setAlarm(Date.now() + OverseerImpl.#AGENT_KEEPALIVE_ALARM_MS);
     }
+    // Every agent turn is orb activity: wake (create/resume) the thread's orb in the
+    // background so it's warm by the time the agent reaches for it. Errors are logged by the
+    // orb module and never block the turn.
+    this.ctx.waitUntil(this.ensureOrbAwake().catch(() => {}));
+  }
+
+  /** The deployment-wide orb settings (admin-configurable later; env-gated for now). */
+  orbSettings(): OrbSettings {
+    if (!this.env.E2B_API_KEY) return { ...DEFAULT_ORB_SETTINGS, enabled: false };
+    return { ...DEFAULT_ORB_SETTINGS, enabled: true };
+  }
+
+  /** Storage adapter handed to the orb module (single writer: this DO). */
+  #orbStore() {
+    return {
+      get: () => this.storage.orbState.get(),
+      put: (state: OrbState) => { this.storage.orbState.put(state); },
+    };
+  }
+
+  /**
+   * Wake (create or resume) this thread's orb and (re-)arm the idle-pause alarm check.
+   * No-op when orbs are disabled for the deployment.
+   */
+  async ensureOrbAwake(): Promise<void> {
+    let settings = this.orbSettings();
+    if (!settings.enabled) return;
+    await wakeOrb(this.env.E2B_API_KEY!, this.ctx.id.toString(), settings, this.#orbStore());
+    // The shared DO alarm may be held by agent keep-alive; orb idleness is checked
+    // opportunistically in alarm() and on unregister. Ensure some alarm exists.
+    let pauseAt = Date.now() + settings.idleMinutes * 60_000 + 30_000;
+    let current = await this.ctx.storage.getAlarm();
+    if (current === null || current > pauseAt) {
+      this.ctx.storage.setAlarm(pauseAt);
+    }
+  }
+
+  /** Record orb activity without a control-plane call (alarm reads lastActivity). */
+  touchOrbActivity(): void {
+    touchOrb(this.#orbStore());
+  }
+
+  /** Pause the orb if it has been idle past the deployment's idle window. */
+  async maybePauseIdleOrb(): Promise<void> {
+    let settings = this.orbSettings();
+    if (!settings.enabled) return;
+    let state = this.storage.orbState.get();
+    if (orbIdleExpired(state, settings, Date.now())) {
+      await sleepOrb(this.env.E2B_API_KEY!, this.ctx.id.toString(), this.#orbStore());
+    } else if (state.status === "running") {
+      // Not idle yet: re-arm the check without clobbering an earlier alarm.
+      let pauseAt = state.lastActivity + settings.idleMinutes * 60_000 + 30_000;
+      let current = await this.ctx.storage.getAlarm();
+      if (current === null || current > pauseAt) {
+        this.ctx.storage.setAlarm(pauseAt);
+      }
+    }
+  }
+
+  /** Destroy the orb (thread deletion). */
+  async destroyThreadOrb(): Promise<void> {
+    let settings = this.orbSettings();
+    if (!this.env.E2B_API_KEY) return;
+    await destroyOrb(this.env.E2B_API_KEY, this.ctx.id.toString(), this.#orbStore()).catch(() => {});
+    void settings;
+  }
+
+  /** Current orb status for the UI. */
+  orbStatus(): OrbStatus {
+    return this.storage.orbState.get().status;
   }
 
   // Tear down all bookkeeping for a finished agent turn: remove it from the in-memory registry,
@@ -5602,6 +5679,25 @@ class OverseerImpl implements AgentHooks {
     return result;
   }
 
+  async executeShellInOrb(command: string, timeoutMs: number)
+      : Promise<{stdout: string, stderr: string, exitCode: number}> {
+    let settings = this.orbSettings();
+    if (!settings.enabled) {
+      throw new Error(
+          "This deployment has no machine (orb) configured, so shell commands are unavailable. " +
+          "Use executeCode and your env bindings instead.");
+    }
+    // Wake (or create) the orb; the returned id may differ from the stored one after a resume.
+    let {sandboxId} = await wakeOrb(
+        this.env.E2B_API_KEY!, this.ctx.id.toString(), settings, {
+          get: () => this.storage.orbState.get(),
+          put: (state) => { this.storage.orbState.put(state); },
+        });
+    let result = await Effect.runPromise(runOrbCommand(sandboxId, undefined, command, timeoutMs));
+    this.touchOrbActivity();
+    return result;
+  }
+
   // --- Connection-request hooks ---
 
   #ownerUserStub() {
@@ -6457,6 +6553,8 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
   async alarm() {
     await this.impl.waitForAllAgentsToComplete();
     await this.impl.deliverReadyExternalMessageResponses();
+    // Orb idleness rides the same shared alarm: pause when idle, or re-arm the check.
+    await this.impl.maybePauseIdleOrb();
   }
 
   #initializeEmptyCodeSnapshot(): void {
@@ -7347,6 +7445,9 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       role: "build",
       defaultArtifactId: this.impl.defaultArtifactId,
     };
+    if (this.impl.orbSettings().enabled) {
+      result.orbStatus = this.impl.orbStatus();
+    }
     if (!this.isOwner) {
       result.owner = await this.#owner.whoami();
     }
@@ -7366,6 +7467,9 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       role: "build",
       defaultArtifactId: this.impl.defaultArtifactId,
     };
+    if (this.impl.orbSettings().enabled) {
+      metadata.orbStatus = this.impl.orbStatus();
+    }
 
     // For collaborators, include owner info.
     if (!this.isOwner) {
@@ -7518,6 +7622,10 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
         await this.disableHook(record.id);
       }
     }
+
+    // Destroy the thread's orb (also frees a paused snapshot). Best-effort: a failed kill
+    // must not block thread deletion; orphans are E2B-listable by metadata.threadId.
+    await this.impl.destroyThreadOrb();
 
     await this.impl.ctx.blockConcurrencyWhile(async () => {
       await this.#owner.deleteThread(this.impl.ctx.id.toString());
