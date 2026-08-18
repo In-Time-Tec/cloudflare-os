@@ -13,6 +13,7 @@ import { FormatGlyph } from '../format/FormatVisuals'
 import { createFromFormat } from '../format/useOutputFormats'
 import { useThreads, useLibraryTemplates, useOutputFormatsQuery, useOwnTemplates } from '../../query/hooks'
 import { asTime } from '../../query/time'
+import { openNewThread } from './newThreadBus'
 
 // A ⌘K command palette: jump to a thread or a primary destination. Because it's keyboard-driven
 // and opened many times a day, it deliberately has *no* open/close animation (instant feels faster
@@ -193,7 +194,7 @@ export default function CommandPalette({
         id: 'nav-new',
         label: 'New thread',
         icon: <Plus size={15} weight="bold" />,
-        run: () => navigate({ to: '/' }),
+        run: () => openNewThread(),
       },
       ...formatCommands,
       {

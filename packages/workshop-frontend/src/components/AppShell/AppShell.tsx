@@ -7,6 +7,7 @@ import { useConnectionLost } from '../../RpcContext'
 import Sidebar from './Sidebar'
 import { ConversationsProvider } from '../../conversations/ConversationsContext'
 import CommandPalette from './CommandPalette'
+import NewThreadDialog from './NewThreadDialog'
 import { OPEN_COMMAND_PALETTE_EVENT } from './commandPaletteBus'
 import { SidebarHoverPreviewProvider } from './SidebarHoverRow'
 
@@ -126,6 +127,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
         </div>
 
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+        <NewThreadDialog />
       </div>
     </div>
     </SidebarHoverPreviewProvider>

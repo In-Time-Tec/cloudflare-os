@@ -17,6 +17,7 @@ import { useSiteName } from '../../ServerConfigContext'
 import SiteLogo from '../SiteLogo'
 import { useGatekeeperApps } from '../../useGatekeeperApps'
 import { openCommandPalette } from './commandPaletteBus'
+import { openNewThread } from './newThreadBus'
 import { PendingIcon, useLinkPending } from '../PendingIcon'
 import SidebarItem from './SidebarItem'
 import {
@@ -153,14 +154,15 @@ export default function Sidebar({
               >
                 <MagnifyingGlass size={15} />
               </button>
-              <Link
-                to="/"
+              <button
+                type="button"
+                onClick={() => openNewThread()}
                 aria-label="New thread"
                 title="New thread"
                 className="press flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
               >
                 <NotePencil size={15} />
-              </Link>
+              </button>
             </div>
           </>
         )}
@@ -174,15 +176,26 @@ export default function Sidebar({
           {/* Primary nav */}
           <nav className={['flex flex-col gap-0.5', collapsed ? 'px-2' : 'px-1.5'].join(' ')}>
             {collapsed && (
-              <button
-                type="button"
-                onClick={() => openCommandPalette()}
-                aria-label="Search"
-                title="Search (⌘K)"
-                className="press mx-auto flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
-              >
-                <MagnifyingGlass size={15} />
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => openCommandPalette()}
+                  aria-label="Search"
+                  title="Search (⌘K)"
+                  className="press mx-auto flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
+                >
+                  <MagnifyingGlass size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openNewThread()}
+                  aria-label="New thread"
+                  title="New thread"
+                  className="press mx-auto flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
+                >
+                  <NotePencil size={15} />
+                </button>
+              </>
             )}
             <SidebarItem
               to="/"

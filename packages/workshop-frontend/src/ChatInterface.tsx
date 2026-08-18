@@ -31,6 +31,7 @@ import {
   Plus,
   Paperclip,
   ArrowUp,
+  ArrowRight,
   Swap,
   ArrowUUpLeft,
   ArrowsClockwise,
@@ -1775,6 +1776,7 @@ export const ChatInput = ({
   showThinkingTraces = true,
   onToggleThinkingTraces,
   docked = false,
+  dialog = false,
 }: {
   createCapsuleGatekeeper: (
     accountId: number,
@@ -1828,6 +1830,7 @@ export const ChatInput = ({
   showThinkingTraces?: boolean;
   onToggleThinkingTraces?: () => void;
   docked?: boolean;
+  dialog?: boolean;
   /** Show the "Pre-approve actions" menu item (only when there are uncovered candidates). */
   /** Open the pre-approval dialog (owned by the parent). */
   /** Called after a gatekeeper is connected via the attach flow, so the parent can refresh the
@@ -2865,7 +2868,7 @@ export const ChatInput = ({
     // captured-log floating chip with z-10, the textarea/mirror with z-[1])
     // so they can't paint on top of body-level portaled popovers like the
     // model picker dropdown opening above the composer.
-    <div className={`relative isolate ${docked ? "" : "px-4 py-4"} ${styles.chatInputRoot}`}>
+    <div className={`relative isolate ${docked || dialog ? "" : "px-4 py-4"} ${styles.chatInputRoot}`}>
       <input
         ref={attachmentInputRef}
         type="file"
@@ -2917,11 +2920,13 @@ export const ChatInput = ({
         </div>
       )}
 
-      <div className={docked ? "relative px-4 pb-3 pt-1" : "relative"}>
+      <div className={docked && !dialog ? "relative px-4 pb-3 pt-1" : "relative"}>
       <div
         ref={promptCardRef}
         className={
-          docked
+          dialog
+            ? "relative overflow-visible"
+            : docked
             ? "relative overflow-visible rounded-2xl border border-kumo-line bg-kumo-base"
             : "themed-prompt-card-shadow relative overflow-visible rounded-2xl border border-kumo-line bg-kumo-control transition-shadow duration-150 ease-out"
         }
@@ -2950,7 +2955,7 @@ export const ChatInput = ({
           </div>
         )}
         {/* Textarea */}
-        <div className="relative px-4 pb-1 pt-3">
+        <div className={dialog ? "relative px-4 pb-2 pt-5" : "relative px-4 pb-1 pt-3"}>
           {slashCommandPicker.popup}
           {/* The resolved command is marked by color alone, so announce it for screen readers. */}
           <div className="sr-only" aria-live="polite">
@@ -3016,7 +3021,9 @@ export const ChatInput = ({
                   ? blockedReason
                   : isAgentActive
                     ? "Waiting for agent…"
-                    : newChat
+                    : dialog
+                      ? "Write prompt..."
+                      : newChat
                       ? "Start a new conversation…"
                       : "Ask a follow-up…"
               }
@@ -3135,7 +3142,7 @@ export const ChatInput = ({
         )}
 
         {/* Footer row: connection/options left, model + send right */}
-        <div className="flex items-center justify-between gap-1.5 px-3 pb-1.5">
+        <div className={`flex items-center justify-between gap-1.5 ${dialog ? "px-3.5 pb-3" : "px-3 pb-1.5"}`}>
           <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
             <DropdownMenu>
               <DropdownMenu.Trigger
@@ -3188,7 +3195,11 @@ export const ChatInput = ({
                   render={
                     <button
                       type="button"
-                      className="group inline-flex h-8 min-w-0 max-w-[180px] cursor-pointer items-center gap-1.5 rounded-lg px-2 text-[13px] leading-5 tracking-[-0.25px] text-kumo-subtle transition-[background-color,color,transform] duration-150 ease-out hover:bg-kumo-tint hover:text-kumo-default focus-visible:bg-kumo-tint focus-visible:text-kumo-default focus-visible:outline-none active:scale-[0.97] data-[popup-open]:bg-kumo-tint data-[popup-open]:text-kumo-default"
+                      className={
+                        dialog
+                          ? "group inline-flex h-7 min-w-0 max-w-[180px] cursor-pointer items-center gap-1.5 rounded-full border border-kumo-line px-2.5 text-[12px] leading-5 tracking-[-0.25px] text-kumo-subtle transition-[background-color,color,transform] duration-150 ease-out hover:bg-kumo-tint hover:text-kumo-default focus-visible:bg-kumo-tint focus-visible:text-kumo-default focus-visible:outline-none active:scale-[0.97] data-[popup-open]:bg-kumo-tint data-[popup-open]:text-kumo-default"
+                          : "group inline-flex h-8 min-w-0 max-w-[180px] cursor-pointer items-center gap-1.5 rounded-lg px-2 text-[13px] leading-5 tracking-[-0.25px] text-kumo-subtle transition-[background-color,color,transform] duration-150 ease-out hover:bg-kumo-tint hover:text-kumo-default focus-visible:bg-kumo-tint focus-visible:text-kumo-default focus-visible:outline-none active:scale-[0.97] data-[popup-open]:bg-kumo-tint data-[popup-open]:text-kumo-default"
+                      }
                       aria-label="Select model"
                     >
                       {selectedModelInfo && (
@@ -3256,7 +3267,7 @@ export const ChatInput = ({
                   className="!h-7 !w-7 !rounded-full disabled:cursor-not-allowed disabled:opacity-30"
                   aria-label="Send message"
                 >
-                  <ArrowUp size={14} weight="bold" />
+                  {dialog ? <ArrowRight size={14} weight="bold" /> : <ArrowUp size={14} weight="bold" />}
                 </WorkshopIconButton>
               )}
           </div>

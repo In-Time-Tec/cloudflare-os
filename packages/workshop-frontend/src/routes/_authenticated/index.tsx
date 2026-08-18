@@ -1,26 +1,12 @@
-import { logRpcFailure } from "../../rpcErrors";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useEffect } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useKumoToastManager } from "@cloudflare/kumo";
-import { ChatInput } from "../../ChatInterface";
-import HomeTaskSuggestions from "../../components/AppShell/HomeTaskSuggestions";
-import { useAuthenticatedApi } from "../../AuthContext";
-import { useModels, modelsOptions } from "../../query/hooks";
-import { RpcStub } from "capnweb";
-import {
-  Overseer,
-  CapsuleSpecifier,
-  ChatAttachmentHandle,
-  MessageFormatRef,
-  SlashCommandRequest,
-} from "@gadgets/workshop-shared/api";
-import {
-  getStoredSelectedModel,
-  persistSelectedModel,
-} from "../../modelSelection";
-import { useDocumentTitle } from "../../useDocumentTitle";
+import HomeDashboard from "../../components/AppShell/HomeDashboard";
+import { openNewThread } from "../../components/AppShell/newThreadBus";
+import { glanceRange } from "../../homeGreeting";
 import { homePromptFromSearch } from "../../homePrompt";
-import { composerDraftStorageKey } from "../../composerDraft";
+import { agendaOptions } from "../../query/conversations";
+import { modelsOptions } from "../../query/hooks";
+import { useDocumentTitle } from "../../useDocumentTitle";
 
 type HomeSearch = { prompt?: string };
 
@@ -29,151 +15,34 @@ export const Route = createFileRoute("/_authenticated/")({
   validateSearch: (search: Record<string, unknown>): HomeSearch => ({
     prompt: homePromptFromSearch(search.prompt),
   }),
-  loader: ({ context }) =>
-    context.queryClient.ensureQueryData({
-      ...modelsOptions(context.session),
-      revalidateIfStale: true,
-    }),
+  loader: async ({ context }) => {
+    const range = glanceRange();
+    await Promise.all([
+      context.queryClient.ensureQueryData({
+        ...modelsOptions(context.session),
+        revalidateIfStale: true,
+      }),
+      context.queryClient.ensureQueryData({
+        ...agendaOptions(context.session, range.from, range.to),
+        revalidateIfStale: true,
+      }),
+    ]);
+  },
 });
 
-// The Home page is the "new thread" launcher. Persistent navigation (recents, favorites) lives
-// in the AppShell rail, so this page focuses on a single thing: composing the first message of a
-// new gadget — a centered column with a hero, the prompt composer, and a few task suggestions.
 function HomePage() {
   return <HomePageContent prompt={Route.useSearch().prompt} />;
 }
 
 export function HomePageContent({ prompt }: HomeSearch) {
   useDocumentTitle("Home");
-
-  const { authenticatedApi, currentUser } = useAuthenticatedApi();
   const navigate = useNavigate();
-  const toasts = useKumoToastManager();
-
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  // Bumped each time a task suggestion is picked; the composer re-seeds its text off the nonce.
-  const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null);
 
   useEffect(() => {
     if (!prompt) return;
-    setSeed((previous) => ({ text: prompt, nonce: (previous?.nonce ?? 0) + 1 }));
+    openNewThread({ seed: prompt });
     navigate({ to: "/", search: {}, replace: true });
   }, [navigate, prompt]);
 
-  const { data: models = [] } = useModels()
-
-  // Seed the persisted selected-model preference once models arrive.
-  useEffect(() => {
-    if (models.length > 0) setSelectedModel(getStoredSelectedModel(models))
-  }, [models])
-
-  const handleModelChange = useCallback((value: string | null) => {
-    setSelectedModel(value);
-    persistSelectedModel(value);
-  }, []);
-
-  // Pre-create a provisional gadget as soon as the user starts interacting, so that navigation
-  // after submit is instant. Same pattern as before — disposed on unmount if never consumed.
-  const provisionalOverseerRef = useRef<{ stub: RpcStub<Overseer> } | null>(null);
-
-  const ensureProvisionalGadget = useCallback(() => {
-    if (!provisionalOverseerRef.current) {
-      const overseer = authenticatedApi.newThread();
-      provisionalOverseerRef.current = { stub: overseer };
-    }
-  }, [authenticatedApi]);
-
-  useEffect(() => {
-    return () => {
-      provisionalOverseerRef.current?.stub[Symbol.dispose]();
-      provisionalOverseerRef.current = null;
-    };
-  }, []);
-
-  const handleSend = useCallback(
-    async (
-      message: string | SlashCommandRequest,
-      modelId: string | null,
-      capsules?: CapsuleSpecifier[],
-      attachments?: ChatAttachmentHandle[],
-      formats?: MessageFormatRef[],
-    ) => {
-      try {
-        ensureProvisionalGadget();
-        const overseer = provisionalOverseerRef.current!.stub;
-        // Pipeline both independent calls in one batch, but settle both before releasing the stub.
-        const [, {id}] = await Promise.all([
-          overseer.newChat(message, modelId, capsules, attachments, formats),
-          overseer.getMetadata(),
-        ]);
-        provisionalOverseerRef.current?.stub[Symbol.dispose]();
-        provisionalOverseerRef.current = null;
-        // Open the thread we just started (the thread IS the conversation).
-        navigate({ to: "/thread/$id", params: { id } });
-      } catch (err) {
-        const transient = logRpcFailure("Failed to create gadget:", err,
-            { reportSite: "thread.create" });
-        // A retry reuses the provisional gadget while the draft contains gadget-scoped references.
-        if (!attachments?.length && !capsules?.length) {
-          provisionalOverseerRef.current?.stub[Symbol.dispose]();
-          provisionalOverseerRef.current = null;
-        }
-        if (!transient) {
-          toasts.add({ title: "Failed to create thread", variant: "error" });
-        }
-        throw err;
-      }
-    },
-    [ensureProvisionalGadget, navigate, toasts],
-  );
-
-  const getOverseer = useCallback((): RpcStub<Overseer> => {
-    ensureProvisionalGadget();
-    return provisionalOverseerRef.current!.stub;
-  }, [ensureProvisionalGadget]);
-
-  const createCapsuleGatekeeper = useCallback(
-    (accountId: number, url: string) => {
-      ensureProvisionalGadget();
-      return provisionalOverseerRef.current!.stub.newGatekeeper(accountId, url);
-    },
-    [ensureProvisionalGadget],
-  );
-
-  return (
-    <div className="relative isolate flex min-h-full w-full flex-col items-center justify-center px-4 py-16 sm:px-8">
-      <div className="flex w-full max-w-2xl flex-col items-stretch gap-6">
-        <header className="text-center">
-          <h1 className="text-3xl font-semibold tracking-tight leading-tight text-kumo-default sm:text-4xl">
-            What are we working on?
-          </h1>
-        </header>
-
-        <ChatInput
-          createCapsuleGatekeeper={createCapsuleGatekeeper}
-          getOverseer={getOverseer}
-          onSend={handleSend}
-          isAgentActive={false}
-          models={models}
-          selectedModel={selectedModel}
-          onModelChange={handleModelChange}
-          newChat
-          offerFormats
-          autoFocus
-          minRows={3}
-          seedText={seed?.text}
-          seedNonce={seed?.nonce}
-          draftStorageKey={currentUser
-            ? composerDraftStorageKey(currentUser.id, "home")
-            : undefined}
-        />
-
-        <HomeTaskSuggestions
-          onPick={(suggestion) =>
-            setSeed((prev) => ({ text: suggestion, nonce: (prev?.nonce ?? 0) + 1 }))
-          }
-        />
-      </div>
-    </div>
-  );
+  return <HomeDashboard />;
 }
