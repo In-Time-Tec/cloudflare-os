@@ -15,8 +15,8 @@ import { forwardTrustedFrameError } from './errorReporting'
 import { useAuthenticatedApi } from './AuthContext'
 import {
   normalizeGatekeeperAppPrompt,
-  parseGatekeeperAppWorkspaceTarget,
-  type GatekeeperAppWorkspaceTarget,
+  parseGatekeeperAppThreadTarget,
+  type GatekeeperAppThreadTarget,
 } from './gatekeeperAppNavigation'
 import {
   persistGatekeeperAppPaint,
@@ -39,20 +39,20 @@ type PresentAck = { rect: OverlayRect | null; willResize: boolean }
 
 // Grows the app's iframe to a full-viewport overlay for app-level modals (true) or restores it (false).
 type PresentController = (active: boolean) => PresentAck
-type OpenTarget = (target: GatekeeperAppWorkspaceTarget) => void
-// Resolves workspace IDs the app already holds to their live titles; null for a workspace the user
+type OpenTarget = (target: GatekeeperAppThreadTarget) => void
+// Resolves thread IDs the app already holds to their live titles; null for a thread the user
 // can no longer see. Deliberately a lookup, not an enumeration: the app learns nothing new.
-type ResolveWorkspaceTitles = (ids: string[]) => Promise<(string | null)[]>
+type ResolveThreadTitles = (ids: string[]) => Promise<(string | null)[]>
 type OpenPrompt = (prompt: string) => void
 
 type OverlayState = 'full' | null
 
-// Upper bound on one workspace-title lookup, matching the app's page size.
-const MAX_RESOLVED_WORKSPACES = 100
+// Upper bound on one thread-title lookup, matching the app's page size.
+const MAX_RESOLVED_THREADS = 100
 
 // How long one gadget listing is reused across title lookups. The untrusted frame calls this once
 // per page of rows (and could call it in a loop), so the listing is shared rather than repeated.
-const WORKSPACE_TITLES_TTL_MS = 10_000
+const THREAD_TITLES_TTL_MS = 10_000
 
 // Near the max int, so the full-viewport iframe sits above all Workshop chrome.
 const overlayZIndex = 2147483000
@@ -94,7 +94,7 @@ class GatekeeperAppHostImpl extends RpcTarget {
   readonly #present: PresentController
   readonly #openTarget: OpenTarget
   readonly #openPrompt: OpenPrompt
-  readonly #resolveWorkspaceTitles: ResolveWorkspaceTitles
+  readonly #resolveThreadTitles: ResolveThreadTitles
   readonly #appId: string
   #presenting = false
   #theme: GatekeeperAppTheme
@@ -109,7 +109,7 @@ class GatekeeperAppHostImpl extends RpcTarget {
     theme: GatekeeperAppTheme,
     openTarget: OpenTarget,
     openPrompt: OpenPrompt,
-    resolveWorkspaceTitles: ResolveWorkspaceTitles,
+    resolveThreadTitles: ResolveThreadTitles,
     appId: string,
   ) {
     super()
@@ -127,7 +127,7 @@ class GatekeeperAppHostImpl extends RpcTarget {
     this.#present = present
     this.#openTarget = openTarget
     this.#openPrompt = openPrompt
-    this.#resolveWorkspaceTitles = resolveWorkspaceTitles
+    this.#resolveThreadTitles = resolveThreadTitles
   }
 
   readPersistedSnapshot(): unknown {
@@ -146,19 +146,19 @@ class GatekeeperAppHostImpl extends RpcTarget {
     return this.#ui
   }
 
-  // Navigate to a workspace the app knows about. The IDs are validated here because the app is
+  // Navigate to a thread the app knows about. The IDs are validated here because the app is
   // untrusted; navigation stays in-app rather than handing the frame a URL to follow.
-  openWorkspace(workspaceId: string, gadgetId?: number): void {
-    this.#openTarget(parseGatekeeperAppWorkspaceTarget(workspaceId, gadgetId))
+  openThread(threadId: string, gadgetId?: number): void {
+    this.#openTarget(parseGatekeeperAppThreadTarget(threadId, gadgetId))
   }
 
-  // Resolve live titles for workspaces the app already references, so it never renders a stale
-  // snapshot. Bounded per call; unknown or no-longer-visible workspaces come back as null.
-  resolveWorkspaceTitles(ids: string[]): Promise<(string | null)[]> {
-    if (!Array.isArray(ids) || ids.length > MAX_RESOLVED_WORKSPACES) {
-      throw new TypeError('Invalid workspace title lookup.')
+  // Resolve live titles for threads the app already references, so it never renders a stale
+  // snapshot. Bounded per call; unknown or no-longer-visible threads come back as null.
+  resolveThreadTitles(ids: string[]): Promise<(string | null)[]> {
+    if (!Array.isArray(ids) || ids.length > MAX_RESOLVED_THREADS) {
+      throw new TypeError('Invalid thread title lookup.')
     }
-    return this.#resolveWorkspaceTitles(ids)
+    return this.#resolveThreadTitles(ids)
   }
 
   openPrompt(prompt: string): void {
@@ -289,20 +289,20 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
         : null
     return { rect, willResize }
   }, [setOverlayPhase])
-  const openTarget = useCallback<OpenTarget>(({ workspaceId, gadgetId }) => {
+  const openTarget = useCallback<OpenTarget>(({ threadId, gadgetId }) => {
     navigate({
-      to: '/workspace/$id',
-      params: { id: workspaceId },
+      to: '/thread/$id',
+      params: { id: threadId },
       search: gadgetId === undefined ? {} : { w: gadgetId },
     })
   }, [navigate])
   const titlesRef = useRef<{ at: number, titles: Promise<Map<string, string>> } | null>(null)
-  const resolveWorkspaceTitles = useCallback<ResolveWorkspaceTitles>(async (ids) => {
+  const resolveThreadTitles = useCallback<ResolveThreadTitles>(async (ids) => {
     let entry = titlesRef.current
-    if (!entry || Date.now() - entry.at >= WORKSPACE_TITLES_TTL_MS) {
+    if (!entry || Date.now() - entry.at >= THREAD_TITLES_TTL_MS) {
       entry = {
         at: Date.now(),
-        titles: authenticatedApi.listGadgets()
+        titles: authenticatedApi.listThreads()
           .then((gadgets) => new Map(gadgets.map((gadget) => [gadget.id, gadget.title]))),
       }
       titlesRef.current = entry
@@ -367,7 +367,7 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
         themeRef.current,
         openTarget,
         openPrompt,
-        resolveWorkspaceTitles,
+        resolveThreadTitles,
         gatekeeperVendorId,
       )
       hostRef.current = host
@@ -408,7 +408,7 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
     // Re-establish the session if either the HTML or the `ui` capability changes, so a new frame
     // carrying a fresh stub (even with identical HTML) never keeps talking through the stale one.
   }, [frame.iframeHtml, frame.ui, gatekeeperVendorId, openPrompt, openTarget,
-      present, resolveWorkspaceTitles, setOverlayPhase])
+      present, resolveThreadTitles, setOverlayPhase])
 
   return (
     <iframe

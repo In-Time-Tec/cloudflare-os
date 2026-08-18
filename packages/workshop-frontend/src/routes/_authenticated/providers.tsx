@@ -50,7 +50,7 @@ function ModelLogo({ model }: { model: AiChatAuthorInfo }) {
   )
 }
 
-// Rows mirror the Blueprints list. User-managed modes make the row a quick-model control and add a
+// Rows mirror the Templates list. User-managed modes make the row a quick-model control and add a
 // kebab menu; locked deployment-managed models are informational only.
 function ModelRow({
   model,
@@ -295,7 +295,7 @@ function ProvidersPage() {
             <div>
               <p className="text-sm font-medium text-kumo-default">No AI providers yet</p>
               <p className="mt-1 text-[13px] leading-[18px] text-kumo-subtle">
-                Add a provider to start building workspaces with AI.
+                Add a provider to start building threads with AI.
               </p>
             </div>
             {canAddModels && (

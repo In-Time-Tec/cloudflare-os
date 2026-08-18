@@ -35,9 +35,13 @@ declare global {
       DEPLOYMENT_AI_DEFAULT_MODEL?: string; // Suggested model ID placed first in model lists
       OPENROUTER_API_TOKEN?: string;        // Backend-only Worker secret
 
-      // Blueprint storage bindings.
-      BLUEPRINTS: KVNamespace;             // Workers KV for blueprint metadata lookup
-      BLUEPRINT_CONTENT: R2Bucket;         // R2 bucket for blueprint code snapshots
+      // E2B control-plane credential for thread orbs (sandboxes). Backend-only Worker secret;
+      // never forwarded to sandboxes, agents, or the frontend. Absent = orbs disabled.
+      E2B_API_KEY?: string;
+
+      // Template storage bindings.
+      TEMPLATES: KVNamespace;             // Workers KV for template metadata lookup
+      TEMPLATE_CONTENT: R2Bucket;         // R2 bucket for template code snapshots
 
       // User avatar storage.
       AVATARS: KVNamespace;                // Workers KV for user avatar images

@@ -19,8 +19,8 @@ describe('WorkpiecePicker', () => {
     await act(async () => root!.render(
       <WorkpiecePicker
         gadgets={[
-          { id: 1, type: 'gadget', title: 'Hooked' },
-          { id: 2, type: 'gadget', title: 'Ordinary' },
+          { id: 1, type: 'artifact', title: 'Hooked' },
+          { id: 2, type: 'artifact', title: 'Ordinary' },
         ]}
         selectedId={null}
         expanded={expanded}

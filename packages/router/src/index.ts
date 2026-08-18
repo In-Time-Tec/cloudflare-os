@@ -35,8 +35,8 @@ export default {
     }
 
     if (url.pathname === "/api" || url.pathname.startsWith("/api/") ||
-        url.pathname === "/blueprint-screenshot" ||
-        url.pathname.startsWith("/blueprint-screenshot/")) {
+        url.pathname === "/template-screenshot" ||
+        url.pathname.startsWith("/template-screenshot/")) {
       return env.WORKSHOP_BACKEND.fetch(req);
     }
 

@@ -17,7 +17,7 @@ export default function NewFormatRow({ label = 'Start with' }: { label?: string 
       <div className="flex flex-wrap items-center justify-center gap-2">
         {formats.map((format) => (
           <button
-            key={format.blueprintId}
+            key={format.templateId}
             type="button"
             disabled={creating !== null}
             onClick={() => create(format)}
@@ -27,9 +27,9 @@ export default function NewFormatRow({ label = 'Start with' }: { label?: string 
             <FormatGlyph
               output={format.output}
               size="md"
-              className={creating === format.blueprintId ? 'animate-pulse' : 'text-kumo-subtle'}
+              className={creating === format.templateId ? 'animate-pulse' : 'text-kumo-subtle'}
             />
-            {creating === format.blueprintId ? `Creating…` : `New ${format.output.noun}`}
+            {creating === format.templateId ? `Creating…` : `New ${format.output.noun}`}
           </button>
         ))}
       </div>

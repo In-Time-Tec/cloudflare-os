@@ -35,7 +35,7 @@ Alternatively, you can [deploy to your Cloudflare account](https://os.cloudflare
 
 Try prompts like:
 
-* "Make slides for my upcoming meeting with a customer." (This will use the built-in slides blueprint.)
+* "Make slides for my upcoming meeting with a customer." (This will use the built-in slides template.)
 * "Make a collaborative whiteboard app." (This will create a new app from scratch.)
 * "Make a tic tac toe game." followed by "I'll be X and you be O. I've made my first move. Your turn."
 * "Make an issue dashboard for this GitHub repo." (Attach a repo; requires that the GitHub integration is configured.)
@@ -86,9 +86,9 @@ Just like office docs, each gadget is private by default, but can be shared -- s
 
 Just like office docs, you can have thousands of them. You can create them on a whim.
 
-Just like office docs, you can start from "templates" -- called "Blueprints". But where an office template is just some content, a Blueprint specifies a whole application.
+Just like office docs, you can start from "templates" -- called "Templates". But where an office template is just some content, a Template specifies a whole application.
 
-Like office docs, you can create new templates (blueprints) from your own docs (Gadgets) and share them with others. But when you do so, you are sharing the code for a whole app.
+Like office docs, you can create new templates (templates) from your own docs (Gadgets) and share them with others. But when you do so, you are sharing the code for a whole app.
 
 ### It kind of is an Operating System
 
@@ -100,7 +100,7 @@ The OS terminology isn't *entirely* marketing. Cloudflare OS is actually analogo
 | device drivers | packages/gatekeeper-*      |
 | shell          | packages/workshop-frontend |
 | processes      | gadgets                    |
-| executables    | blueprints                 |
+| executables    | templates                 |
 | users          | users                      |
 | ACLs           | shared permissions         |
 | ???            | agents                     |
@@ -147,11 +147,11 @@ You can share your Gadget just like you'd share a document in a typical online o
 
 This works because every Gadget is backed by a [Durable Object](https://developers.cloudflare.com/durable-objects/), Cloudflare's stateful serverless primitive which makes real-time multiplayer collaboration easy. It's so easy that the coding agent just implements it by default, without being asked.
 
-### Blueprints: Share your code
+### Templates: Share your code
 
-If you've created a Gadget that might be useful to others, but you don't want to share the Gadget itself, you can instead share a Blueprint, allowing other people to create their own copy of the Gadget. A Blueprint is essentially a copy of the code.
+If you've created a Gadget that might be useful to others, but you don't want to share the Gadget itself, you can instead share a Template, allowing other people to create their own copy of the Gadget. A Template is essentially a copy of the code.
 
-It may sound simple, but Blueprints are a major change from cloud software tradition. Traditionally, if you create a web app that you want to share with other users, you host the app on your server, and the users connect to that. Blueprints are much more like mobile apps and traditional PC apps: every user runs their own copy of the software.
+It may sound simple, but Templates are a major change from cloud software tradition. Traditionally, if you create a web app that you want to share with other users, you host the app on your server, and the users connect to that. Templates are much more like mobile apps and traditional PC apps: every user runs their own copy of the software.
 
 In the age of AI, this change is critically important. On one hand, AI empowers an individual developer to build more than ever, but it is still difficult for an individual developer to maintain an online service; this eliminates the need. On the other hand -- and even more importantly -- allowing each user to run their own copy of the software empowers the user to *change* the software to meet their needs, using AI. No need to file a feature request, no need to beg the developer to prioritize it. The end user can solve their own problems.
 

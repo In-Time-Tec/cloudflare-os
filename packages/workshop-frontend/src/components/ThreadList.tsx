@@ -1,0 +1,504 @@
+import { Link } from '@tanstack/react-router'
+import { PendingIcon, useLinkPending } from './PendingIcon'
+import { Clock, MagnifyingGlass, Hexagon, DotsThreeVertical, ShareNetwork, Trash, Info, Star, Pencil, ArrowRight } from '@phosphor-icons/react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { DropdownMenu, Dialog, Button, useKumoToastManager } from '@cloudflare/kumo'
+import { RpcStub } from 'capnweb'
+import { useAuthenticatedApi } from '../AuthContext'
+import { useQueryClient } from '@tanstack/react-query'
+import { threadsKey, useFeaturedTemplates, useThreads, useWhoami } from '../query/hooks'
+import { asTime } from '../query/time'
+import { useThreadMutations } from '../query/useThreadMutations'
+import { ThreadMetadataWithTimestamps, TemplatePublicInfo, Overseer } from '@gadgets/workshop-shared/api'
+import ShareModal from '../ShareModal'
+import { BindingBadge, getGradient as getTemplateGradient, uniqueBindingBadges } from './TemplateCard'
+import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './menuStyles'
+import { TemplatePreviewImage } from './TemplatePreviewImage'
+import DeleteConfirmationDialog from './DeleteConfirmationDialog'
+
+// Neutral monogram for a thread — matches the sidebar treatment (no per-item color noise).
+function initials(title: string | undefined): string {
+  const t = (title || 'Untitled').trim()
+  if (!t) return 'UG'
+  const parts = t.split(/\s+/).slice(0, 2)
+  return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || t.slice(0, 2).toUpperCase()
+}
+
+function formatRelativeTime(date: Date | string | number): string {
+  const diff = Date.now() - asTime(date)
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+function formatCost(cost: number): string {
+  return `$${cost.toFixed(4)}`
+}
+
+function AppRow({
+  gadget,
+  onDelete,
+  onShare,
+  onInfo,
+  onTogglePin,
+  onRename,
+}: {
+  gadget: ThreadMetadataWithTimestamps
+  onDelete: (gadget: ThreadMetadataWithTimestamps) => void
+  onShare: (gadget: ThreadMetadataWithTimestamps) => void
+  onInfo: (gadget: ThreadMetadataWithTimestamps) => void
+  onTogglePin: (gadget: ThreadMetadataWithTimestamps) => void
+  onRename: (gadget: ThreadMetadataWithTimestamps, newTitle: string) => void
+}) {
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState(gadget.title || '')
+  const renameInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isRenaming) renameInputRef.current?.focus()
+  }, [isRenaming])
+
+  const commitRename = () => {
+    const trimmed = renameValue.trim()
+    if (trimmed && trimmed !== gadget.title) {
+      onRename(gadget, trimmed)
+    }
+    setIsRenaming(false)
+  }
+
+  const startRenaming = () => {
+    setRenameValue(gadget.title || '')
+    setIsRenaming(true)
+  }
+  const pending = useLinkPending({ to: '/thread/$id', params: { id: gadget.id } })
+
+  return (
+    <Link
+      to="/thread/$id"
+      params={{ id: gadget.id }}
+      aria-busy={pending}
+      className="group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint"
+      onClick={(e) => {
+        // Prevent navigation when renaming or clicking the menu
+        if (isRenaming) e.preventDefault()
+      }}
+    >
+      {/* Neutral monogram */}
+      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-kumo-fill text-[12px] font-medium text-kumo-subtle">
+        <PendingIcon pending={pending} size={20}>
+          {initials(gadget.title)}
+        </PendingIcon>
+      </div>
+
+      {/* Info */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          {gadget.pinned && <Star size={12} weight="fill" className="text-kumo-brand flex-shrink-0" />}
+          {isRenaming ? (
+            <input
+              ref={renameInputRef}
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename()
+                if (e.key === 'Escape') setIsRenaming(false)
+              }}
+              className="text-sm font-medium text-kumo-default bg-transparent border-b border-kumo-brand outline-none w-full min-w-0"
+              onClick={(e) => e.preventDefault()}
+            />
+          ) : (
+            <h3 className="text-sm font-medium text-kumo-default truncate">
+              {gadget.title || 'Untitled Thread'}
+            </h3>
+          )}
+        </div>
+        {gadget.owner && (
+          <p className="text-xs text-kumo-subtle truncate mt-0.5">
+            Shared by {gadget.owner.name}
+          </p>
+        )}
+      </div>
+
+      {/* Time */}
+      <span className="hidden lg:flex items-center gap-1 text-xs text-kumo-inactive flex-shrink-0">
+        <Clock size={10} />
+        {formatRelativeTime(gadget.lastActive)}
+      </span>
+
+      {/* Overflow menu — wrapper stops clicks from reaching the parent Link */}
+      <div onClick={(e) => { e.stopPropagation(); e.preventDefault() }}>
+      <DropdownMenu>
+        <DropdownMenu.Trigger
+          render={
+            <button
+              className="p-1.5 text-kumo-subtle hover:text-kumo-default rounded-md hover:bg-kumo-fill transition-colors sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+            >
+              <DotsThreeVertical size={16} />
+            </button>
+          }
+        />
+        <DropdownMenu.Content className={MENU_CONTENT}>
+          <DropdownMenu.Item onClick={startRenaming} className={MENU_ITEM}>
+            <Pencil size={13} className="mr-2" />
+            Rename
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onClick={() => onTogglePin(gadget)} className={MENU_ITEM}>
+            <Star size={13} className="mr-2" weight={gadget.pinned ? 'fill' : 'regular'} />
+            {gadget.pinned ? 'Unfavorite' : 'Favorite'}
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onClick={() => onInfo(gadget)} className={MENU_ITEM}>
+            <Info size={13} className="mr-2" />
+            Information
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onClick={() => onShare(gadget)} className={MENU_ITEM}>
+            <ShareNetwork size={13} className="mr-2" />
+            Share
+          </DropdownMenu.Item>
+          <DropdownMenu.Separator />
+          <DropdownMenu.Item
+            variant="danger"
+            onClick={() => onDelete(gadget)}
+            className={MENU_ITEM_DANGER}
+          >
+            <Trash size={13} className="mr-2" />
+            {gadget.owner ? 'Dismiss' : 'Delete'}
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu>
+      </div>
+    </Link>
+  )
+}
+
+export default function ThreadList({ showHeader = true }: { showHeader?: boolean } = {}) {
+  const { authenticatedApi } = useAuthenticatedApi()
+  const toasts = useKumoToastManager()
+  const queryClient = useQueryClient()
+  const { data: rawGadgets, isError: loadError } = useThreads()
+  const { data: userInfo = null } = useWhoami()
+  const { togglePin, renameThread, deleteThread, remove } = useThreadMutations()
+  const gadgets = useMemo(() => [...(rawGadgets ?? [])].toSorted((a, b) => {
+    if (a.pinned && !b.pinned) return -1
+    if (!a.pinned && b.pinned) return 1
+    return asTime(b.lastActive) - asTime(a.lastActive)
+  }), [rawGadgets])
+  const [search, setSearch] = useState('')
+
+  const [deleteTarget, setDeleteTarget] = useState<ThreadMetadataWithTimestamps | null>(null)
+
+  const [infoTarget, setInfoTarget] = useState<ThreadMetadataWithTimestamps | null>(null)
+
+  const [shareTarget, setShareTarget] = useState<ThreadMetadataWithTimestamps | null>(null)
+  const [shareOverseer, setShareOverseer] = useState<{ stub: RpcStub<Overseer> } | null>(null)
+
+  const loadGadgets = () => {
+    void queryClient.invalidateQueries({ queryKey: threadsKey() })
+  }
+
+  // Clean up share overseer when modal closes
+  useEffect(() => {
+    if (!shareTarget && shareOverseer) {
+      shareOverseer.stub[Symbol.dispose]()
+      setShareOverseer(null)
+    }
+  }, [shareTarget, shareOverseer])
+
+  // Dispose share overseer on unmount if still open
+  const shareOverseerRef = useRef(shareOverseer)
+  shareOverseerRef.current = shareOverseer
+  useEffect(() => {
+    return () => { shareOverseerRef.current?.stub[Symbol.dispose]() }
+  }, [])
+
+  const handleDelete = (gadget: ThreadMetadataWithTimestamps) => {
+    setDeleteTarget(gadget)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return
+    try {
+      await deleteThread(deleteTarget)
+      setDeleteTarget(null)
+    } catch {
+    }
+  }
+
+  const handleShare = async (gadget: ThreadMetadataWithTimestamps) => {
+    let overseer: RpcStub<Overseer> | null = null
+    try {
+      overseer = authenticatedApi.openThread(gadget.id)
+      const metadata = await overseer.getMetadata()
+      setShareOverseer({ stub: overseer })
+      setShareTarget({ ...gadget, ...metadata })
+      overseer = null
+    } catch (err) {
+      overseer?.[Symbol.dispose]()
+      console.error('Failed to open thread for sharing:', err)
+      toasts.add({ title: 'Failed to open share settings', variant: 'error' })
+    }
+  }
+
+  const handleTogglePin = (gadget: ThreadMetadataWithTimestamps) => {
+    togglePin(gadget)
+  }
+
+  const handleRename = (gadget: ThreadMetadataWithTimestamps, newTitle: string) => {
+    renameThread(gadget, newTitle)
+  }
+
+  const handleShareClose = () => {
+    setShareTarget(null)
+  }
+
+  const filtered = gadgets.filter((g) => {
+    if (!search) return true
+    return (g.title || '').toLowerCase().includes(search.toLowerCase())
+  })
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      {showHeader && (
+        <div className="px-6 sm:px-10 lg:px-10 pt-10 lg:pt-10 mb-4">
+          <h2 className="text-lg font-semibold text-kumo-default">
+            Your threads
+          </h2>
+          {rawGadgets !== undefined && gadgets.length === 0 && !loadError && (
+            <p className="mt-1 text-sm text-kumo-inactive">
+              You haven&apos;t created any threads yet
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Search — hidden when the user has no gadgets. While loading, the row is reserved (below)
+          rather than hidden, so resolving the list doesn't shove it down by the row's height. */}
+      {gadgets.length > 0 && (
+        <div className="mb-4 px-3">
+          <div className="relative">
+            <MagnifyingGlass
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-kumo-inactive"
+            />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search threads…"
+              className="h-9 w-full rounded-lg border border-kumo-line bg-kumo-base pl-9 pr-4 text-[13px] tracking-[-0.25px] text-kumo-default placeholder:text-kumo-inactive transition-[border-color,box-shadow] duration-150 ease-out focus:border-kumo-ring focus:outline-none focus:ring-[3px] focus:ring-kumo-ring/15"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* List. The page gutter lives on the route wrapper; header, search, and rows all share a
+          uniform px-3 so their content lines up exactly. The scroll container itself carries no
+          horizontal padding, so the scrollbar sits just past the aligned content (not far out). */}
+      <div className="chat-panel flex flex-1 min-h-0 flex-col gap-0.5 overflow-y-auto pt-1">
+        {loadError ? (
+          <div className="text-center py-12 text-sm">
+            <p className="text-kumo-danger">Something went wrong loading your threads.</p>
+            <button onClick={loadGadgets} className="text-kumo-brand mt-1 underline">Try again</button>
+          </div>
+        ) : rawGadgets === undefined ? (
+          null
+        ) : filtered.length === 0 ? (
+          search ? (
+            <div className="text-center py-12 text-kumo-inactive text-sm">
+              No threads found
+            </div>
+          ) : (
+            <FeaturedTemplatesGallery />
+          )
+        ) : (
+          filtered.map((gadget) => (
+            <AppRow
+              key={gadget.id}
+              gadget={gadget}
+              onDelete={handleDelete}
+              onShare={handleShare}
+              onInfo={setInfoTarget}
+              onTogglePin={handleTogglePin}
+              onRename={handleRename}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Delete confirmation dialog */}
+      <DeleteConfirmationDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
+        isDeleting={remove.isPending}
+        title={deleteTarget?.owner ? 'Remove thread' : 'Delete thread'}
+        description={
+          deleteTarget?.owner
+            ? `Remove "${deleteTarget?.title || 'Untitled Thread'}" from your list? You can still access it via its link.`
+            : `Delete "${deleteTarget?.title || 'Untitled Thread'}"? This cannot be undone.`
+        }
+        confirmLabel={deleteTarget?.owner ? 'Remove' : 'Delete'}
+        confirmingLabel={deleteTarget?.owner ? 'Removing...' : 'Deleting...'}
+        onConfirm={handleDeleteConfirm}
+      />
+
+      {/* Information modal */}
+      <Dialog.Root
+        open={infoTarget !== null}
+        onOpenChange={(open) => { if (!open) setInfoTarget(null) }}
+      >
+        <Dialog className="p-8" size="sm">
+          <Dialog.Title className="text-lg font-semibold">
+            {infoTarget?.title || 'Untitled Thread'}
+          </Dialog.Title>
+          <div className="mt-4 flex flex-col gap-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-kumo-subtle">Author</span>
+              <span className="text-kumo-default">{infoTarget?.owner ? infoTarget.owner.name : 'You'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-kumo-subtle">Total cost</span>
+              <span className="text-kumo-default">
+                {formatCost(infoTarget?.totalCost ?? 0)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-kumo-subtle">Created</span>
+              <span className="text-kumo-default">
+                {infoTarget?.created?.toLocaleString()}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-kumo-subtle">Last active</span>
+              <span className="text-kumo-default">
+                {infoTarget?.lastActive?.toLocaleString()}
+              </span>
+            </div>
+          </div>
+          <div className="mt-6 flex justify-end">
+            <Dialog.Close
+              render={(props) => (
+                <Button variant="secondary" {...props}>
+                  Close
+                </Button>
+              )}
+            />
+          </div>
+        </Dialog>
+      </Dialog.Root>
+
+      {/* Share modal */}
+      {shareOverseer && shareTarget && (
+        <ShareModal
+          open={true}
+          onClose={handleShareClose}
+          overseer={shareOverseer.stub}
+          metadata={shareTarget}
+          currentUser={userInfo}
+          authenticatedApi={authenticatedApi}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── featured templates gallery (shown when gadget list is empty) ────────────
+
+const MAX_FEATURED_SHOWN = 6
+
+function HomeFeaturedTemplateCard({
+  template,
+}: {
+  template: TemplatePublicInfo
+}) {
+  const badges = uniqueBindingBadges(template.metadata.bindings).slice(0, 1)
+  const pending = useLinkPending({ to: '/template/$id', params: { id: template.id } })
+
+  return (
+    <div className="themed-card-hover-shadow group relative isolate flex min-h-[190px] flex-col overflow-hidden rounded-2xl border border-kumo-line bg-kumo-base text-left transition-[border-color,box-shadow,transform] duration-150 ease-out hover:-translate-y-px hover:border-kumo-fill active:scale-[0.995]">
+      <Link
+        to="/template/$id"
+        params={{ id: template.id }}
+        aria-label={`Open template ${template.metadata.title}`}
+        aria-busy={pending}
+        className="absolute inset-0 z-10 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kumo-brand"
+      />
+      <div className="pointer-events-none relative z-20 flex flex-1 flex-col p-2.5">
+        <TemplatePreviewImage
+          templateId={template.id}
+          title={template.metadata.title}
+          screenshotUrl={template.screenshotUrl}
+          className="mb-3"
+        />
+        <div className="flex min-w-0 items-start gap-2 px-1 pb-1">
+          <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br ${getTemplateGradient(template.id)}`}>
+            <PendingIcon pending={pending} size={16}>
+              <Hexagon size={13} className="text-white/75" weight="bold" />
+            </PendingIcon>
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="m-0 truncate text-[13px] leading-[18px] font-semibold tracking-[-0.25px] text-kumo-default">
+              {template.metadata.title}
+            </p>
+            <p className={`mt-0.5 line-clamp-2 min-h-8 text-[12px] leading-4 tracking-[-0.2px] ${template.metadata.description ? 'text-kumo-subtle' : 'text-kumo-inactive italic'}`}>
+              {template.metadata.description || 'No description'}
+            </p>
+            {badges.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {badges.map((badge) => (
+                  <BindingBadge key={badge.vendorKey ?? badge.type} badge={badge} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FeaturedTemplatesGallery() {
+  const { data: templates = [] } = useFeaturedTemplates()
+
+  if (templates.length === 0) {
+    return null
+  }
+
+  const shown = templates.slice(0, MAX_FEATURED_SHOWN)
+  const hasMore = templates.length > MAX_FEATURED_SHOWN
+
+  return (
+    <div className="py-4 pr-4 sm:pr-6">
+      <div className="mb-5">
+        <h3 className="text-[13px] leading-[18px] font-medium tracking-[-0.25px] text-kumo-default">
+          Start from a featured template.
+        </h3>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {shown.map((bp) => (
+          <HomeFeaturedTemplateCard
+            key={bp.id}
+            template={bp}
+          />
+        ))}
+      </div>
+
+      {hasMore && (
+        <div className="mt-4 text-center">
+          <Link
+            to="/explore"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-kumo-brand hover:text-kumo-brand-hover transition-colors"
+          >
+            Browse all templates
+            <ArrowRight size={12} weight="bold" />
+          </Link>
+        </div>
+      )}
+    </div>
+  )
+}

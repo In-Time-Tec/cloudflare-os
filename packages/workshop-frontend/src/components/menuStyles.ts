@@ -1,6 +1,6 @@
 /**
- * Shared styling for kebab / overflow DropdownMenu menus, so every list (sidebar rows, Workspaces,
- * Blueprints, AI providers) uses the same compact, on-language menu instead of Kumo's larger
+ * Shared styling for kebab / overflow DropdownMenu menus, so every list (sidebar rows, Threads,
+ * Templates, AI providers) uses the same compact, on-language menu instead of Kumo's larger
  * defaults. Kept tight (13px rows, small padding) to match the rest of the design system.
  * `outline-none`: the popup takes DOM focus when it opens, and the UA focus ring around the whole
  * panel adds nothing (the highlighted row already shows where you are) while fighting the border.

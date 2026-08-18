@@ -18,14 +18,14 @@ const generatedPaths = Object.fromEntries(
     Object.entries(packageDirs).map(([name, directory]) => [name, join(directory, generatedName)]),
 );
 const resourceNames = [
-  "blueprintsKvNamespace",
+  "templatesKvNamespace",
   "avatarsKvNamespace",
-  "blueprintContentBucket",
+  "templateContentBucket",
   "contextKvNamespace",
 ];
 const managedAiProviders = new Set(["openrouter"]);
 const checkResources = {
-  blueprintsKvNamespaceId: "00000000000000000000000000000001",
+  templatesKvNamespaceId: "00000000000000000000000000000001",
   avatarsKvNamespaceId: "00000000000000000000000000000002",
   contextKvNamespaceId: "00000000000000000000000000000003",
   workersSubdomain: "example",
@@ -95,13 +95,13 @@ function setCommon(base, accountId, name, workersDev = false) {
 }
 
 /** Generate the four Wrangler configurations deployed by `pnpm deploy`. */
-export function generateConfigs(config, accountId, bases, resources) {
+export function generateConfigs(config, accountId, bases, resources, environment = process.env) {
   validateConfig(config);
   if (!/^[a-f\d]{32}$/i.test(accountId)) {
     throw new Error("CLOUDFLARE_ACCOUNT_ID must be a 32-character hexadecimal account ID.");
   }
   for (const key of [
-    "blueprintsKvNamespaceId",
+    "templatesKvNamespaceId",
     "avatarsKvNamespaceId",
     "contextKvNamespaceId",
   ]) {
@@ -131,9 +131,12 @@ export function generateConfigs(config, accountId, bases, resources) {
   backend.vars = {
     ...backend.vars,
     ADMINS: config.auth.admins,
-    // Microsoft Entra is the only sign-in method: allowlist it and disable password auth.
+    // Microsoft Entra is the preferred sign-in method: allowlist it and disable password auth.
+    // But when its app-registration secrets are absent the gatekeeper deploys unconfigured, and
+    // disabling password auth too would lock everyone out (auth/config.ts guards the same way) —
+    // so password login stays on until Microsoft is actually configured.
     AUTH_GATEKEEPERS: "microsoft",
-    DISABLE_PASSWORD_AUTH: "true",
+    DISABLE_PASSWORD_AUTH: environment.MICROSOFT_CLIENT_ID ? "true" : "false",
     ...(config.ai ? {
       DEPLOYMENT_AI_PROVIDERS: config.ai.providers.join(","),
       DEPLOYMENT_AI_DEFAULT_MODEL: config.ai.defaultModel,
@@ -160,8 +163,8 @@ export function generateConfigs(config, accountId, bases, resources) {
   ];
   backend.kv_namespaces = [
     {
-      binding: "BLUEPRINTS",
-      id: resources.blueprintsKvNamespaceId,
+      binding: "TEMPLATES",
+      id: resources.templatesKvNamespaceId,
     },
     {
       binding: "AVATARS",
@@ -169,8 +172,8 @@ export function generateConfigs(config, accountId, bases, resources) {
     },
   ];
   backend.r2_buckets = [{
-    binding: "BLUEPRINT_CONTENT",
-    bucket_name: config.resources.blueprintContentBucket,
+    binding: "TEMPLATE_CONTENT",
+    bucket_name: config.resources.templateContentBucket,
   }];
 
   const router = setCommon(bases.router, accountId, config.workers.router, true);
@@ -205,6 +208,14 @@ export function getDeploymentSecrets(config, environment = process.env) {
           "OPENROUTER_API_TOKEN is required when the deployment enables OpenRouter.");
     }
     backend.OPENROUTER_API_TOKEN = environment.OPENROUTER_API_TOKEN;
+  }
+
+  // E2B credential for thread orbs (sandboxes). Optional: without it the deployment runs with
+  // orbs disabled (executeShell tool reports machines unavailable) — no code change to enable.
+  if (environment.E2B_API_KEY) {
+    backend.E2B_API_KEY = environment.E2B_API_KEY;
+  } else {
+    console.warn("E2B_API_KEY is not configured; deploying with thread orbs disabled.");
   }
 
   // Microsoft Entra is the deployment's only sign-in method. Its app-registration credentials are
@@ -308,7 +319,7 @@ export async function ensureRemoteResources(config, accountId, apiToken, fetchIm
   }
 
   const kvNames = {
-    blueprintsKvNamespaceId: config.resources.blueprintsKvNamespace,
+    templatesKvNamespaceId: config.resources.templatesKvNamespace,
     avatarsKvNamespaceId: config.resources.avatarsKvNamespace,
     contextKvNamespaceId: config.resources.contextKvNamespace,
   };
@@ -339,7 +350,7 @@ export async function ensureRemoteResources(config, accountId, apiToken, fetchIm
       `/accounts/${accountId}/workers/subdomain`, apiToken, {}, fetchImpl);
   resolved.workersSubdomain = subdomainPayload.result.subdomain;
 
-  const bucketName = config.resources.blueprintContentBucket;
+  const bucketName = config.resources.templateContentBucket;
   const bucketPath = `/accounts/${accountId}/r2/buckets/${encodeURIComponent(bucketName)}`;
   try {
     await cloudflareRequest(bucketPath, apiToken, {}, fetchImpl);
@@ -392,6 +403,21 @@ function build() {
 }
 
 async function main() {
+  // Load repo-root .env (E2B_API_KEY, OPENROUTER_API_TOKEN, ...) into process.env for local
+  // deploys; existing environment variables win. CI sets real env vars and has no .env.
+  try {
+    const envFile = await readFile(join(root, ".env"), "utf8");
+    for (const line of envFile.split("\n")) {
+      const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
+      if (!match || line.trimStart().startsWith("#")) continue;
+      const [, name, rawValue] = match;
+      if (process.env[name] !== undefined) continue;
+      process.env[name] = rawValue.replace(/^["']|["']$/g, "");
+    }
+  } catch {
+    // No .env file — fine.
+  }
+
   const config = validateConfig(await readJsonc(join(root, "deployment/workers-dev.jsonc")));
   // Fold in the secret-configured Entra admin principal (if provided) before generating configs.
   config.auth = { ...config.auth, admins: resolveAdmins(config) };

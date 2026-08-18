@@ -37,21 +37,21 @@ import { bridgePdfAttachments } from "./chat-attachment-pdf.js";
    apiKey: string;
  }
 
-// Gadgets-owned attribution schema attached to AI Gateway requests.
+// Artifacts-owned attribution schema attached to AI Gateway requests.
 type GatewayMetadata = {
-  // Stable Gadgets user identifier for attribution.
+  // Stable Artifacts user identifier for attribution.
   user: string;
-  // Gadgets execution context, present when the call is associated with a gadget operation.
+  // Artifacts execution context, present when the call is associated with a artifact operation.
   source?: GatewayMetadataContext["source"];
-  gadgetId?: string;
+  artifactId?: string;
   chatId?: number;
-  // Distinguishes gadget-initiated model calls from interactive user calls.
+  // Distinguishes artifact-initiated model calls from interactive user calls.
   automated?: true;
 };
 
 type GatewayMetadataContext = {
-  source: "chat" | "thread-title" | "gadget-title" | "model-binding";
-  gadgetId?: string;
+  source: "chat" | "thread-title" | "artifact-title" | "model-binding";
+  artifactId?: string;
   chatId?: number;
 };
 
@@ -69,7 +69,7 @@ export type ModelStreamOptions = SimpleStreamOptions & {
   /**
    * When false, suppress the handle's per-API thinking/reasoning defaults so the request runs
    * without extended thinking (as far as the model allows). Used by completeText(): one-shot
-   * calls -- titles, binding names, compaction summaries, gadget model bindings -- should be
+   * calls -- titles, binding names, compaction summaries, artifact model bindings -- should be
    * quick, and none of them benefit from cross-step reasoning. Default: true.
    */
   thinking?: boolean;
@@ -113,10 +113,10 @@ function buildMetadata(initiator: AiChatAuthorInfo, context?: GatewayMetadataCon
   const metadata: GatewayMetadata = { user: initiator.id };
   if (context) {
     metadata.source = context.source;
-    if (context.gadgetId) metadata.gadgetId = context.gadgetId;
+    if (context.artifactId) metadata.artifactId = context.artifactId;
     if (context.chatId !== undefined) metadata.chatId = context.chatId;
   }
-  if (initiator.type === "gadget") metadata.automated = true;
+  if (initiator.type === "artifact") metadata.automated = true;
   return metadata;
 }
 
@@ -733,7 +733,7 @@ class LanguageModelBindingImpl extends RpcTarget implements LanguageModelBinding
   async run(options: {prompt: string, systemPrompt?: string}): Promise<string> {
     // TODO: Should we be calling authorizeObservation() here? It's not really observing anything,
     //   but you might want the audit logs?
-    // TODO: Account LLM costs back to the calling gadget.
+    // TODO: Account LLM costs back to the calling artifact.
     return await completeText(this.model, {
       prompt: options.prompt,
       systemPrompt: options.systemPrompt,

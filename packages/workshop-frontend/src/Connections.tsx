@@ -3,12 +3,12 @@ import { Dialog, Tooltip, useKumoToastManager } from '@cloudflare/kumo'
 import {
   Pencil,
   Trash,
-  Blueprint,
+  Blueprint as BlueprintIcon,
   Warning,
   X,
 } from '@phosphor-icons/react'
 import { RpcStub } from 'capnweb'
-import { Overseer, GadgetClient, GadgetBindingInfo, BoundHookInfo, AuthenticatedApi, WorkpieceId } from '@gadgets/workshop-shared/api'
+import { Overseer, ArtifactClient, ArtifactBindingInfo, BoundHookInfo, AuthenticatedApi, WorkpieceId } from '@gadgets/workshop-shared/api'
 import GatekeeperModal from './GatekeeperModal'
 import { GatekeeperIcon } from './components/GatekeeperIcon'
 import { HookToggle } from './components/HookToggle'
@@ -17,14 +17,14 @@ import { WorkshopButton, WorkshopIconButton, WorkshopInput } from './components/
 import { EmptyState } from './components/EmptyState'
 import {
   BindingCardData,
-  BlueprintBindingCard,
+  TemplateBindingCard,
   loadBindingCardData,
-} from './components/BlueprintBindingCard'
+} from './components/TemplateBindingCard'
 import { reportIssue } from './errorReporting'
 
 interface ConnectionsProps {
   overseer: RpcStub<Overseer>
-  gadget: RpcStub<GadgetClient>
+  gadget: RpcStub<ArtifactClient>
   // The chat currently open in the editor, if any. Connecting a resource with a chat open makes
   // the new binding provisional to that chat, exactly like a code edit: it works in the chat's
   // preview immediately, and becomes permanent only when the user accepts the chat's changes.
@@ -36,11 +36,11 @@ interface ConnectionsProps {
 }
 
 /**
- * Auto-approval rules live in Activity because they apply across the workspace, while this view is
+ * Auto-approval rules live in Activity because they apply across the thread, while this view is
  * scoped to one gadget.
  */
 export default function Connections({ overseer, gadget, chatId, authenticatedApi, onConnectionsChange, isVisible, onHasGatekeepersChange }: ConnectionsProps) {
-  const [bindings, setBindings] = useState<GadgetBindingInfo[]>([])
+  const [bindings, setBindings] = useState<ArtifactBindingInfo[]>([])
   // Identity of the gadget this tab is showing, needed to offer it to agent spawners.
   const [gadgetInfo, setGadgetInfo] = useState<{ id: WorkpieceId; title: string } | null>(null)
   const [hooks, setHooks] = useState<BoundHookInfo[]>([])
@@ -52,7 +52,7 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
   const [deleteTarget, setDeleteTarget] = useState<{ name: string; resourceTitle: string } | null>(null)
   const [deleteHookTarget, setDeleteHookTarget] = useState<{ id: number; title: string } | null>(null)
   const [togglingHooks, setTogglingHooks] = useState<Set<number>>(new Set())
-  const [annotationTarget, setAnnotationTarget] = useState<GadgetBindingInfo | null>(null)
+  const [annotationTarget, setAnnotationTarget] = useState<ArtifactBindingInfo | null>(null)
   const toasts = useKumoToastManager()
 
   const loadGatekeepers = async () => {
@@ -62,14 +62,14 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
         gadget.getTitle(),
         // Pass the open chat so bindings this tab added provisionally to it are listed too.
         gadget.listBindings(chatId),
-        // Workspace-wide; filtered to this gadget below.
+        // Thread-wide; filtered to this gadget below.
         overseer.listHooks(),
       ])
       setGadgetInfo({ id, title: gadgetTitle })
       setBindings(bindingList)
       // This tab shows one gadget, so drop hooks that wake a different one -- otherwise its
       // toggle/delete controls would operate on another gadget's hooks.
-      setHooks(hookList.filter((hook) => hook.gadgetId === id))
+      setHooks(hookList.filter((hook) => hook.artifactId === id))
       onHasGatekeepersChange?.(bindingList.length > 0)
     } catch (err) {
       // Loud on purpose: this panel has no retry path, so a quieted transient failure would
@@ -237,8 +237,8 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
               {bindings.map((gk, index) => {
                 const isEditing = editingBinding === gk.name
                 const isDeleting = deleteTarget?.name === gk.name
-                // Still provisional to the open chat (see GadgetBindingInfo.chatId). Blueprint
-                // annotations are excluded, since a blueprint only ever exports permanent edges.
+                // Still provisional to the open chat (see ArtifactBindingInfo.chatId). BlueprintIcon
+                // annotations are excluded, since a template only ever exports permanent edges.
                 const isPending = gk.chatId !== undefined
 
                 return (
@@ -329,12 +329,12 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
                             </WorkshopIconButton>
                           </Tooltip>
                           {!isPending && (
-                            <Tooltip content="Edit blueprint settings" asChild>
+                            <Tooltip content="Edit template settings" asChild>
                               <WorkshopIconButton
                                 onClick={() => setAnnotationTarget(gk)}
-                                aria-label="Edit blueprint settings"
+                                aria-label="Edit template settings"
                               >
-                                <Blueprint size={14} />
+                                <BlueprintIcon size={14} />
                               </WorkshopIconButton>
                             </Tooltip>
                           )}
@@ -473,12 +473,12 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
         }}
       />
 
-      <BlueprintAnnotationModal
+      <TemplateAnnotationModal
         target={annotationTarget}
         gadget={gadget}
         onClose={() => setAnnotationTarget(null)}
         onSaved={() => {
-          toasts.add({ title: 'Blueprint settings saved.', variant: 'success' })
+          toasts.add({ title: 'Template settings saved.', variant: 'success' })
           setAnnotationTarget(null)
         }}
       />
@@ -487,14 +487,14 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
   )
 }
 
-function BlueprintAnnotationModal({
+function TemplateAnnotationModal({
   target,
   gadget,
   onClose,
   onSaved,
 }: {
-  target: GadgetBindingInfo | null
-  gadget: RpcStub<GadgetClient>
+  target: ArtifactBindingInfo | null
+  gadget: RpcStub<ArtifactClient>
   onClose: () => void
   onSaved: () => void
 }) {
@@ -538,7 +538,7 @@ function BlueprintAnnotationModal({
     setSaving(true)
     setSaveError(null)
     try {
-      await gadget.setBlueprintAnnotation(target.name, data.annotation)
+      await gadget.setTemplateAnnotation(target.name, data.annotation)
       onSaved()
     } catch (err: any) {
       reportIssue('connections.binding-save', err)
@@ -557,10 +557,10 @@ function BlueprintAnnotationModal({
           <div className="flex items-start justify-between gap-4 border-b border-kumo-line px-4 py-4 sm:px-5">
             <div className="min-w-0">
               <Dialog.Title className="text-[15px] leading-5 font-medium tracking-[-0.3px] text-kumo-default">
-                Blueprint settings
+                BlueprintIcon settings
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-[12px] leading-4 font-normal tracking-[-0.2px] text-kumo-subtle">
-                How this connection appears in blueprints.
+                How this connection appears in templates.
               </Dialog.Description>
             </div>
             <Dialog.Close
@@ -579,7 +579,7 @@ function BlueprintAnnotationModal({
               null
             ) : (
               <>
-                <BlueprintBindingCard
+                <TemplateBindingCard
                   data={data}
                   onChange={(annotation) => setData({ ...data, annotation })}
                   autoFocusDescription

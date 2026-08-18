@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
-  Blueprint,
+  Blueprint as BlueprintIcon,
   MagnifyingGlass,
   Plus,
   SquaresFour,
@@ -11,10 +11,10 @@ import { useAuthenticatedApi } from '../../AuthContext'
 import type { OutputFormatOffer } from '@gadgets/workshop-shared/api'
 import { FormatGlyph } from '../format/FormatVisuals'
 import { createFromFormat } from '../format/useOutputFormats'
-import { useGadgets, useLibraryBlueprints, useOutputFormatsQuery, useOwnBlueprints } from '../../query/hooks'
+import { useThreads, useLibraryTemplates, useOutputFormatsQuery, useOwnTemplates } from '../../query/hooks'
 import { asTime } from '../../query/time'
 
-// A ⌘K command palette: jump to a workspace or a primary destination. Because it's keyboard-driven
+// A ⌘K command palette: jump to a thread or a primary destination. Because it's keyboard-driven
 // and opened many times a day, it deliberately has *no* open/close animation (instant feels faster
 // than any transition here — see the Raycast example in our motion guidance). Results stream in as
 // the gadget list loads.
@@ -27,19 +27,19 @@ type Command = {
   run: () => void
 }
 
-type BlueprintEntry = { id: string; title: string; recency: number }
+type TemplateEntry = { id: string; title: string; recency: number }
 
-// Merge the user's published blueprints and their library into a single de-duplicated list, keyed
+// Merge the user's published templates and their library into a single de-duplicated list, keyed
 // by id and keeping the most-recent timestamp from either source.
-function mergeBlueprints(
+function mergeTemplates(
   own: { id: string; title: string; lastUpdated: Date }[],
   library: { id: string; metadata: { title: string }; addedAt: Date }[],
-): BlueprintEntry[] {
-  const map = new Map<string, BlueprintEntry>()
+): TemplateEntry[] {
+  const map = new Map<string, TemplateEntry>()
   for (const b of library) {
     map.set(b.id, {
       id: b.id,
-      title: b.metadata.title || 'Untitled blueprint',
+      title: b.metadata.title || 'Untitled template',
       recency: b.addedAt.getTime(),
     })
   }
@@ -47,7 +47,7 @@ function mergeBlueprints(
     const prev = map.get(b.id)
     map.set(b.id, {
       id: b.id,
-      title: b.title || prev?.title || 'Untitled blueprint',
+      title: b.title || prev?.title || 'Untitled template',
       recency: Math.max(prev?.recency ?? 0, b.lastUpdated.getTime()),
     })
   }
@@ -134,13 +134,13 @@ export default function CommandPalette({
   const { authenticatedApi } = useAuthenticatedApi()
   const navigate = useNavigate()
   const toasts = useKumoToastManager()
-  const { data: gadgets = [] } = useGadgets()
-  const { data: ownBlueprints = [] } = useOwnBlueprints()
-  const { data: libraryBlueprints = [] } = useLibraryBlueprints()
+  const { data: gadgets = [] } = useThreads()
+  const { data: ownTemplates = [] } = useOwnTemplates()
+  const { data: libraryTemplates = [] } = useLibraryTemplates()
   const { data: formats = [] } = useOutputFormatsQuery()
-  const blueprints = useMemo(
-    () => mergeBlueprints(ownBlueprints, libraryBlueprints),
-    [ownBlueprints, libraryBlueprints],
+  const templates = useMemo(
+    () => mergeTemplates(ownTemplates, libraryTemplates),
+    [ownTemplates, libraryTemplates],
   )
 
   const [query, setQuery] = useState('')
@@ -178,10 +178,10 @@ export default function CommandPalette({
     const needle = query.trim()
     const searching = needle.length > 0
 
-    // One entry per standard format. "New workspace" remains the first action because it is the
+    // One entry per standard format. "New thread" remains the first action because it is the
     // general starting point; the format shortcuts follow it in the admin's configured order.
     const formatCommands: Command[] = formats.map((format) => ({
-      id: `format-${format.blueprintId}`,
+      id: `format-${format.templateId}`,
       label: `New ${format.output.noun}`,
       hint: 'Format',
       icon: <FormatGlyph output={format.output} size="md" />,
@@ -191,21 +191,21 @@ export default function CommandPalette({
     const nav: Command[] = [
       {
         id: 'nav-new',
-        label: 'New workspace',
+        label: 'New thread',
         icon: <Plus size={15} weight="bold" />,
         run: () => navigate({ to: '/' }),
       },
       ...formatCommands,
       {
-        id: 'nav-workspaces',
-        label: 'Workspaces',
+        id: 'nav-threads',
+        label: 'Threads',
         icon: <SquaresFour size={15} />,
-        run: () => navigate({ to: '/workspaces' }),
+        run: () => navigate({ to: '/threads' }),
       },
       {
-        id: 'nav-blueprints',
-        label: 'Blueprints',
-        icon: <Blueprint size={15} />,
+        id: 'nav-templates',
+        label: 'Templates',
+        icon: <BlueprintIcon size={15} />,
         run: () => navigate({ to: '/explore' }),
       },
     ]
@@ -214,23 +214,23 @@ export default function CommandPalette({
       .toSorted((a, b) => asTime(b.lastActive) - asTime(a.lastActive))
       .map((g) => ({
         id: `ws-${g.id}`,
-        label: g.title || 'Untitled workspace',
-        hint: 'Workspace',
+        label: g.title || 'Untitled thread',
+        hint: 'Thread',
         icon: <SquaresFour size={15} className="text-kumo-inactive" />,
-        run: () => navigate({ to: '/workspace/$id', params: { id: g.id } }),
+        run: () => navigate({ to: '/thread/$id', params: { id: g.id } }),
       }))
 
-    const bpBase: Command[] = blueprints
+    const bpBase: Command[] = templates
       .toSorted((a, b) => b.recency - a.recency)
       .map((b) => ({
         id: `bp-${b.id}`,
         label: b.title,
-        hint: 'Blueprint',
-        icon: <Blueprint size={15} className="text-kumo-inactive" />,
-        run: () => navigate({ to: '/blueprint/$id', params: { id: b.id } }),
+        hint: 'Template',
+        icon: <BlueprintIcon size={15} className="text-kumo-inactive" />,
+        run: () => navigate({ to: '/template/$id', params: { id: b.id } }),
       }))
 
-    // Empty state shows a short, curated list (actions + a few recent workspaces). Once the user
+    // Empty state shows a short, curated list (actions + a few recent threads). Once the user
     // types, we fuzzy-match across everything and rank by score, expanding the per-group limits.
     const refine = (cmds: Command[], limit: number): ScoredCommand[] => {
       if (!searching) return cmds.slice(0, limit).map((c) => ({ ...c, indices: [] }))
@@ -246,18 +246,18 @@ export default function CommandPalette({
     const built: Group[] = searching
       ? [
           { heading: 'Actions', items: refine(nav, nav.length) },
-          { heading: 'Workspaces', items: refine(wsBase, 8) },
-          { heading: 'Blueprints', items: refine(bpBase, 8) },
+          { heading: 'Threads', items: refine(wsBase, 8) },
+          { heading: 'Templates', items: refine(bpBase, 8) },
         ]
       : [
           { heading: 'Actions', items: refine(nav, nav.length) },
-          { heading: 'Recent workspaces', items: refine(wsBase, 4) },
+          { heading: 'Recent threads', items: refine(wsBase, 4) },
         ]
 
     const groups = built.filter((g) => g.items.length > 0)
     const flat = groups.flatMap((g) => g.items)
     return { groups, flat }
-  }, [query, gadgets, blueprints, formats, navigate, createFormat])
+  }, [query, gadgets, templates, formats, navigate, createFormat])
 
   // Keep the active index in range as the result set changes.
   useEffect(() => {
@@ -311,7 +311,7 @@ export default function CommandPalette({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Search workspaces and actions…"
+            placeholder="Search threads and actions…"
             className="h-12 w-full bg-transparent text-[14px] leading-5 tracking-[-0.25px] text-kumo-default placeholder:text-kumo-inactive focus:outline-none"
           />
           <kbd className="shrink-0 rounded border border-kumo-line px-1.5 py-0.5 font-sans text-[10px] leading-none text-kumo-inactive">

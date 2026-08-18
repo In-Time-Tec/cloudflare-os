@@ -72,7 +72,7 @@ describe('classifyRpcError', () => {
   })
 
   it('classifies everything else as other', () => {
-    expect(classifyRpcError(new Error('Workspace not found.'))).toBe('other')
+    expect(classifyRpcError(new Error('Thread not found.'))).toBe('other')
     expect(classifyRpcError('boom')).toBe('other')
     expect(classifyRpcError(null)).toBe('other')
     expect(classifyRpcError(undefined)).toBe('other')
@@ -84,7 +84,7 @@ describe('isTransientRpcError', () => {
     expect(isTransientRpcError(storageTimeoutReset())).toBe(true)
     expect(isTransientRpcError(new Error('Peer closed WebSocket: 1006 '))).toBe(true)
     expect(isTransientRpcError(new Error('invalid session token'))).toBe(false)
-    expect(isTransientRpcError(new Error('Workspace not found.'))).toBe(false)
+    expect(isTransientRpcError(new Error('Thread not found.'))).toBe(false)
   })
 })
 
@@ -121,7 +121,7 @@ describe('logRpcFailure', () => {
       expect(debug).toHaveBeenCalledOnce()
       expect(error).not.toHaveBeenCalled()
 
-      expect(logRpcFailure('failed:', new Error('Workspace not found.'))).toBe(false)
+      expect(logRpcFailure('failed:', new Error('Thread not found.'))).toBe(false)
       expect(error).toHaveBeenCalledOnce()
     } finally {
       debug.mockRestore()

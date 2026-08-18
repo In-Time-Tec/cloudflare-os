@@ -1,4 +1,4 @@
-export const BLUEPRINT_ARCHIVE_EXTENSION = '.gadget'
+export const TEMPLATE_ARCHIVE_EXTENSION = '.template'
 
 function makeFilename(title: string, fallback: string): string {
   return title
@@ -7,12 +7,12 @@ function makeFilename(title: string, fallback: string): string {
     .replace(/^-+|-+$/g, '') || fallback
 }
 
-export function makeBlueprintFilename(title: string, version: number): string {
-  return `${makeFilename(title, 'blueprint')}-v${version}${BLUEPRINT_ARCHIVE_EXTENSION}`
+export function makeTemplateFilename(title: string, version: number): string {
+  return `${makeFilename(title, 'template')}-v${version}${TEMPLATE_ARCHIVE_EXTENSION}`
 }
 
 export function makeExportFilename(title: string, extension: string): string {
-  return `${makeFilename(title, 'gadget')}${extension}`
+  return `${makeFilename(title, 'artifact')}${extension}`
 }
 
 type SaveFileHandle = {

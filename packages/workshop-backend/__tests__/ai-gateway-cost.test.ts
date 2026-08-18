@@ -16,7 +16,7 @@ const AUTHOR: AiChatAuthorInfo = { type: "agent", id: "model-id", name: "Model" 
 describe("AI Gateway cost persistence", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("retries and records a cross-account log cost on the matching chat and gadget", async () => {
+  it("retries and records a cross-account log cost on the matching chat and artifact", async () => {
     const fetchMock = vi.fn(async () => fetchMock.mock.calls.length === 1
       ? new Response(null, { status: 404 })
       : Response.json({ success: true, result: { cost: 1.25 } }));

@@ -13,7 +13,7 @@ function makeOverseer(
 ): OverseerDurableObject {
   let overseer = Object.create(OverseerDurableObject.prototype) as OverseerDurableObject;
   Object.assign(overseer, {
-    env: { BLUEPRINTS: { get: getConfig } },
+    env: { TEMPLATES: { get: getConfig } },
     impl: {
       storage: {
         boundHooks: { get: () => hook && ({ ...hook, gatekeeperId: 1 }) },
@@ -96,13 +96,13 @@ describe("OverseerDurableObject.startHook", () => {
   });
 });
 
-async function makeTargetOverseer(gadgetId?: number) {
+async function makeTargetOverseer(artifactId?: number) {
   let controllerEnable = vi.fn(async (_initiator: object, _target: object) => {});
   let record = {
     id: 4,
     actionId: 12,
     gatekeeperId: 1,
-    gadgetId,
+    artifactId,
     controller: {enable: controllerEnable},
     callback: {},
     description: {title: "Incoming email", description: "Receives email"},
@@ -123,7 +123,7 @@ async function makeTargetOverseer(gadgetId?: number) {
         }),
       },
       ctx: {
-        id: {toString: () => "workspace-id"},
+        id: {toString: () => "thread-id"},
         exports: {GatekeeperHookLoopback: ({props}: {props: object}) => props},
       },
       storage: {
@@ -140,21 +140,21 @@ async function makeTargetOverseer(gadgetId?: number) {
 
 describe("hook target", () => {
 
-  it("passes the workspace and gadget IDs to enable()", async () => {
+  it("passes the thread and artifact IDs to enable()", async () => {
     let {client, controllerEnable} = await makeTargetOverseer(17);
 
     await client.enableHook(4);
 
     expect(controllerEnable).toHaveBeenCalledTimes(1);
-    expect(controllerEnable.mock.calls[0][1]).toEqual({workspaceId: "workspace-id", gadgetId: 17});
+    expect(controllerEnable.mock.calls[0][1]).toEqual({threadId: "thread-id", artifactId: 17});
   });
 
-  it("omits the gadget ID for a hook that is not pinned to one", async () => {
+  it("omits the artifact ID for a hook that is not pinned to one", async () => {
     let {client, controllerEnable} = await makeTargetOverseer();
 
     await client.enableHook(4);
 
-    expect(controllerEnable.mock.calls[0][1]).toEqual({workspaceId: "workspace-id"});
+    expect(controllerEnable.mock.calls[0][1]).toEqual({threadId: "thread-id"});
   });
 
 });

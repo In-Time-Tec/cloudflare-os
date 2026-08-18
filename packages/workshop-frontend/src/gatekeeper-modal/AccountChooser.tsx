@@ -4,7 +4,7 @@ import { AccountDescription, SupportedResource, VendorDescription } from '@gadge
 
 /**
  * Account info as consumed by the chooser. Matches the shape used by GatekeeperModal and the
- * blueprint configure panel.
+ * template configure panel.
  */
 export type AccountOption = {
   id: number

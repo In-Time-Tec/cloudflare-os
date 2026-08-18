@@ -1,4 +1,4 @@
-import { AiChatMessage, AiChatAuthorInfo, AiToolCall, AiChatMessageBody, AgentSpawnerConfig, AiChatStreamEvent, BlueprintOutput, WorkpieceId, type AiModelConfig, isTextLikeAttachmentMimeType, validateBindingName } from '@gadgets/workshop-shared/api';
+import { AiChatMessage, AiChatAuthorInfo, AiToolCall, AiChatMessageBody, AgentSpawnerConfig, AiChatStreamEvent, TemplateOutput, WorkpieceId, type AiModelConfig, isTextLikeAttachmentMimeType, validateBindingName } from '@gadgets/workshop-shared/api';
 import { PDF_MIME_TYPE, modelApiSupportsPdfAttachments } from './chat-attachment-pdf';
 import { AgentCatalog, ObservationDescription } from '@gadgets/workshop-shared/gatekeeper';
 import { createWorkshopLogger } from "./observability";
@@ -39,8 +39,8 @@ export type AiChatAgentContext = {
   spawnerConfig?: AgentSpawnerConfig;
 
   /**
-   * Initial `env` binding set gathered when this chat was started, typically including all gadgets
-   * and all gatekeepers which those gadgets bind to, but the contents may be different depending
+   * Initial `env` binding set gathered when this chat was started, typically including all artifacts
+   * and all gatekeepers which those artifacts bind to, but the contents may be different depending
    * on how the chat thread was started (e.g. agent spawners initialize env in a specific way).
    *
    * This map is frozen after the chat starts. "changes" messages in the chat log may introduce
@@ -82,11 +82,11 @@ export type SeedBindingInfo = {
   name: string;
   target: WorkpieceId;
 
-  /** Human title of the target (a gadget's title, or a gatekeeper's resource title). */
+  /** Human title of the target (a artifact's title, or a gatekeeper's resource title). */
   title: string;
 
-  /** Whether the target is a gadget (vs. an external resource gatekeeper). */
-  isGadget: boolean;
+  /** Whether the target is a artifact (vs. an external resource gatekeeper). */
+  isArtifact: boolean;
 
   /**
    * Present when this entry is an always-available (ambient) resource, e.g. the read session of a
@@ -98,7 +98,7 @@ export type SeedBindingInfo = {
 
 /**
  * One entry of the chat's binding map: what a name in the agent's executeCode `env` resolves to.
- * Either a workpiece (a gadget or gatekeeper -- the overseer distinguishes at env-build time) or
+ * Either a workpiece (a artifact or gatekeeper -- the overseer distinguishes at env-build time) or
  * the value arguments of an agent callback.
  */
 export type ChatBindingEntry =
@@ -144,8 +144,8 @@ export type CompactionCheckpoint = {
    * `acceptedChanges`; replay applies both. Individual batches remain addressable through the chat
    * log, so reverting to a point before the boundary is still possible.
    *
-   * Provisional gadget creations and binding additions from before the boundary are deliberately
-   * absent: they carry no Y.Doc update, and the registry rows they created (`GadgetRecord.pending`,
+   * Provisional artifact creations and binding additions from before the boundary are deliberately
+   * absent: they carry no Y.Doc update, and the registry rows they created (`ArtifactRecord.pending`,
    * `BindingRecord.pending`) already record them with the sequence that did, untouched by
    * compaction. Merge and revert promote and delete from there rather than from the log, so
    * duplicating them here would be a second source of truth. See getProposedChanges(), which
@@ -167,22 +167,22 @@ export type CompactionContext = {
 };
 
 /**
- * Summary of one of the workspace's gadgets, as needed by the agent: identity, the name of the
- * Y.Doc root map holding its files, and its named bindings. See AgentHooks.listGadgetInfo().
+ * Summary of one of the thread's artifacts, as needed by the agent: identity, the name of the
+ * Y.Doc root map holding its files, and its named bindings. See AgentHooks.listArtifactInfo().
  */
-export type AgentGadgetInfo = {
+export type AgentArtifactInfo = {
   id: WorkpieceId;
   title: string;
   rootName: string;
   /**
-   * Whether this is the workspace's default gadget: the gadget that tools operate on when their
-   * gadget-name parameter is omitted. Only workspaces migrated from single-gadget days
-   * (or created from a blueprint) have one.
+   * Whether this is the thread's default artifact: the artifact that tools operate on when their
+   * artifact-name parameter is omitted. Only threads migrated from single-artifact days
+   * (or created from a template) have one.
    */
   isDefault: boolean;
   bindings: {name: string, title: string, target: WorkpieceId}[];
-  /** What instantiating this gadget's blueprint produces, when it came from one that declares it. */
-  output?: BlueprintOutput;
+  /** What instantiating this artifact's template produces, when it came from one that declares it. */
+  output?: TemplateOutput;
 };
 
 // Resolves a `describeBinding` tool argument (a name in the chat's env) to its human-readable
@@ -270,45 +270,45 @@ export interface AgentHooks {
   buildYDoc(version: number | "current"): {ydoc: Y.Doc, version: number};
 
   /**
-   * Summarize the workspace's gadgets for the system prompt (see AgentGadgetInfo). Gadgets still
+   * Summarize the thread's artifacts for the system prompt (see AgentArtifactInfo). Artifacts still
    * provisional to a chat other than `forChatId` are omitted.
    */
-  listGadgetInfo(forChatId: number): AgentGadgetInfo[];
+  listArtifactInfo(forChatId: number): AgentArtifactInfo[];
 
   /**
    * Resolve an agent tool's optional workpiece reference to the workpiece's files root. Absent
-   * means the workspace's default gadget; throws an agent-readable error if there is none. When
-   * `mustExist` is set, additionally throws if the gadget isn't currently registered -- or is
+   * means the thread's default artifact; throws an agent-readable error if there is none. When
+   * `mustExist` is set, additionally throws if the artifact isn't currently registered -- or is
    * provisional to a chat other than `forChatId` -- (used by live file tools; history replay
-   * omits it so old edits to since-deleted gadgets still resolve).
+   * omits it so old edits to since-deleted artifacts still resolve).
    */
   resolveWorkpieceRoot(workpieceId?: WorkpieceId, mustExist?: boolean, forChatId?: number)
       : {workpieceId: WorkpieceId, rootName: string};
 
   /**
-   * Create a new, empty gadget workpiece with the given title and binding name, provisional to
+   * Create a new, empty artifact workpiece with the given title and binding name, provisional to
    * the given chat: it becomes permanent only when the user accepts the chat's changes through
-   * the "changes" message that records the creation (see GadgetRecord.pending in overseer.ts).
-   * Throws if the binding name is invalid or already claimed by another gadget (including one
+   * the "changes" message that records the creation (see ArtifactRecord.pending in overseer.ts).
+   * Throws if the binding name is invalid or already claimed by another artifact (including one
    * still pending in another chat). Returns the id and the (trimmed) title as created. `output`
-   * is the format declared by the blueprint being instantiated, if any (see fetchBlueprint).
+   * is the format declared by the template being instantiated, if any (see fetchTemplate).
    */
-  createGadget(title: string, bindingName: string, chatId: number, output?: BlueprintOutput)
+  createArtifact(title: string, bindingName: string, chatId: number, output?: TemplateOutput)
       : {id: WorkpieceId, title: string};
 
   /**
-   * Describe a workpiece (a gadget or a gatekeeper) reachable as `envName` in the chat's env,
+   * Describe a workpiece (a artifact or a gatekeeper) reachable as `envName` in the chat's env,
    * for the agent's describeBinding tool. (`envName` is provided here only so that it can be
    * incorporated into the returned description.)
    */
   describeBinding(envName: string, id: WorkpieceId): Promise<string>;
 
   /**
-   * Add a binding to the given gadget, pointing at the given workpiece. The binding is provisional
+   * Add a binding to the given artifact, pointing at the given workpiece. The binding is provisional
    * to the chat. The caller is responsible for getting the addition recorded in the chat log (see
    * `addedBindings` on the "changes" message) so the pending edge gets sequence-stamped.
    */
-  addGadgetBinding(gadgetId: WorkpieceId, name: string, target: WorkpieceId, chatId: number): void;
+  addArtifactBinding(artifactId: WorkpieceId, name: string, target: WorkpieceId, chatId: number): void;
 
   /**
    * Prepare (seeding/naming lazily as needed) and return the chat's seed binding layer, including
@@ -326,10 +326,42 @@ export interface AgentHooks {
                    initiator: AiChatAuthorInfo, initiatorModelId: string,
                    bindings: Record<string, ChatBindingEntry>,
                    onOutputText?: (delta: string) => void): Promise<string>;
+
+  /**
+   * Run one shell command inside the thread's orb (E2B sandbox), waking it first if needed.
+   * Returns collected stdout/stderr/exit code. Throws an agent-readable error when orbs are
+   * disabled for the deployment. Commands are bounded (output size + wall-clock) — long-running
+   * work belongs in background processes.
+   */
+  executeShellInOrb(command: string, timeoutMs: number)
+      : Promise<{stdout: string, stderr: string, exitCode: number}>;
+
+  /**
+   * Spawn a child thread owned by the same user, seeded with `prompt` as its first message
+   * (which starts the child's own agent turn). Returns the child's thread id. The child's
+   * completed responses are consumed with waitForChildThreads.
+   */
+  spawnChildThread(title: string, prompt: string): Promise<string>;
+
+  /** Send a follow-up prompt to a child thread this thread previously spawned. */
+  sendToChildThread(childThreadId: string, prompt: string): Promise<void>;
+
+  /**
+   * Block until at least one spawned child thread has completed a response (or timeout),
+   * consuming and returning each ready child's oldest response. Empty = timeout.
+   */
+  waitForChildThreads(timeoutMs: number)
+      : Promise<{threadId: string, title: string, response: string}[]>;
+
+  /** List child threads this thread has spawned, with unconsumed-response counts. */
+  listChildThreads(): {threadId: string, title: string, pendingResponses: number}[];
+
+  /** Read a spawned child thread's conversation transcript (bounded plain text). */
+  readChildThreadTranscript(childThreadId: string): Promise<string>;
   activeAgentCallbackCount(chatId: number): number;
   rejectAllAgentCallbacks(chatId: number, error: string): void;
   consumeCapturedActions(chatId: number)
-      : {actions: number[], accessedGadget: boolean} | undefined;
+      : {actions: number[], accessedArtifact: boolean} | undefined;
   /**
    * Appends messages to the chat log and updates cost/token accounting. When both
    * `aiGatewayLogId` and `aiGatewayLogRoute` are present, the authoritative cost is fetched
@@ -380,86 +412,94 @@ export interface AgentHooks {
 
 
   /**
-   * Blueprint hooks for the agent.
+   * Template hooks for the agent.
    *
-   * List the blueprints available to the turn's initiator (their own published blueprints, their
+   * List the templates available to the turn's initiator (their own published templates, their
    * library, and the deployment's featured set) as formatted text. The initiator -- not the
-   * workspace owner -- because blueprint libraries are per-user: a collaborator driving the agent
+   * thread owner -- because template libraries are per-user: a collaborator driving the agent
    * should see their own. There is no search index; the corpora are small enough for the model to
    * scan directly.
    */
-  listAvailableBlueprints(initiator: AiChatAuthorInfo): Promise<string>;
+  listAvailableTemplates(initiator: AiChatAuthorInfo): Promise<string>;
 
   /**
    * A short standing note naming the deployment's standard output formats, or "" if it has none.
-   * Carried in the system prompt rather than left to `listBlueprints`, because a request phrased as
-   * "make me a doc" may not prompt an agent to go looking for blueprints at all.
+   * Carried in the system prompt rather than left to `listTemplates`, because a request phrased as
+   * "make me a doc" may not prompt an agent to go looking for templates at all.
    */
   describeStandardFormats(): Promise<string>;
 
   /**
-   * Fetch a blueprint's decoded files, plus formatted notes describing the copied files and the
-   * bindings the blueprint's code expects the agent to wire up. Used by the createGadget tool to
-   * instantiate the blueprint as a new gadget, along with the output format the blueprint declares
-   * (if any), which the created gadget inherits. Throws an agent-readable error if the blueprint
+   * Fetch a template's decoded files, plus formatted notes describing the copied files and the
+   * bindings the template's code expects the agent to wire up. Used by the createArtifact tool to
+   * instantiate the template as a new artifact, along with the output format the template declares
+   * (if any), which the created artifact inherits. Throws an agent-readable error if the template
    * doesn't exist.
    */
-  fetchBlueprint(blueprintId: string)
-      : Promise<{files: Record<string, string>, notes: string, output?: BlueprintOutput}>;
+  fetchTemplate(templateId: string)
+      : Promise<{files: Record<string, string>, notes: string, output?: TemplateOutput}>;
 }
 
 // =======================================================================================
 // Agent system prompt and tool descriptions
 
 let SYSTEM_PROMPT = `
-You are a helpful coding assistant tasked with helping users write small personal applications known as "Gadgets". A Gadget is an application that typically serves a single user, or a small group, rather than being public-facing. They may help a user automate part of their job, or just be gadgets the user makes for fun.
+You are a helpful coding assistant tasked with helping users write small personal applications known as "Artifacts". A Artifact is an application that typically serves a single user, or a small group, rather than being public-facing. They may help a user automate part of their job, or just be artifacts the user makes for fun.
 
-# Workspaces
+# Threads
 
-You are working within a "workspace". A workspace contains any number of Gadgets, plus connections to external resources. Each of these is available to you as a named binding in your \`env\` (used with the \`executeCode\` tool, described later). The workspace's current Gadgets, along with each one's files and bindings, are listed later in this prompt with the \`env\` name each one goes by.
+You are working within a "thread". A thread contains any number of Artifacts, plus connections to external resources. Each of these is available to you as a named binding in your \`env\` (used with the \`executeCode\` tool, described later). The thread's current Artifacts, along with each one's files and bindings, are listed later in this prompt with the \`env\` name each one goes by.
 
-A new workspace contains no Gadgets: use the \`createGadget\` tool to create one before writing any code. Most workspaces contain a single Gadget, but the user may ask you to build several Gadgets that work together.
+A new thread contains no Artifacts: use the \`createArtifact\` tool to create one before writing any code. Most threads contain a single Artifact, but the user may ask you to build several Artifacts that work together.
 
 Your bindings are the whole of your reach: there is no way for you to request, discover, or negotiate access to anything else, and no approval you can wait for. If a task needs a resource you have no binding for, say plainly that you do not have access to it and that the user can grant it from Connectors in their profile menu. Name the service, do not guess at a binding that is not listed, and do not offer to retry once they have connected — you will see the new binding on your next turn.
 
-When the user asks for a new Gadget, ALWAYS consider starting from a blueprint. A blueprint is code for a specific type of Gadget that has already been written. The \`listBlueprints\` tool returns a list of available blueprints. If any of them match the user's request, and the user did not explicitly request otherwise, you should create a new gadget starting from a blueprint.
+When the user asks for a new Artifact, ALWAYS consider starting from a template. A template is code for a specific type of Artifact that has already been written. The \`listTemplates\` tool returns a list of available templates. If any of them match the user's request, and the user did not explicitly request otherwise, you should create a new artifact starting from a template.
 
-Note that users rarely ask for "a Gadget" in those words. They ask for a thing: a doc, a deck, a tracker, a tool that does X. Any of those is a request for a new Gadget, and so a request to consider a blueprint — including when the workspace already contains a Gadget, which does not make the request an edit to that one.
+Note that users rarely ask for "a Artifact" in those words. They ask for a thing: a doc, a deck, a tracker, a tool that does X. Any of those is a request for a new Artifact, and so a request to consider a template — including when the thread already contains a Artifact, which does not make the request an edit to that one.
 
-Tools refer to Gadgets by their binding name in your env: the file tools (\`readFile\`, \`writeFile\`, \`editFile\`) take a \`gadget\` parameter naming the Gadget that owns the file, and \`setGadgetBinding\` takes a \`gadget\` parameter naming the Gadget whose bindings to modify. Some older workspaces have a "default" Gadget (noted in the gadget list) which the file tools fall back to when \`gadget\` is omitted; even so, prefer passing the name explicitly.
+Tools refer to Artifacts by their binding name in your env: the file tools (\`readFile\`, \`writeFile\`, \`editFile\`) take a \`artifact\` parameter naming the Artifact that owns the file, and \`setArtifactBinding\` takes a \`artifact\` parameter naming the Artifact whose bindings to modify. Some older threads have a "default" Artifact (noted in the artifact list) which the file tools fall back to when \`artifact\` is omitted; even so, prefer passing the name explicitly.
 
-# Writing Gadgets
+# Your Machine
 
-Gadgets execute on a restricted and heavily-sandboxed variant of Cloudflare Workers.
+Each thread has its own persistent Linux machine (sandbox). Use the \`executeShell\` tool to run commands on it: install packages, clone repos, process data, run scripts. The machine's filesystem persists across commands and across the machine sleeping when idle — it wakes automatically when you use it. This is separate from Artifact code (which runs on sandboxed Cloudflare Workers): use the machine for heavy computation, real tooling (git, node, python), and scratch work; use Artifacts for what the user keeps.
 
-Each Gadget has two main files: client.js and server.js
+# Child Threads
 
-server.js defines the Gadget's server-side logic, in the form of a Cloudflare Durable Object class. The class must be exported under the name \`Gadget\`. Unlike with normal Durable Objects on Cloudflare, there is no need to export a separate fetch handler; the Gadgets platform automatically takes care of routing requests to the Gadget. The Gadget has access to private storage via the regular Durable Objects KV and SQLite storage APIs. A simple server.js might look like:
+You can delegate work to child threads: independent agents, each in its own thread with its own conversation, files, and machine. \`spawnThread\` creates one with an initial task; \`sendToThread\` sends follow-ups; \`waitForThreads\` collects responses; \`listSpawnedThreads\` and \`readThread\` inspect them. A child cannot see your conversation or files, so make each task prompt self-contained. Spawn children to parallelize independent subtasks (e.g. researching several topics at once) or to keep a large subtask's detail out of this conversation; for simple sequential work, just do it yourself. The user sees child threads in their sidebar nested under this one.
+
+# Writing Artifacts
+
+Artifacts execute on a restricted and heavily-sandboxed variant of Cloudflare Workers.
+
+Each Artifact has two main files: client.js and server.js
+
+server.js defines the Artifact's server-side logic, in the form of a Cloudflare Durable Object class. The class must be exported under the name \`Artifact\`. Unlike with normal Durable Objects on Cloudflare, there is no need to export a separate fetch handler; the Artifacts platform automatically takes care of routing requests to the Artifact. The Artifact has access to private storage via the regular Durable Objects KV and SQLite storage APIs. A simple server.js might look like:
 
 \`\`\`
 import { DurableObject } from "cloudflare:workers";
 
-export class Gadget extends DurableObject {
+export class Artifact extends DurableObject {
   greet(name) {
     return \`Hello, \${name}!\`;
   }
 }
 \`\`\`
 
-client.js is JavaScript that runs inside the browser to render a client-side user interface. This script runs inside a sandboxed iframe. It can display UI by manipulating the DOM. The client context is initialized with a special global variable called \`gadget\`, which is an RPC stub pointing at the gadget's Durable Object server. This RPC stub is implemented using Cap'n Web, an RPC system from Cloudflare that works similarly to Cloudflare Workers' built-in RPC system, but is able to be used in a browser. In short, methods invoked on the \`gadget\` stub will invoke the same-named method on the Durable Object class. A simple client.js might look like:
+client.js is JavaScript that runs inside the browser to render a client-side user interface. This script runs inside a sandboxed iframe. It can display UI by manipulating the DOM. The client context is initialized with a special global variable called \`artifact\`, which is an RPC stub pointing at the artifact's Durable Object server. This RPC stub is implemented using Cap'n Web, an RPC system from Cloudflare that works similarly to Cloudflare Workers' built-in RPC system, but is able to be used in a browser. In short, methods invoked on the \`artifact\` stub will invoke the same-named method on the Durable Object class. A simple client.js might look like:
 
 \`\`\`
-let greeting = await gadget.greet("World");
+let greeting = await artifact.greet("World");
 document.body.appendChild(document.createTextNode(greeting));
 \`\`\`
 
 Note that there is no index.html. Instead, client.js must build the entire UI using JavaScript code.
 
-Make Gadget UIs responsive and usable on both desktop and phones by default.
+Make Artifact UIs responsive and usable on both desktop and phones by default.
 
-Every Gadget UI can be exported to PDF using platform-owned controls outside the Gadget. Never add print or export UI to a Gadget and never call \`window.print()\`. When asked to support or improve PDF export, only add standard print CSS such as \`@media print\`, \`@page\`, and CSS fragmentation properties so the PDF remains readable.
+Every Artifact UI can be exported to PDF using platform-owned controls outside the Artifact. Never add print or export UI to a Artifact and never call \`window.print()\`. When asked to support or improve PDF export, only add standard print CSS such as \`@media print\`, \`@page\`, and CSS fragmentation properties so the PDF remains readable.
 
-Both the client and server run inside a strictly isolated sandbox. They cannot make requests to the Internet, e.g. by calling \`fetch()\`. Instead, a Gadget communicates with the outside world strictly through its "bindings", that is, the Cloudflare Workers \`env\` API, which code in the Durable Object class can access as \`this.env\`.
+Both the client and server run inside a strictly isolated sandbox. They cannot make requests to the Internet, e.g. by calling \`fetch()\`. Instead, a Artifact communicates with the outside world strictly through its "bindings", that is, the Cloudflare Workers \`env\` API, which code in the Durable Object class can access as \`this.env\`.
 
 Note that the iframe sandbox on the client side prohibits modal popup boxes like alert() and confirm(), so do not use those.
 
@@ -491,14 +531,14 @@ class Callback extends RpcTarget {
 
   [Symbol.dispose]() {
     // Connection lost. Resubscribe using new connection.
-    gadget.subscribe(this);
+    artifact.subscribe(this);
   }
 }
 
-gadget.subscribe(new Callback());
+artifact.subscribe(new Callback());
 \`\`\`
 
-The top-level \`gadget\` stub survives backend reconnects, and calls made while its replacement is being acquired will wait. However, other capabilities passed over RPC in either direction are disposed on disconnect, and must be re-acquired.
+The top-level \`artifact\` stub survives backend reconnects, and calls made while its replacement is being acquired will wait. However, other capabilities passed over RPC in either direction are disposed on disconnect, and must be re-acquired.
 
 DO NOT import \`RpcTarget\` in client.js. It is already imported.
 
@@ -509,20 +549,20 @@ If you need \`RpcTarget\` in server.js, you can import it from "cloudflare:worke
 * ALWAYS store server state in Durable Object storage, not just in memory. Memory is OK to use for caching but users expect not to have their experience disrupted when the server restarts.
 * If the user asks for a game or any sort of app where multiple users might collaborate, make sure multiple clients can connect at once and broadcast real-time updates to each other.
 * Clients may frequently reload, and there is no client-side storage, so there is no way to track long-lived "sessions". So, for example, if the user asks for a multiplayer game, you should design it so that any connected client can choose to be any player. If it's turn-based, you can just let any client make any move. If it's concurrent but with distinct players, let each client choose which player they are controlling, including letting multiple clients choose the same player.
-* If a Gadget contains a README.md file, use it to describe that Gadget at a high level and document anything that future agents (or humans) may need to know when editing the code. You don't need to document details that are obvious from looking at the code, or which most people and agents would know already.
+* If a Artifact contains a README.md file, use it to describe that Artifact at a high level and document anything that future agents (or humans) may need to know when editing the code. You don't need to document details that are obvious from looking at the code, or which most people and agents would know already.
 
 # Persistent Stubs and \`ctx.restore()\`
 
-Some APIs available to you (especially APIs returned by \`describeBinding\`) will take an argument of type \`RpcStub\` and will describe the stub as needing to be "persistent". A persistent stub is one that can be stored in long-term storage and "restored" later. Persistent stubs are used for callbacks that may be called in the distant future, e.g. to implement "hooks" that start the Gadget when certain events occur.
+Some APIs available to you (especially APIs returned by \`describeBinding\`) will take an argument of type \`RpcStub\` and will describe the stub as needing to be "persistent". A persistent stub is one that can be stored in long-term storage and "restored" later. Persistent stubs are used for callbacks that may be called in the distant future, e.g. to implement "hooks" that start the Artifact when certain events occur.
 
-To construct a persistent stub, you must use the \`ctx.restore(params)\` API, while defining a special \`[restore](params)\` method on the Gadget's \`DurableObject\` class. The special restore method gives the system a repeatable way to recreate a live RPC object from the given parameters. When the hook fires in the future, the call to \`[restore](params)\` will be repeated to create a new object to handle the hook.
+To construct a persistent stub, you must use the \`ctx.restore(params)\` API, while defining a special \`[restore](params)\` method on the Artifact's \`DurableObject\` class. The special restore method gives the system a repeatable way to recreate a live RPC object from the given parameters. When the hook fires in the future, the call to \`[restore](params)\` will be repeated to create a new object to handle the hook.
 
-Here is an example Gadget implementing the restore pattern:
+Here is an example Artifact implementing the restore pattern:
 
 \`\`\`
 import { DurableObject, Greeter, restore } from "cloudflare:workers";
 
-export class Gadget extends DurableObject {
+export class Artifact extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
   }
@@ -552,14 +592,14 @@ class Greeter extends RpcTarget {
 
 Notice that the restore method is named using a symbol. This allows the system to access it, without making the method directly available over RPC.
 
-Within a Gadget class with a restore method, you can call \`this.ctx.restore(params)\`. The given \`params\` (which must be serializable) will be passed back to the Gadget's restore method, and the resulting persistent RpcStub will be returned. This can then be passed to an API that requires persistent stubs, e.g.:
+Within a Artifact class with a restore method, you can call \`this.ctx.restore(params)\`. The given \`params\` (which must be serializable) will be passed back to the Artifact's restore method, and the resulting persistent RpcStub will be returned. This can then be passed to an API that requires persistent stubs, e.g.:
 
 \`\`\`
 let greeter = await this.ctx.restore({type: "greeter", greeting: "Howdy"});
 await this.env.SOME_BINDING.registerGreeter(greeter);
 \`\`\`
 
-Typically, though, a Gadget doesn't register hooks from within its own code. Instead, you will probably want to register a hook once as part of an \`executeCode\` tool call. To facilitate this, within an \`executeCode\` invocation you have the ability to directly invoke each Gadget's restore method via its RPC stub. This is not normally possible over RPC, but the \`executeCode\` environment has been set up to make it possible. You can thus call a gadget's restorer in an \`executeCode\` invocation by providing code like:
+Typically, though, a Artifact doesn't register hooks from within its own code. Instead, you will probably want to register a hook once as part of an \`executeCode\` tool call. To facilitate this, within an \`executeCode\` invocation you have the ability to directly invoke each Artifact's restore method via its RPC stub. This is not normally possible over RPC, but the \`executeCode\` environment has been set up to make it possible. You can thus call a artifact's restorer in an \`executeCode\` invocation by providing code like:
 
 \`\`\`
 import { restore } from "cloudflare:workers";
@@ -570,33 +610,33 @@ export default async function(self, env, ctx) {
 }
 \`\`\`
 
-The call to \`env.MY_GADGET[restore](params)\` is equivalent to calling \`this.ctx.restore(params)\` from within the Gadget itself. This returns a persistent stub which you can then use as a hook callback.
+The call to \`env.MY_GADGET[restore](params)\` is equivalent to calling \`this.ctx.restore(params)\` from within the Artifact itself. This returns a persistent stub which you can then use as a hook callback.
 `.trim();
 
 let SPAWNER_SYSTEM_PROMPT = `
-You are an AI agent started to perform a specific task as part of a personal application called a "Gadget". A Gadget is an application that typically serves a single user, or a small group, rather than being public-facing. They may help a user automate part of their job, or just be gadgets the user makes for fun.
+You are an AI agent started to perform a specific task as part of a personal application called a "Artifact". A Artifact is an application that typically serves a single user, or a small group, rather than being public-facing. They may help a user automate part of their job, or just be artifacts the user makes for fun.
 
-Gadgets execute on a restricted and heavily-sandboxed variant of Cloudflare Workers.
+Artifacts execute on a restricted and heavily-sandboxed variant of Cloudflare Workers.
 
-You were started programmatically by the Gadget to perform a task. The specific task will be described in the first message in this chat. The message is not directly from the user but rather from an automated system. If you receive any further messages after the first, then these additional messages are directly from a human user making additional requests regarding the task.
+You were started programmatically by the Artifact to perform a task. The specific task will be described in the first message in this chat. The message is not directly from the user but rather from an automated system. If you receive any further messages after the first, then these additional messages are directly from a human user making additional requests regarding the task.
 
 Typically (but not always), you will need to use the \`executeCode\` tool to complete the task, invoking the available bindings (members of the env object) and other APIs available to you.
 `.trim();
 
 let READ_FILE_TOOL_DESCRIPTION = `
-Read the content of a file owned by one of the workspace's gadgets. Note that you will be informed any time a file changes, so it is not necessary to read a file again after you have already read it once. This cannot read chat attachments; attachments are provided directly in the conversation.
+Read the content of a file owned by one of the thread's artifacts. Note that you will be informed any time a file changes, so it is not necessary to read a file again after you have already read it once. This cannot read chat attachments; attachments are provided directly in the conversation.
 `.trim();
 
 let CREATE_GADGET_TOOL_DESCRIPTION = `
-Create a new Gadget in this workspace. The new gadget immediately becomes available in your \`env\` under the \`bindingName\` you choose, which is also how you refer to it in other tools (the \`workpiece\` parameter of the file tools, etc.).
+Create a new Artifact in this thread. The new artifact immediately becomes available in your \`env\` under the \`bindingName\` you choose, which is also how you refer to it in other tools (the \`workpiece\` parameter of the file tools, etc.).
 
-Use this when the workspace has no gadgets yet, or when the user asks for an additional gadget. Always choose a short, descriptive title — the user will see it.
+Use this when the thread has no artifacts yet, or when the user asks for an additional artifact. Always choose a short, descriptive title — the user will see it.
 
-By default the new gadget is empty. Pass \`blueprintId\` (discovered with the \`listBlueprints\` tool, or given by the user) to instead start the gadget from a blueprint's code; the result then also describes the bindings the blueprint expects you to wire up.
+By default the new artifact is empty. Pass \`templateId\` (discovered with the \`listTemplates\` tool, or given by the user) to instead start the artifact from a template's code; the result then also describes the bindings the template expects you to wire up.
 `.trim();
 
-let LIST_BLUEPRINTS_TOOL_DESCRIPTION = `
-List the blueprints available to the user: their own published blueprints, their blueprint library, and this deployment's featured blueprints. A blueprint is a shareable snapshot of a Gadget's code; instantiate one as a new Gadget by passing its \`blueprintId\` to \`createGadget\`. There is no search — read the list and pick the best match yourself.
+let LIST_TEMPLATES_TOOL_DESCRIPTION = `
+List the templates available to the user: their own published templates, their template library, and this deployment's featured templates. A template is a shareable snapshot of a Artifact's code; instantiate one as a new Artifact by passing its \`templateId\` to \`createArtifact\`. There is no search — read the list and pick the best match yourself.
 `.trim();
 
 let WRITE_FILE_TOOL_DESCRIPTION = `
@@ -610,7 +650,7 @@ Edit content of a file. If you need to edit multiple places in a file or across 
 let WEBFETCH_TOOL_DESCRIPTION = `
 Fetch the contents of a public web URL via HTTPS GET. Use this to look up documentation, fetch API references, or read pages the user has linked, when doing so would help you answer accurately. Prefer it over guessing when you're unsure about an API or library.
 
-The Gadget's own code (server.js / client.js) still cannot make network requests at runtime; \`webFetch\` is a tool for *you*, not something you can call from gadget code.
+The Artifact's own code (server.js / client.js) still cannot make network requests at runtime; \`webFetch\` is a tool for *you*, not something you can call from artifact code.
 
 Only https:// URLs to public hosts are allowed; credentials in the URL are not permitted, and the request is sent with no cookies and no authorization headers. Responses are capped at ~1 MiB; if the cap is hit, the result will note that the body was truncated.
 
@@ -643,28 +683,29 @@ IMPORTANT: The objects found in \`env\` most likely do NOT implement any API you
 `.trim();
 
 let SET_GADGET_BINDING_TOOL_DESCRIPTION = `
-Wire a resource from your \`env\` into a Gadget's own \`env\`, so the Gadget's code can use it.
+Wire a resource from your \`env\` into a Artifact's own \`env\`, so the Artifact's code can use it.
 
-The bindings in your \`env\` belong to this chat; a Gadget's code sees only the Gadget's own bindings, which are listed in the system prompt. Use this tool to add one of your bindings to a Gadget: \`gadget\` names the target Gadget (by its name in your env), \`source\` names the resource binding to wire in, and \`name\` is the name the Gadget's code will see it as (\`env.<name>\` in server.js), defaulting to the same name as \`source\`.
+The bindings in your \`env\` belong to this chat; a Artifact's code sees only the Artifact's own bindings, which are listed in the system prompt. Use this tool to add one of your bindings to a Artifact: \`artifact\` names the target Artifact (by its name in your env), \`source\` names the resource binding to wire in, and \`name\` is the name the Artifact's code will see it as (\`env.<name>\` in server.js), defaulting to the same name as \`source\`.
 
 The addition is part of your proposed changes: like code edits, it takes permanent effect when the user accepts your changes.
 
-NOTE: You do NOT need this tool to use a resource yourself with \`executeCode\` — your own bindings are already available there. ONLY use it when a Gadget's code needs the resource.
+NOTE: You do NOT need this tool to use a resource yourself with \`executeCode\` — your own bindings are already available there. ONLY use it when a Artifact's code needs the resource.
 `.trim();
 
 let EXECUTE_CODE_TOOL_DESCRIPTION = `
 Executes one-off JavaScript code, returning the output it logs to the console. The code runs in a sandbox where it cannot talk to the internet, except through the bindings in its 'env' object; fetch() will not work. Otherwise, the code can call any built-in APIs available in Cloudflare Workers.
 
 The 'env' object contains this chat's named bindings:
-* An entry for each Gadget in the workspace, under the name given in the system prompt's gadget list (or the name you passed to \`createGadget\`): an RPC stub pointing at the Gadget's server-side Durable Object. If the user asks you to interact with a Gadget directly, or asks if you can "see" it, use this stub (read the Gadget's server code to learn what RPC methods it exposes).
-* An entry for each external resource connected to this workspace, listed in the system prompt.
+* An entry for each Artifact in the thread, under the name given in the system prompt's artifact list (or the name you passed to \`createArtifact\`): an RPC stub pointing at the Artifact's server-side Durable Object. If the user asks you to interact with a Artifact directly, or asks if you can "see" it, use this stub (read the Artifact's server code to learn what RPC methods it exposes).
+* An entry for each external resource available to this chat, listed in the system prompt.
 
-Note that this differs from the \`env\` a Gadget's own code sees: a Gadget's server.js sees only that Gadget's own bindings (listed in the system prompt's gadget list), which are wired up separately with \`setGadgetBinding\`. Your bindings and a Gadget's bindings may point at the same resource under the same or different names.
+Note that this differs from the \`env\` a Artifact's own code sees: a Artifact's server.js sees only that Artifact's own bindings (listed in the system prompt's artifact list), which are wired up separately with \`setArtifactBinding\`. Your bindings and a Artifact's bindings may point at the same resource under the same or different names.
 
-When the user asks you to just do a task that can be done with these bindings, you should use executeCode to perform the task, instead of adding code to a gadget to do it.
+When the user asks you to just do a task that can be done with these bindings, you should use executeCode to perform the task, instead of adding code to a artifact to do it.
 
 The function also receives a \`self\` parameter which is a magic object that points back to this chat thread. Calling any method on \`self\`, like \`self.foo(123)\`, delivers a callback message to this chat and activates you to respond. \`self\` can be passed over RPC (e.g. to a subscription method) and stored in a Durable Object's KV storage for long-term callbacks. When an agent callback is received, it appears in your env under a name like \`PARAMS_1\`, with \`.args\` (the callback arguments), \`.resolve(value)\` (to return a value to the caller), and \`.reject(error)\` (to reject with an error).
 `.trim();
+
 
 let GIVE_UP_TOOL_DESCRIPTION = `
 Gives up on handling the current callbacks, rejecting all outstanding callbacks with an error. Use this if you cannot fulfill the callbacks after attempting to do so.
@@ -678,8 +719,8 @@ type CodePreviewEntry = {
   toolName: "writeFile" | "editFile";
   parser: StreamingToolInputParser;
   // The edit's target workpiece, resolved from the streaming input's prefix fields once they are
-  // complete. `null` means resolution failed (e.g. the agent omitted `workpiece` in a workspace
-  // with no default gadget) — the tool call itself will fail, so no preview is shown.
+  // complete. `null` means resolution failed (e.g. the agent omitted `workpiece` in a thread
+  // with no default artifact) — the tool call itself will fail, so no preview is shown.
   target?: {workpieceId: WorkpieceId, rootName: string} | null;
   // Whether we've already emitted the toolCallTarget event. To avoid emitting multiple times.
   targetEmitted?: boolean;
@@ -1121,39 +1162,39 @@ export async function runAgent(
     compaction: CompactionContext): Promise<CompactionCheckpoint | undefined> {
   let checkpoint = compaction.checkpoint;
 
-  // The workspace's gadget registry, snapshotted at the start of the turn (gadgets provisional
+  // The thread's artifact registry, snapshotted at the start of the turn (artifacts provisional
   // to other chats are excluded -- they belong to those chats' proposed changes). This is the
-  // enumeration source of truth for which Y.Doc roots hold gadget files (roots of gadgets
-  // deleted from the registry are inert). A gadget created mid-turn (via createGadget) isn't
+  // enumeration source of truth for which Y.Doc roots hold artifact files (roots of artifacts
+  // deleted from the registry are inert). A artifact created mid-turn (via createArtifact) isn't
   // in this snapshot, but nothing here needs it: the system prompt was already built, and
   // replayed "changes" messages predate it.
-  let gadgetInfos = hooks.listGadgetInfo(chatId);
+  let artifactInfos = hooks.listArtifactInfo(chatId);
 
   // On first use, we'll build a copy of the Y.Doc, then reuse it for further tool calls in
-  // this session. Each gadget's files live in the doc's root map named by
-  // AgentGadgetInfo.rootName; file tools resolve their optional `workpiece` parameter to a root
+  // this session. Each artifact's files live in the doc's root map named by
+  // AgentArtifactInfo.rootName; file tools resolve their optional `workpiece` parameter to a root
   // via hooks.resolveWorkpieceRoot.
   let ydoc: Y.Doc | undefined;
   let versionLock = checkpoint?.observedCodeVersion;
   let capturedYdocChanges: Uint8Array[] = [];
-  // Gadgets created this turn, awaiting attachment to the next flushed "changes" message (see
-  // flushCapturedYdocChanges and the createGadget tool) -- which is what durably records, and
+  // Artifacts created this turn, awaiting attachment to the next flushed "changes" message (see
+  // flushCapturedYdocChanges and the createArtifact tool) -- which is what durably records, and
   // sequence-stamps, each creation. Like captured edits, buffered creations from a turn that
-  // crashed before flushing are recovered during history replay: replayed createGadget calls not
-  // listed in any "changes" message's `createdGadgets` are re-added here (see
+  // crashed before flushing are recovered during history replay: replayed createArtifact calls not
+  // listed in any "changes" message's `createdArtifacts` are re-added here (see
   // replayedCreations/recordedCreations below).
-  let pendingCreatedGadgets: {gadgetId: WorkpieceId, title: string, bindingName: string}[] = [];
+  let pendingCreatedArtifacts: {artifactId: WorkpieceId, title: string, bindingName: string}[] = [];
 
-  // Binding edges added this turn (via the setGadgetBinding tool), likewise awaiting attachment
+  // Binding edges added this turn (via the setArtifactBinding tool), likewise awaiting attachment
   // to the next flushed "changes" message (see `addedBindings`), which sequence-stamps the
   // pending edge. Crash recovery mirrors creations: replayed additions not listed in any
   // "changes" message are re-added here (see replayedBindingAdditions/recordedBindingAdditions).
-  let pendingAddedBindings: {gadgetId: WorkpieceId, name: string, target: WorkpieceId}[] = [];
+  let pendingAddedBindings: {artifactId: WorkpieceId, name: string, target: WorkpieceId}[] = [];
 
   // The chat's binding map: what each name in the agent's executeCode `env` resolves to. Starts
   // from the seed layer (see AgentHooks.prepareChatBindings) and accumulates chat-local entries
-  // during history replay (pasted resources, accepted connections, created gadgets, agent
-  // callbacks) and live tool calls (createGadget). Names are never rebound, so resolution is
+  // during history replay (pasted resources, accepted connections, created artifacts, agent
+  // callbacks) and live tool calls (createArtifact). Names are never rebound, so resolution is
   // replay-deterministic. Iteration order is insertion order; the first name inserted for a
   // target wins reverse lookups (see chatNameFor).
   let chatBindings = new Map<string, ChatBindingEntry>(checkpoint?.chatBindings ?? []);
@@ -1190,7 +1231,7 @@ export async function runAgent(
   let getRollingFileContents = () => {
     if (!rollingFileContents) {
       rollingFileContents = new Map();
-      for (let info of gadgetInfos) {
+      for (let info of artifactInfos) {
         let files = new Map<string, string>();
         for (let [filename, text] of getSessionYDoc().getMap<Y.Text>(info.rootName)) {
           files.set(filename, text.toString());
@@ -1204,9 +1245,9 @@ export async function runAgent(
     let ydoc = getSessionYDoc();
     let currentContents = getRollingFileContents();
 
-    // Observe every gadget's files root while applying the update, collecting touched filenames
+    // Observe every artifact's files root while applying the update, collecting touched filenames
     // per root. (An update may span roots; changes to roots with no registry entry are ignored.)
-    let observed = gadgetInfos.map(info => {
+    let observed = artifactInfos.map(info => {
       let files = ydoc.getMap<Y.Text>(info.rootName);
       let touchedFiles = new Set<string>();
       let observer = (events: Y.YEvent<any>[]) => {
@@ -1232,7 +1273,7 @@ export async function runAgent(
       }
     }
 
-    // Diffs are grouped by gadget: each gadget with changes contributes a heading line naming it
+    // Diffs are grouped by artifact: each artifact with changes contributes a heading line naming it
     // (unified diff format tolerates metadata between files, and this output only needs to be
     // understandable to the model, not valid `patch` input), followed by its files' diffs with
     // bare filenames.
@@ -1244,12 +1285,12 @@ export async function runAgent(
         currentContents.set(info.rootName, rootContents);
       }
 
-      // A gadget with no in-scope binding gets no diff output: the agent can't reference it, so
+      // A artifact with no in-scope binding gets no diff output: the agent can't reference it, so
       // a diff would only confuse it. (This shouldn't really be possible anyway.) Its rolling
       // snapshot must still advance below so later diffs against it stay correct.
       let envName = chatNameFor(info.id);
 
-      let gadgetDiffParts: string[] = [];
+      let artifactDiffParts: string[] = [];
       for (let filename of [...touchedFiles].toSorted()) {
         let oldContent = rootContents.get(filename) ?? "";
         let text = files.get(filename);
@@ -1263,7 +1304,7 @@ export async function runAgent(
               rootContents.has(filename),
               text !== undefined);
           if (diff) {
-            gadgetDiffParts.push(diff);
+            artifactDiffParts.push(diff);
           }
         }
 
@@ -1275,10 +1316,10 @@ export async function runAgent(
         }
       }
 
-      if (envName !== undefined && gadgetDiffParts.length > 0) {
+      if (envName !== undefined && artifactDiffParts.length > 0) {
         diffParts.push(
-            `==== Gadget env.${envName}: ${JSON.stringify(info.title)} ====`,
-            ...gadgetDiffParts);
+            `==== Artifact env.${envName}: ${JSON.stringify(info.title)} ====`,
+            ...artifactDiffParts);
       }
     }
 
@@ -1293,28 +1334,28 @@ export async function runAgent(
   // a "changes" message yet. This is needed for a few tricky cases.
   let pendingReplayEdits: ReplayPendingEdit[] = [];
 
-  // Same idea for gadget creations, but exact and order-immune: a creation is durably recorded
-  // iff some "changes" message lists it in `createdGadgets` -- possibly even *before* the tool
+  // Same idea for artifact creations, but exact and order-immune: a creation is durably recorded
+  // iff some "changes" message lists it in `createdArtifacts` -- possibly even *before* the tool
   // call's own message (an executeCode barrier flush in the same step) -- so rather than
   // clearing a pending list incrementally, collect the tool calls and the recorded ids
   // separately and re-adopt the difference after replay. Whatever isn't recorded is a crashed
   // turn's tail. (The registry records already exist -- created durably at tool time, awaiting
-  // their stamp -- which is why replay of createGadget itself never re-creates anything.)
-  let replayedCreations: {gadgetId: WorkpieceId, title: string, bindingName: string}[] = [];
+  // their stamp -- which is why replay of createArtifact itself never re-creates anything.)
+  let replayedCreations: {artifactId: WorkpieceId, title: string, bindingName: string}[] = [];
   let recordedCreations = new Set<WorkpieceId>();
 
-  // And the same again for binding additions (setGadgetBinding), recorded by `addedBindings`.
-  // Unlike creations, additions have no unique id: (gadgetId, name) can legitimately recur when
+  // And the same again for binding additions (setArtifactBinding), recorded by `addedBindings`.
+  // Unlike creations, additions have no unique id: (artifactId, name) can legitimately recur when
   // an earlier addition is removed or reverted and the same name is added again. So instead of a
   // set difference, count per key -- recordings consume the *earliest* replayed additions (an
   // addition is recorded no later than any subsequent same-name addition, which requires the
   // earlier edge to be gone first) and the excess tail is re-adopted. Only agent-flushed
   // recordings count: a user-authored "changes" message records a UI-initiated bind
-  // (GadgetClient.bind), which has no tool call, and counting it would mask an agent addition of
+  // (ArtifactClient.bind), which has no tool call, and counting it would mask an agent addition of
   // the same name.
-  let replayedBindingAdditions: {gadgetId: WorkpieceId, name: string, target: WorkpieceId}[] = [];
+  let replayedBindingAdditions: {artifactId: WorkpieceId, name: string, target: WorkpieceId}[] = [];
   let recordedBindingAdditions = new Map<string, number>();
-  let bindingAdditionKey = (gadgetId: WorkpieceId, name: string) => `${gadgetId}:${name}`;
+  let bindingAdditionKey = (artifactId: WorkpieceId, name: string) => `${artifactId}:${name}`;
 
   // Track which files have been read in this session, keyed by (workpieceId, filename). Edits
   // aren't allowed before reading. Deliberately not carried across a compaction boundary: an
@@ -1324,7 +1365,7 @@ export async function runAgent(
   let fileKey = (workpieceId: WorkpieceId, filename: string) => `${workpieceId}:${filename}`;
 
   // Resolve a file tool's optional `workpiece` parameter -- the chat binding name of the target
-  // workpiece -- to a workpiece id (or undefined, meaning the workspace's default gadget,
+  // workpiece -- to a workpiece id (or undefined, meaning the thread's default artifact,
   // resolved downstream by resolveWorkpieceRoot).
   let resolveToolWorkpieceId = (workpiece?: string): WorkpieceId | undefined => {
     if (workpiece === undefined) return undefined;
@@ -1332,10 +1373,10 @@ export async function runAgent(
     if (!entry) {
       throw new Error(
           `There is no binding named "${workpiece}" in your env. Pass the env name of a ` +
-          `gadget, as listed in the system prompt or chosen in createGadget.`);
+          `artifact, as listed in the system prompt or chosen in createArtifact.`);
     }
     if (entry.type !== "workpiece") {
-      throw new Error(`env.${workpiece} does not refer to a gadget.`);
+      throw new Error(`env.${workpiece} does not refer to a artifact.`);
     }
     return entry.id;
   };
@@ -1495,7 +1536,7 @@ export async function runAgent(
         let assistantContentComplete = false;
         switch (msg.author.type) {
           case "user":
-          case "gadget":
+          case "artifact":
             if (msg.attachments?.length) {
               let parts: (TextContent | ImageContent)[] = [];
               if (content) parts.push({type: "text", text: content});
@@ -1675,15 +1716,15 @@ export async function runAgent(
                   // recorded no-op.
                   toolOutput = {text: jsonToolResultText({success: true})};
                   break;
-                case "setGadgetBinding":
+                case "setArtifactBinding":
                   // The addition is provisional and the recorded output identifies the edge so a
                   // crashed turn's unrecorded addition can be re-adopted, exactly like
-                  // createGadget.
+                  // createArtifact.
                   if (toolCall.output === undefined) {
-                    throw new Error("setGadgetBinding tool call in log is missing its result");
+                    throw new Error("setArtifactBinding tool call in log is missing its result");
                   }
                   replayedBindingAdditions.push({
-                    gadgetId: toolCall.output.gadgetId,
+                    artifactId: toolCall.output.artifactId,
                     name: toolCall.output.name,
                     target: toolCall.output.target,
                   });
@@ -1691,24 +1732,24 @@ export async function runAgent(
                     text: jsonToolResultText({success: true, changeId: toolCall.output.changeId}),
                   };
                   break;
-                case "createGadget": {
+                case "createArtifact": {
                   // A creation tool can't be re-run: the created workpiece ID was persisted as
                   // the tool's recorded result, so replay returns it without creating anything.
                   // (The recorded changeId needs no counter bookkeeping here: it names the
                   // "changes" message that recorded the creation, which is numbered by the
-                  // normal "changes" replay below. Likewise a blueprint instantiation needs no
+                  // normal "changes" replay below. Likewise a template instantiation needs no
                   // re-fetch: its files ride that same "changes" message, which the live tool
                   // flushes before its own step's message can land in the log.)
                   if (toolCall.output === undefined) {
-                    throw new Error("createGadget tool call in log is missing its result");
+                    throw new Error("createArtifact tool call in log is missing its result");
                   }
                   replayedCreations.push({
-                    gadgetId: toolCall.output.gadgetId,
+                    artifactId: toolCall.output.artifactId,
                     title: toolCall.input.title,
                     bindingName: toolCall.input.bindingName,
                   });
                   chatBindings.set(toolCall.input.bindingName,
-                      {type: "workpiece", id: toolCall.output.gadgetId});
+                      {type: "workpiece", id: toolCall.output.artifactId});
                   toolOutput = {text: jsonToolResultText(toolCall.output)};
                   break;
                 }
@@ -1730,7 +1771,7 @@ export async function runAgent(
                   // if it did, replay the same brush-off the live tool returns.
                   toolOutput = {text: OBSERVE_USER_CHANGES_NOOP_RESULT};
                   break;
-                case "listBlueprints":
+                case "listTemplates":
                   toolOutput = {text: toolCall.output ?? ""};
                   break;
                 default:
@@ -1773,11 +1814,11 @@ export async function runAgent(
       }
 
       case "changes": {
-        // User-created gadgets enter the chat's binding map (agent creations were already added
-        // by their createGadget tool-call replay; the has() check makes this a no-op for those).
-        for (let {gadgetId, bindingName} of msg.createdGadgets ?? []) {
+        // User-created artifacts enter the chat's binding map (agent creations were already added
+        // by their createArtifact tool-call replay; the has() check makes this a no-op for those).
+        for (let {artifactId, bindingName} of msg.createdArtifacts ?? []) {
           if (!chatBindings.has(bindingName)) {
-            chatBindings.set(bindingName, {type: "workpiece", id: gadgetId});
+            chatBindings.set(bindingName, {type: "workpiece", id: artifactId});
           }
         }
 
@@ -1805,18 +1846,18 @@ export async function runAgent(
               : undefined;
           if (msg.author.type === "user") {
             // Surface everything the user did in this batch as one synthetic observation:
-            // gadgets they created and bindings they added from the workspace UI
+            // artifacts they created and bindings they added from the thread UI
             // (agent-initiated creations/additions need no note -- the model already sees its
             // own tool calls and recorded results), followed by the diff of their file edits. A
             // creation-only batch has a no-op update and thus no diff.
-            let observations = (msg.createdGadgets ?? []).map(({title, bindingName}) =>
-                `Created new gadget ${JSON.stringify(title)}, available in your env as ` +
+            let observations = (msg.createdArtifacts ?? []).map(({title, bindingName}) =>
+                `Created new artifact ${JSON.stringify(title)}, available in your env as ` +
                 `\`env.${bindingName}\`.`);
-            for (let {gadgetId, name} of msg.addedBindings ?? []) {
-              let gadgetName = chatNameFor(gadgetId);
+            for (let {artifactId, name} of msg.addedBindings ?? []) {
+              let artifactName = chatNameFor(artifactId);
               observations.push(
                   `Added binding "${name}" to ` +
-                  (gadgetName !== undefined ? `gadget ${gadgetName}` : `a gadget`) + `.`);
+                  (artifactName !== undefined ? `artifact ${artifactName}` : `a artifact`) + `.`);
             }
             if (diff !== undefined) {
               observations.push(diff);
@@ -1848,12 +1889,12 @@ export async function runAgent(
         if (msg.update !== undefined) {
           pendingReplayEdits = [];
         }
-        for (let {gadgetId} of msg.createdGadgets ?? []) {
-          recordedCreations.add(gadgetId);
+        for (let {artifactId} of msg.createdArtifacts ?? []) {
+          recordedCreations.add(artifactId);
         }
         if (msg.author.type !== "user") {
-          for (let {gadgetId, name} of msg.addedBindings ?? []) {
-            let key = bindingAdditionKey(gadgetId, name);
+          for (let {artifactId, name} of msg.addedBindings ?? []) {
+            let key = bindingAdditionKey(artifactId, name);
             recordedBindingAdditions.set(key, (recordedBindingAdditions.get(key) ?? 0) + 1);
           }
         }
@@ -1925,8 +1966,9 @@ export async function runAgent(
         modelMessages.push({ role: "user", content: msg.text, timestamp: msgTimestamp });
         break;
 
+
       case "action":
-      case "useGadget":
+      case "useArtifact":
       case "error":
         // No need to tell the agent about this.
         break;
@@ -1961,19 +2003,19 @@ export async function runAgent(
     pendingReplayEdits = [];
   }
 
-  // Likewise, re-adopt gadget creations and binding additions from a crashed turn that were
+  // Likewise, re-adopt artifact creations and binding additions from a crashed turn that were
   // never recorded in a "changes" message, so this turn's next flush records (and thereby
   // sequence-stamps) them. The registry rows/edges already exist, unstamped; reconciliation
-  // spares them because their tool calls appear in the log (see reconcilePendingGadgets in
+  // spares them because their tool calls appear in the log (see reconcilePendingArtifacts in
   // overseer.ts).
   for (let creation of replayedCreations) {
-    if (!recordedCreations.has(creation.gadgetId)) {
-      pendingCreatedGadgets.push(creation);
+    if (!recordedCreations.has(creation.artifactId)) {
+      pendingCreatedArtifacts.push(creation);
     }
   }
   let seenAdditionCounts = new Map<string, number>();
   for (let addition of replayedBindingAdditions) {
-    let key = bindingAdditionKey(addition.gadgetId, addition.name);
+    let key = bindingAdditionKey(addition.artifactId, addition.name);
     let occurrence = (seenAdditionCounts.get(key) ?? 0) + 1;
     seenAdditionCounts.set(key, occurrence);
     if (occurrence > (recordedBindingAdditions.get(key) ?? 0)) {
@@ -1995,7 +2037,7 @@ export async function runAgent(
       error instanceof Error ? error.message : String(error);
 
   let flushCapturedYdocChanges = () => {
-    if (capturedYdocChanges.length === 0 && pendingCreatedGadgets.length === 0 &&
+    if (capturedYdocChanges.length === 0 && pendingCreatedArtifacts.length === 0 &&
         pendingAddedBindings.length === 0) {
       return;
     }
@@ -2007,8 +2049,8 @@ export async function runAgent(
         ? Y.mergeUpdatesV2(capturedYdocChanges)
         : undefined;
     capturedYdocChanges = [];
-    let createdGadgets = pendingCreatedGadgets;
-    pendingCreatedGadgets = [];
+    let createdArtifacts = pendingCreatedArtifacts;
+    pendingCreatedArtifacts = [];
     let addedBindings = pendingAddedBindings;
     pendingAddedBindings = [];
     hooks.addChatMessages(chatId, author, [{
@@ -2017,7 +2059,7 @@ export async function runAgent(
       // records the base version the update applies to, which replay latches before rebuilding
       // the session's code state.
       ...(update !== undefined ? {update, observedCodeVersion: versionLock!} : {}),
-      ...(createdGadgets.length > 0 ? {createdGadgets} : {}),
+      ...(createdArtifacts.length > 0 ? {createdArtifacts} : {}),
       ...(addedBindings.length > 0 ? {addedBindings} : {}),
     }]);
     ++nextChangeId;
@@ -2045,7 +2087,7 @@ export async function runAgent(
   if (agentContext.spawnerConfig) {
     // This is a spawned agent. Build an appropriate system prompt. Spawned agents see only the
     // bindings the spawner configured (snapshotted into the chat's seed layer at spawn time),
-    // never the whole workspace.
+    // never the whole thread.
     let namedSeeds = seedBindings.filter(seed => seed.catalog === undefined);
     let systemPromptBindings: string;
     if (namedSeeds.length == 0) {
@@ -2054,8 +2096,8 @@ export async function runAgent(
     } else {
       let lines = namedSeeds.map(seed =>
           `* env.${seed.name} — ` +
-          (seed.isGadget
-              ? `RPC stub to the server-side Durable Object of the Gadget ` +
+          (seed.isArtifact
+              ? `RPC stub to the server-side Durable Object of the Artifact ` +
                 `${JSON.stringify(seed.title)}.`
               : seed.title));
       systemPromptBindings =
@@ -2074,7 +2116,7 @@ export async function runAgent(
   } else {
     // This is a regular coding agent.
 
-    // Let's include each gadget's list of files in the system prompt so that the agent doesn't
+    // Let's include each artifact's list of files in the system prompt so that the agent doesn't
     // have to call a tool to list files at the start of every thread. In order to avoid cache
     // misses, we specifically list the files that existed at the start of the thread even if the
     // agent adds or removes files during the thread.
@@ -2089,28 +2131,28 @@ export async function runAgent(
     //   that files are being created or deleted concurrently to a chat within the cache TTL,
     //   so no big deal. We could "fix" this by choosing the version at the start of the thread
     //   rather than first read.
-    let systemPromptWorkspace: string;
-    if (gadgetInfos.length == 0) {
-      systemPromptWorkspace =
-          "This workspace does not contain any gadgets yet. Before writing any code, create a " +
-          "gadget with the `createGadget` tool.";
+    let systemPromptThread: string;
+    if (artifactInfos.length == 0) {
+      systemPromptThread =
+          "This thread does not contain any artifacts yet. Before writing any code, create a " +
+          "artifact with the `createArtifact` tool.";
     } else {
-      let sections = gadgetInfos.map(info => {
+      let sections = artifactInfos.map(info => {
         let files = [...getSessionYDoc().getMap<Y.Text>(info.rootName).keys()];
         let envName = chatNameFor(info.id);
         let lines = [envName !== undefined
-            ? `## Gadget ${envName}: ${JSON.stringify(info.title)}`
-            : `## Gadget ${JSON.stringify(info.title)} (no binding in your env)`];
+            ? `## Artifact ${envName}: ${JSON.stringify(info.title)}`
+            : `## Artifact ${JSON.stringify(info.title)} (no binding in your env)`];
         if (info.isDefault) {
           lines.push(
-              `This is the workspace's default gadget: file tools operate on it when their ` +
+              `This is the thread's default artifact: file tools operate on it when their ` +
               `\`workpiece\` parameter is omitted.`);
         }
         if (files.length == 0) {
-          lines.push(`As of the start of this session, this gadget had no code files.`);
+          lines.push(`As of the start of this session, this artifact had no code files.`);
         } else {
           lines.push(
-              `As of the start of this session, this gadget contained the following files:`,
+              `As of the start of this session, this artifact contained the following files:`,
               ...files.map(f => `* ${f}`));
         }
         if (info.output) {
@@ -2118,7 +2160,7 @@ export async function runAgent(
           // them, not to edit them. Especially non-technical folks. We tell the agent to wait to be
           // explicitly asked.
           lines.push(
-              `This gadget is a ${info.output.noun}: a finished application whose content is data ` +
+              `This artifact is a ${info.output.noun}: a finished application whose content is data ` +
               `in its own storage, not text in its code. To read or change what it contains, call ` +
               `its RPC methods from \`executeCode\`` +
               (envName !== undefined ? ` (\`env.${envName}\`)` : ``) +
@@ -2127,11 +2169,11 @@ export async function runAgent(
               `how the ${info.output.noun} itself works (its editor, layout, or features).`);
         }
         if (info.bindings.length == 0) {
-          lines.push(`This gadget has no bindings.`);
+          lines.push(`This artifact has no bindings.`);
         } else {
-          // For each of the gadget's own bindings, cross-reference how the agent can reach the
+          // For each of the artifact's own bindings, cross-reference how the agent can reach the
           // same resource in its own env (matched by target workpiece), if it can.
-          lines.push(`This gadget's bindings (as its own code sees them):`,
+          lines.push(`This artifact's bindings (as its own code sees them):`,
                      ...info.bindings.map(b => {
             let chatName = chatNameFor(b.target);
             return `* ${b.name}: ${b.title}` +
@@ -2142,11 +2184,11 @@ export async function runAgent(
         }
         return lines.join("\n");
       });
-      systemPromptWorkspace = `# This workspace's gadgets\n\n${sections.join("\n\n")}`;
+      systemPromptThread = `# This thread's artifacts\n\n${sections.join("\n\n")}`;
     }
 
     // Named in the prompt because the request that should trigger them ("make me a doc") may
-    // not look trigger the agent to browse blueprints.
+    // not look trigger the agent to browse templates.
     let standardFormats = await hooks.describeStandardFormats();
 
     // Split the system prompt into static and dynamic parts for better caching.
@@ -2155,7 +2197,7 @@ export async function runAgent(
           ? `${SYSTEM_PROMPT}\n\n${instanceInstructions}`
           : SYSTEM_PROMPT,
       (standardFormats ? `${standardFormats}\n\n` : "") +
-          systemPromptWorkspace +
+          systemPromptThread +
           (alwaysAvailableResourcesPrompt ? `\n\n${alwaysAvailableResourcesPrompt}` : ""),
     ];
   }
@@ -2261,8 +2303,8 @@ export async function runAgent(
   // not describe it as optional here.
   let workpieceParam = Type.String({
     description:
-        "Env binding name of the workpiece (e.g. gadget) that owns the file, as listed in the " +
-        "system prompt or chosen in createGadget.",
+        "Env binding name of the workpiece (e.g. artifact) that owns the file, as listed in the " +
+        "system prompt or chosen in createArtifact.",
   });
 
   let tools: Record<string, AgentTool> = {
@@ -2452,28 +2494,28 @@ export async function runAgent(
       }
     }),
 
-    setGadgetBinding: defineTool({
-      name: "setGadgetBinding",
-      label: "Bind resource to gadget",
+    setArtifactBinding: defineTool({
+      name: "setArtifactBinding",
+      label: "Bind resource to artifact",
       description: SET_GADGET_BINDING_TOOL_DESCRIPTION,
       parameters: Type.Object({
-        gadget: Type.String({
-          description: "Env binding name of the gadget whose bindings to modify.",
+        artifact: Type.String({
+          description: "Env binding name of the artifact whose bindings to modify.",
         }),
         source: Type.String({
-          description: "Env binding name of the resource to wire into the gadget.",
+          description: "Env binding name of the resource to wire into the artifact.",
         }),
         name: Type.Optional(Type.String({
           description:
-              "Name to bind the resource under within the gadget (`env.<name>` in the gadget's " +
+              "Name to bind the resource under within the artifact (`env.<name>` in the artifact's " +
               "own code). Defaults to the same name as `source`. Style: ALL_CAPS_WITH_UNDERSCORES.",
         })),
       }),
-      execute: async (toolCallId, {gadget, source, name}) => {
+      execute: async (toolCallId, {artifact, source, name}) => {
         try {
-          let gadgetEntry = chatBindings.get(gadget);
-          if (!gadgetEntry || gadgetEntry.type !== "workpiece") {
-            throw new Error(`There is no gadget named "${gadget}" in your env.`);
+          let artifactEntry = chatBindings.get(artifact);
+          if (!artifactEntry || artifactEntry.type !== "workpiece") {
+            throw new Error(`There is no artifact named "${artifact}" in your env.`);
           }
           let sourceEntry = chatBindings.get(source);
           if (!sourceEntry) {
@@ -2481,23 +2523,23 @@ export async function runAgent(
           }
           if (sourceEntry.type !== "workpiece") {
             throw new Error(`env.${source} holds agent callback arguments; it cannot be bound ` +
-                `into a gadget.`);
+                `into a artifact.`);
           }
           let bindingName = name ?? source;
 
-          // Like createGadget, flush edits captured so far into their own "changes" message
+          // Like createArtifact, flush edits captured so far into their own "changes" message
           // first, so a revert at the addition never drags along earlier edits; the addition
           // then rides the *next* flush, whose "changes" message durably records and
           // sequence-stamps the pending edge (see addChatMessages in overseer.ts).
           flushCapturedYdocChanges();
-          hooks.addGadgetBinding(gadgetEntry.id, bindingName, sourceEntry.id, chatId);
+          hooks.addArtifactBinding(artifactEntry.id, bindingName, sourceEntry.id, chatId);
           pendingAddedBindings.push(
-              {gadgetId: gadgetEntry.id, name: bindingName, target: sourceEntry.id});
+              {artifactId: artifactEntry.id, name: bindingName, target: sourceEntry.id});
 
           // Record the resolved edge as the tool's output so a crashed turn's replay can re-adopt
           // the addition (see replayedBindingAdditions); the model-visible result is just
           // success + the batch's change ID.
-          let output = {gadgetId: gadgetEntry.id, name: bindingName, target: sourceEntry.id,
+          let output = {artifactId: artifactEntry.id, name: bindingName, target: sourceEntry.id,
                         changeId: nextChangeId};
           return toolResult(
               jsonToolResultText({success: true, changeId: nextChangeId}),
@@ -2511,28 +2553,28 @@ export async function runAgent(
       }
     }),
 
-    createGadget: defineTool({
-      name: "createGadget",
-      label: "Create gadget",
+    createArtifact: defineTool({
+      name: "createArtifact",
+      label: "Create artifact",
       description: CREATE_GADGET_TOOL_DESCRIPTION,
       parameters: Type.Object({
         title: Type.String({
           description:
-              "Short, descriptive, human-readable title for the new gadget. Shown to the user.",
+              "Short, descriptive, human-readable title for the new artifact. Shown to the user.",
         }),
         bindingName: Type.String({
           description:
-              "Name under which the new gadget appears in your env, and how other tools refer " +
+              "Name under which the new artifact appears in your env, and how other tools refer " +
               "to it (e.g. the file tools' `workpiece` parameter). Must be a JavaScript " +
               "identifier not already in use; style: ALL_CAPS_WITH_UNDERSCORES.",
         }),
-        blueprintId: Type.Optional(Type.String({
+        templateId: Type.Optional(Type.String({
           description:
-              "If given, initialize the new gadget from this blueprint's code instead of empty. " +
-              "Use the listBlueprints tool to discover available blueprint IDs.",
+              "If given, initialize the new artifact from this template's code instead of empty. " +
+              "Use the listTemplates tool to discover available template IDs.",
         })),
       }),
-      execute: async (toolCallId, {title, bindingName, blueprintId}) => {
+      execute: async (toolCallId, {title, bindingName, templateId}) => {
         try {
           validateBindingName(bindingName);
           if (isNameInScope(bindingName)) {
@@ -2540,52 +2582,52 @@ export async function runAgent(
                 `Choose a different name.`);
           }
 
-          // Fetch the blueprint (if any) before creating anything, so a bad blueprintId fails
-          // cleanly without leaving an empty gadget behind.
-          let blueprint = blueprintId !== undefined
-              ? await hooks.fetchBlueprint(blueprintId) : undefined;
+          // Fetch the template (if any) before creating anything, so a bad templateId fails
+          // cleanly without leaving an empty artifact behind.
+          let template = templateId !== undefined
+              ? await hooks.fetchTemplate(templateId) : undefined;
 
           // Flush edits captured so far into their own "changes" message before creating the
-          // gadget, so the creation cleanly separates change batches: a revert from this creation
+          // artifact, so the creation cleanly separates change batches: a revert from this creation
           // onward must not drag along a batch that also holds earlier edits. (Same barrier
           // pattern as executeCode, including its known single-step-mixing caveat there.)
           flushCapturedYdocChanges();
 
-          // The gadget is created provisional to this chat: it becomes permanent only when the
+          // The artifact is created provisional to this chat: it becomes permanent only when the
           // user accepts the chat's changes. The creation is attached to the next flushed
           // "changes" message, which is the durable record that sequence-stamps the pending
           // registry row (see addChatMessages in overseer.ts). Until then it behaves like a
           // pending write/edit: if the turn dies first, either this tool call was persisted (the
           // resumed turn re-adopts the creation from the log tail -- see replayedCreations) or
-          // it wasn't (the registry row is reaped as an orphan -- see reconcilePendingGadgets --
-          // and the resumed turn just creates a fresh gadget).
+          // it wasn't (the registry row is reaped as an orphan -- see reconcilePendingArtifacts --
+          // and the resumed turn just creates a fresh artifact).
 
           // Let the transcript name the format while the call runs, as writes do with their target
           // file.
-          if (blueprint?.output) {
-            emitStreamEvent({type: "toolCallOutputFormat", toolCallId, output: blueprint.output});
+          if (template?.output) {
+            emitStreamEvent({type: "toolCallOutputFormat", toolCallId, output: template.output});
           }
 
-          let created = hooks.createGadget(title, bindingName, chatId, blueprint?.output);
-          pendingCreatedGadgets.push({gadgetId: created.id, title: created.title, bindingName});
+          let created = hooks.createArtifact(title, bindingName, chatId, template?.output);
+          pendingCreatedArtifacts.push({artifactId: created.id, title: created.title, bindingName});
           chatBindings.set(bindingName, {type: "workpiece", id: created.id});
 
           // The creation is part of the upcoming "changes" batch; report that batch's change ID
           // (exactly as writeFile/editFile do) so reverts can be referred to precisely.
           let changeId = nextChangeId;
 
-          let output: {gadgetId: WorkpieceId, changeId: number, blueprintNotes?: string} =
-              {gadgetId: created.id, changeId};
+          let output: {artifactId: WorkpieceId, changeId: number, templateNotes?: string} =
+              {artifactId: created.id, changeId};
 
-          if (blueprint) {
-            // Copy the blueprint's files into the new gadget's root in the session doc: like
+          if (template) {
+            // Copy the template's files into the new artifact's root in the session doc: like
             // writeFile edits, they ride the chat's proposed changes and revert together with the
             // creation.
             let resolved = hooks.resolveWorkpieceRoot(created.id, true, chatId);
             let ydoc = getSessionYDoc();
             ydoc.transact(() => {
               let root = ydoc.getMap<Y.Text>(resolved.rootName);
-              for (let [filename, content] of Object.entries(blueprint.files)) {
+              for (let [filename, content] of Object.entries(template.files)) {
                 let text = new Y.Text();
                 text.insert(0, content);
                 root.set(filename, text);
@@ -2595,21 +2637,21 @@ export async function runAgent(
             // hasn't seen their contents, so it must read before editing.)
 
             // Flush the creation + files immediately rather than waiting for the next barrier.
-            // The blueprint's contents aren't reconstructible from this tool call's input the way
+            // The template's contents aren't reconstructible from this tool call's input the way
             // writeFile edits are, so they must be durable before the step's message lands: the
             // "changes" message then precedes the tool call in the log, which replay already
             // tolerates (see recordedCreations) -- and which makes replay of a later readFile of
-            // a blueprint file work with no special cases. The residual crash window (changes
-            // persisted, step's message lost) leaves a stamped pending gadget the resumed model
+            // a template file work with no special cases. The residual crash window (changes
+            // persisted, step's message lost) leaves a stamped pending artifact the resumed model
             // doesn't remember; it is visible in the chat's proposed changes and reverts
             // normally.
             flushCapturedYdocChanges();
 
-            output.blueprintNotes = blueprint.notes;
+            output.templateNotes = template.notes;
           }
 
           // Persist the result as the tool's recorded output: history replay can't re-run a
-          // creation tool (nor re-fetch a blueprint, whose content may have changed since), so
+          // creation tool (nor re-fetch a template, whose content may have changed since), so
           // it returns this recorded value instead (see the replay path above).
           return toolResult(jsonToolResultText(output), {output} as Partial<AiToolCall>);
         } catch (error) {
@@ -2621,14 +2663,14 @@ export async function runAgent(
       }
     }),
 
-    listBlueprints: defineTool({
-      name: "listBlueprints",
-      label: "List blueprints",
-      description: LIST_BLUEPRINTS_TOOL_DESCRIPTION,
+    listTemplates: defineTool({
+      name: "listTemplates",
+      label: "List templates",
+      description: LIST_TEMPLATES_TOOL_DESCRIPTION,
       parameters: Type.Object({}),
       execute: async (toolCallId) => {
         try {
-          let output = await hooks.listAvailableBlueprints(initiator);
+          let output = await hooks.listAvailableTemplates(initiator);
           return toolResult(output, { output });
         } catch (error) {
           toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
@@ -2661,7 +2703,7 @@ export async function runAgent(
       }),
       execute: async (toolCallId, {code}) => {
         try {
-          // Make edits from previous tool steps visible to the gadget before running code
+          // Make edits from previous tool steps visible to the artifact before running code
           // against it. Later edits in this turn will still be batched until the next barrier.
           // TODO: If an agent emits a file edit followed by an executeCode in a *single step*,
           //   this will corrupt the chat: the "changes" message gets inserted prior to the step's
@@ -2690,6 +2732,174 @@ export async function runAgent(
       }
     }),
 
+    executeShell: defineTool({
+      name: "executeShell",
+      label: "Run shell command",
+      description:
+          "Runs one shell command inside this thread's machine (a persistent Linux sandbox " +
+          "that belongs to this thread). The machine has a real filesystem, network access, " +
+          "and common tools (bash, git, node, python). State persists across commands and " +
+          "across the machine sleeping/waking, so you can install packages, clone repos, and " +
+          "build multi-step workflows. Output is captured after the command completes; keep " +
+          "individual commands under ~2 minutes and run longer work in the background " +
+          "(`nohup ... &`).",
+      parameters: Type.Object({
+        command: Type.String({
+          description: "The shell command to run (executed with bash -lc).",
+        }),
+      }),
+      execute: async (toolCallId, {command}) => {
+        try {
+          let result = await hooks.executeShellInOrb(command, 120_000);
+          let text = [
+            result.stdout,
+            result.stderr ? `\n[stderr]\n${result.stderr}` : "",
+            result.exitCode !== 0 ? `\n[exit code: ${result.exitCode}]` : "",
+          ].join("");
+          if (text.length > 40_000) {
+            text = text.slice(0, 40_000) + "\n[output truncated]";
+          }
+          return toolResult(text || "(no output)", {output: text} as Partial<AiToolCall>);
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    spawnThread: defineTool({
+      name: "spawnThread",
+      label: "Spawn thread",
+      description:
+          "Spawns a new child thread — an independent agent working in its own thread with its " +
+          "own conversation, files, and machine — and sends it an initial task prompt. The child " +
+          "starts working immediately. Returns its thread id. Use child threads to parallelize " +
+          "independent subtasks or to isolate a large task's context; collect results with " +
+          "waitForThreads. The user sees child threads nested under this thread in their sidebar.",
+      parameters: Type.Object({
+        title: Type.String({
+          description: "Short human-readable title for the child thread (shown in the sidebar).",
+        }),
+        prompt: Type.String({
+          description:
+              "The child's task. Be complete and self-contained: the child cannot see this " +
+              "thread's conversation, files, or bindings.",
+        }),
+      }),
+      execute: async (toolCallId, {title, prompt}) => {
+        try {
+          let threadId = await hooks.spawnChildThread(title, prompt);
+          let output = `Spawned child thread ${threadId} ("${title}"). ` +
+              `It is working now; use waitForThreads to collect its response.`;
+          return toolResult(output, { output });
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    sendToThread: defineTool({
+      name: "sendToThread",
+      label: "Send to thread",
+      description:
+          "Sends a follow-up message to a child thread previously created with spawnThread. " +
+          "The child's agent runs another turn on it; collect the response with waitForThreads.",
+      parameters: Type.Object({
+        threadId: Type.String({ description: "The child thread id returned by spawnThread." }),
+        prompt: Type.String({ description: "The follow-up message for the child's agent." }),
+      }),
+      execute: async (toolCallId, {threadId, prompt}) => {
+        try {
+          await hooks.sendToChildThread(threadId, prompt);
+          let output = `Message sent to child thread ${threadId}.`;
+          return toolResult(output, { output });
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    waitForThreads: defineTool({
+      name: "waitForThreads",
+      label: "Wait for threads",
+      description:
+          "Waits for spawned child threads to finish responding. Returns each ready child's " +
+          "oldest unread response (consuming it). Returns a timeout notice if none respond in " +
+          "time — you can call this again, or continue other work and check back later.",
+      parameters: Type.Object({
+        timeoutSeconds: Type.Optional(Type.Number({
+          description: "Max seconds to wait (default 120, max 300).",
+        })),
+      }),
+      execute: async (toolCallId, {timeoutSeconds}) => {
+        try {
+          let timeoutMs = Math.min(Math.max(timeoutSeconds ?? 120, 1), 300) * 1000;
+          let responses = await hooks.waitForChildThreads(timeoutMs);
+          let output: string;
+          if (responses.length === 0) {
+            let children = hooks.listChildThreads();
+            let stillWorking = children.filter(c => c.pendingResponses === 0);
+            output = `No child responses within the timeout. ` +
+                `${stillWorking.length} child thread(s) may still be working. ` +
+                `Call waitForThreads again to keep waiting.`;
+          } else {
+            output = responses.map(r =>
+                `── Response from child thread ${r.threadId} ("${r.title}") ──\n${r.response}`)
+                .join("\n\n");
+          }
+          return toolResult(output, { output });
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    listSpawnedThreads: defineTool({
+      name: "listSpawnedThreads",
+      label: "List spawned threads",
+      description:
+          "Lists the child threads this thread has spawned, with how many of each child's " +
+          "responses are waiting to be read via waitForThreads.",
+      parameters: Type.Object({}),
+      execute: async (toolCallId, _params) => {
+        try {
+          let children = hooks.listChildThreads();
+          let output = children.length === 0
+              ? "No child threads have been spawned."
+              : children.map(c =>
+                  `${c.threadId} — "${c.title}" (${c.pendingResponses} unread response(s))`)
+                  .join("\n");
+          return toolResult(output, { output });
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    readThread: defineTool({
+      name: "readThread",
+      label: "Read thread",
+      description:
+          "Reads a spawned child thread's full conversation transcript. Use this to inspect a " +
+          "child's progress or reasoning beyond the responses returned by waitForThreads.",
+      parameters: Type.Object({
+        threadId: Type.String({ description: "The child thread id returned by spawnThread." }),
+      }),
+      execute: async (toolCallId, {threadId}) => {
+        try {
+          let output = await hooks.readChildThreadTranscript(threadId);
+          if (!output.trim()) output = "(the child thread's conversation is empty)";
+          return toolResult(output, { output });
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
   };
 
   // When the agent was started to handle callbacks, add the giveUp tool so it can bail out.
@@ -2868,8 +3078,8 @@ export async function runAgent(
           for (let actionId of capturedActions.actions) {
             msgs.push({type: "action", actionId});
           }
-          if (capturedActions.accessedGadget) {
-            msgs.push({type: "useGadget"});
+          if (capturedActions.accessedArtifact) {
+            msgs.push({type: "useArtifact"});
           }
         }
 

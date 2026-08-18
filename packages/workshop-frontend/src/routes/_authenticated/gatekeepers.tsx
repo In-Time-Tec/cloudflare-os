@@ -614,7 +614,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean } = {}
               description={
                 search
                   ? "We couldn't find anything matching your search."
-                  : 'Gatekeepers will appear here as they become available in your workspace.'
+                  : 'Gatekeepers will appear here as they become available in your thread.'
               }
               icon={Plugs}
             />

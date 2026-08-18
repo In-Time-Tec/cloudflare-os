@@ -1,5 +1,5 @@
 // Deployment-wide admin configuration: a single object owned by the AdminSettings durable object and
-// mirrored to one reserved BLUEPRINTS KV key, so the per-(re)connect getServerConfig() path and the
+// mirrored to one reserved TEMPLATES KV key, so the per-(re)connect getServerConfig() path and the
 // agent can resolve it with a single cheap KV get.
 //
 // This covers the "soft" deployment customizations only (branding, agent instructions, and which
@@ -8,9 +8,9 @@
 // changed by a compromised admin session. Everything here is enabled by default; the admin UI opts
 // things *out*.
 
-import { AmbientGatekeeperMode, BannerConfig, BlueprintBinding, BlueprintMetadata, BlueprintOutput, DEFAULT_BANNER_COLOR, OutputFormatOffer, isAmbientGatekeeperMode, isBannerColor, isOutputIcon } from "@gadgets/workshop-shared/api";
+import { AmbientGatekeeperMode, BannerConfig, TemplateBinding, TemplateMetadata, TemplateOutput, DEFAULT_BANNER_COLOR, OutputFormatOffer, isAmbientGatekeeperMode, isBannerColor, isOutputIcon } from "@gadgets/workshop-shared/api";
 import { SupportedResource } from "@gadgets/workshop-shared/gatekeeper";
-import { ADMIN_CONFIG_KEY, BlueprintKvEnv, readBlueprintKvRecord, sanitizeBlueprintOutput } from "./blueprint-archive.js";
+import { ADMIN_CONFIG_KEY, TemplateKvEnv, readTemplateKvRecord, sanitizeTemplateOutput } from "./template-archive.js";
 
 export type AdminConfig = {
   /**
@@ -52,22 +52,22 @@ export type AdminConfig = {
   ambientGatekeeperModes: Record<string, AmbientGatekeeperMode>;
 
   /**
-   * The blueprints offered as this deployment's standard output formats. What a user gets from
+   * The templates offered as this deployment's standard output formats. What a user gets from
    * "New Slides", and what the agent is told to prefer. Order is menu order.
    *
-   * Separate from the blueprint's own declaration of what it produces (BlueprintMetadata.output):
-   * any user can publish a blueprint calling itself a Document, but only this list decides what
+   * Separate from the template's own declaration of what it produces (TemplateMetadata.output):
+   * any user can publish a template calling itself a Document, but only this list decides what
    * the deployment offers.
    */
   formats: FormatCuration[];
 };
 
 /**
- * One promoted blueprint. The blueprint itself supplies the noun, plural and icon, so improving
- * the blueprint improves every deployment that hasn't overridden it.
+ * One promoted template. The template itself supplies the noun, plural and icon, so improving
+ * the template improves every deployment that hasn't overridden it.
  */
 export type FormatCuration = {
-  blueprintId: string;
+  templateId: string;
 
   /**
    * Offered to users and the agent. Disabling keeps the entry (and its overrides) around, so
@@ -79,10 +79,10 @@ export type FormatCuration = {
   agentHint?: string;
 
   /**
-   * Presentation the deployment substitutes for the blueprint's own, e.g. an org that calls its
-   * decks "Briefings". Absent fields fall back to the blueprint's declaration.
+   * Presentation the deployment substitutes for the template's own, e.g. an org that calls its
+   * decks "Briefings". Absent fields fall back to the template's declaration.
    */
-  overrides?: Partial<BlueprintOutput>;
+  overrides?: Partial<TemplateOutput>;
 };
 
 export const DEFAULT_ADMIN_CONFIG: AdminConfig = {
@@ -114,11 +114,11 @@ function parseFormats(value: unknown): FormatCuration[] {
   let seen = new Set<string>();
   for (let raw of value) {
     if (!raw || typeof raw !== "object") continue;
-    let {blueprintId, enabled, agentHint, overrides} = raw as Partial<FormatCuration>;
-    if (typeof blueprintId !== "string" || !blueprintId) continue;
-    if (seen.has(blueprintId)) continue;
-    seen.add(blueprintId);
-    let entry: FormatCuration = {blueprintId, enabled: enabled !== false};
+    let {templateId, enabled, agentHint, overrides} = raw as Partial<FormatCuration>;
+    if (typeof templateId !== "string" || !templateId) continue;
+    if (seen.has(templateId)) continue;
+    seen.add(templateId);
+    let entry: FormatCuration = {templateId, enabled: enabled !== false};
     if (typeof agentHint === "string" && agentHint.trim()) {
       entry.agentHint = agentHint.trim().slice(0, MAX_AGENT_HINT);
     }
@@ -130,21 +130,21 @@ function parseFormats(value: unknown): FormatCuration[] {
 }
 
 /**
- * `formats` rearranged into the order `blueprintIds` gives. Throws unless that is a permutation of
+ * `formats` rearranged into the order `templateIds` gives. Throws unless that is a permutation of
  * what is promoted, so a stale client can't silently drop a format.
  *
  * Uniqueness is checked separately from length because the lookup Map dedupes: [A, A] against
  * promoted [A, B] passes both a length and a membership test, drops B, and leaves a duplicate that
  * makes every later reorder throw.
  */
-export function reorderFormats(formats: FormatCuration[], blueprintIds: string[])
+export function reorderFormats(formats: FormatCuration[], templateIds: string[])
     : FormatCuration[] {
-  let byId = new Map(formats.map(f => [f.blueprintId, f]));
-  if (blueprintIds.length !== byId.size || new Set(blueprintIds).size !== blueprintIds.length
-      || blueprintIds.some(id => !byId.has(id))) {
+  let byId = new Map(formats.map(f => [f.templateId, f]));
+  if (templateIds.length !== byId.size || new Set(templateIds).size !== templateIds.length
+      || templateIds.some(id => !byId.has(id))) {
     throw new Error("Format order must list each promoted format exactly once.");
   }
-  return blueprintIds.map(id => byId.get(id)!);
+  return templateIds.map(id => byId.get(id)!);
 }
 
 /**
@@ -161,23 +161,23 @@ export function fingerprint(text: string): string {
 }
 
 /**
- * Stable grouping id for a promoted blueprint that doesn't declare what it produces. An
- * implementation detail of the Outputs filter. Keeps short blueprint ids readable and preserves
+ * Stable grouping id for a promoted template that doesn't declare what it produces. An
+ * implementation detail of the Outputs filter. Keeps short template ids readable and preserves
  * uniqueness.
  */
-export function defaultOutputFormatId(blueprintId: string): string {
-  if (blueprintId.length <= 40) return blueprintId;
-  return `${blueprintId.slice(0, 31)}-${fingerprint(blueprintId)}`;
+export function defaultOutputFormatId(templateId: string): string {
+  if (templateId.length <= 40) return templateId;
+  return `${templateId.slice(0, 31)}-${fingerprint(templateId)}`;
 }
 
 /**
  * Keep only the well-formed fields of an admin's presentation override, or undefined if none
  * survive.
  */
-export function sanitizeOutputOverrides(overrides: unknown): Partial<BlueprintOutput> | undefined {
+export function sanitizeOutputOverrides(overrides: unknown): Partial<TemplateOutput> | undefined {
   if (!overrides || typeof overrides !== "object") return undefined;
-  let {id, noun, plural, icon} = overrides as Partial<BlueprintOutput>;
-  let clean: Partial<BlueprintOutput> = {};
+  let {id, noun, plural, icon} = overrides as Partial<TemplateOutput>;
+  let clean: Partial<TemplateOutput> = {};
   for (let [key, value] of Object.entries({id, noun, plural})) {
     if (typeof value === "string" && value.trim() && value.trim().length <= 40) {
       clean[key as "id" | "noun" | "plural"] = value.trim();
@@ -188,30 +188,30 @@ export function sanitizeOutputOverrides(overrides: unknown): Partial<BlueprintOu
 }
 
 /**
- * The presentation a gadget instantiated from `blueprintId` should inherit: the blueprint's own
+ * The presentation a gadget instantiated from `templateId` should inherit: the template's own
  * declaration with this deployment's override applied. Called on every instantiation path, so an
  * admin who renames "Slides" to "Briefing" gets Briefings from then on.
  *
  * Overrides apply even when the format is disabled: disabling stops it being *offered*, but a
- * gadget built from that blueprint still carries the deployment's naming.
+ * gadget built from that template still carries the deployment's naming.
  */
-export function deploymentOutputForBlueprint(
-    config: AdminConfig, blueprintId: string, declared: BlueprintOutput | undefined)
-    : BlueprintOutput | undefined {
-  return resolveFormatOutput(declared, config.formats.find(f => f.blueprintId === blueprintId)?.overrides);
+export function deploymentOutputForTemplate(
+    config: AdminConfig, templateId: string, declared: TemplateOutput | undefined)
+    : TemplateOutput | undefined {
+  return resolveFormatOutput(declared, config.formats.find(f => f.templateId === templateId)?.overrides);
 }
 
 /**
- * Resolve what a promoted blueprint should be shown as: the blueprint's own declaration with the
- * deployment's overrides applied. Returns undefined when the blueprint declares nothing and the
+ * Resolve what a promoted template should be shown as: the template's own declaration with the
+ * deployment's overrides applied. Returns undefined when the template declares nothing and the
  * admin overrode nothing meaningful.
  */
 export function resolveFormatOutput(
-    declared: BlueprintOutput | undefined, overrides?: Partial<BlueprintOutput>)
-    : BlueprintOutput | undefined {
+    declared: TemplateOutput | undefined, overrides?: Partial<TemplateOutput>)
+    : TemplateOutput | undefined {
   let merged = {...declared, ...overrides};
   if (!merged.id || !merged.noun || !merged.plural || !merged.icon) return undefined;
-  return merged as BlueprintOutput;
+  return merged as TemplateOutput;
 }
 
 // --- Reading the promoted set ---
@@ -219,52 +219,52 @@ export function resolveFormatOutput(
 // Three surfaces offer the deployment's formats -- the user's New menu, the agent's catalog, and
 // the admin panel that curates them.
 
-/** One promoted blueprint joined with the blueprint it points at. */
+/** One promoted template joined with the template it points at. */
 export type PromotedFormat = {
   entry: FormatCuration;
 
   /**
-   * The blueprint's own metadata. Absent when it has been deleted since being promoted; such an
+   * The template's own metadata. Absent when it has been deleted since being promoted; such an
    * entry is skipped everywhere except the admin panel, which offers to remove it.
    */
-  metadata?: BlueprintMetadata;
+  metadata?: TemplateMetadata;
 
-  /** What the blueprint declares it produces, after validation. Absent if it declares nothing usable. */
-  declared?: BlueprintOutput;
+  /** What the template declares it produces, after validation. Absent if it declares nothing usable. */
+  declared?: TemplateOutput;
 
   /** `declared` with the deployment's overrides applied. */
-  output?: BlueprintOutput;
+  output?: TemplateOutput;
 };
 
-/** Join promoted entries with the blueprints they point at, preserving order. */
-export async function listPromotedFormats(env: BlueprintKvEnv, formats: FormatCuration[])
+/** Join promoted entries with the templates they point at, preserving order. */
+export async function listPromotedFormats(env: TemplateKvEnv, formats: FormatCuration[])
     : Promise<PromotedFormat[]> {
   let records = await Promise.all(
-      formats.map(entry => readBlueprintKvRecord(env, entry.blueprintId)));
+      formats.map(entry => readTemplateKvRecord(env, entry.templateId)));
 
   return formats.map((entry, i) => {
     let metadata = records[i]?.metadata;
-    let declared = sanitizeBlueprintOutput(metadata?.output);
+    let declared = sanitizeTemplateOutput(metadata?.output);
     return {entry, metadata, declared, output: resolveFormatOutput(declared, entry.overrides)};
   });
 }
 
 /**
  * A format the deployment is offering, plus the two things only the agent's catalog wants: the
- * admin's note about when to prefer it, and the bindings its blueprint expects to be wired up.
+ * admin's note about when to prefer it, and the bindings its template expects to be wired up.
  * listOutputFormats() drops both.
  */
 export type FormatOffer = OutputFormatOffer & {
   agentHint?: string;
-  bindings: Record<string, BlueprintBinding>;
+  bindings: Record<string, TemplateBinding>;
 };
 
 /**
  * The formats this deployment offers, in menu order: promoted, enabled, and resolvable to a
- * complete presentation. A promoted blueprint that has since been deleted, or that names nothing
+ * complete presentation. A promoted template that has since been deleted, or that names nothing
  * to call itself, is silently skipped.
  */
-export async function listFormatOffers(env: BlueprintKvEnv, config: AdminConfig)
+export async function listFormatOffers(env: TemplateKvEnv, config: AdminConfig)
     : Promise<FormatOffer[]> {
   let enabled = config.formats.filter(entry => entry.enabled);
   if (enabled.length === 0) return [];
@@ -273,7 +273,7 @@ export async function listFormatOffers(env: BlueprintKvEnv, config: AdminConfig)
   for (let {entry, metadata, output} of await listPromotedFormats(env, enabled)) {
     if (!metadata || !output) continue;
     offers.push({
-      blueprintId: entry.blueprintId,
+      templateId: entry.templateId,
       output,
       description: metadata.description,
       requiresSetup: Object.keys(metadata.bindings).length > 0,
@@ -340,7 +340,7 @@ export function serializeAdminConfig(config: AdminConfig): string {
 
 /** Read the admin config from the KV mirror. Cheap enough for the hot path (a single KV get). */
 export async function readAdminConfig(env: Cloudflare.Env): Promise<AdminConfig> {
-  return parseAdminConfig(await env.BLUEPRINTS.get(ADMIN_CONFIG_KEY));
+  return parseAdminConfig(await env.TEMPLATES.get(ADMIN_CONFIG_KEY));
 }
 
 // --- Resource-disable helpers ---

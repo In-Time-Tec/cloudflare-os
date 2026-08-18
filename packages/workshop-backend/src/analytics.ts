@@ -9,62 +9,62 @@ export type ProductAnalyticsConnectionType = "gatekeeper" | "ai_model" | "agent_
 // Events:
 // - account_created: an account was created.
 // - user_authenticated: a user authenticated.
-// - gadget_created/opened/deleted: gadget lifecycle and open events.
-// - gadget_interaction: chat, UI connection, and code merge interactions.
+// - artifact_created/opened/deleted: artifact lifecycle and open events.
+// - artifact_interaction: chat, UI connection, and code merge interactions.
 // - connection_created/removed: gatekeeper, AI model, or agent spawner connections changed.
-// - blueprint_created/imported: blueprint lifecycle events.
+// - template_created/imported: template lifecycle events.
 //
-// Per-event shapes defined in ProductAnalyticsGadgetInput and ProductAnalyticsInput.
+// Per-event shapes defined in ProductAnalyticsThreadInput and ProductAnalyticsInput.
 
 export type ProductAnalyticsRecord = {
   event_id: string;
   event_ts: string;
   event_name: string;
   user_id?: string;
-  gadget_id?: string;
+  artifact_id?: string;
   properties: Record<string, unknown>;
 };
 
-/** Events about a specific gadget. */
-export type ProductAnalyticsGadgetInput =
+/** Events about a specific artifact. */
+export type ProductAnalyticsThreadInput =
   | {
-      event_name: "gadget_created";
+      event_name: "artifact_created";
       user_id: string;
-      gadget_id?: string;
-      gadget_owner_user_id?: string;
-      /** Whether the gadget was created from empty chat or via blueprint. */
-      source: "blank" | "blueprint";
-      blueprint_id?: string;
+      artifact_id?: string;
+      artifact_owner_user_id?: string;
+      /** Whether the artifact was created from empty chat or via template. */
+      source: "blank" | "template";
+      template_id?: string;
     }
   | {
-      event_name: "gadget_opened";
+      event_name: "artifact_opened";
       user_id: string;
-      gadget_id?: string;
-      gadget_owner_user_id?: string;
-      /** Whether the gadget was opened with share link or not. */
+      artifact_id?: string;
+      artifact_owner_user_id?: string;
+      /** Whether the artifact was opened with share link or not. */
       source: "direct" | "share_key";
     }
   | {
-      event_name: "gadget_deleted";
+      event_name: "artifact_deleted";
       user_id: string;
-      gadget_id?: string;
-      gadget_owner_user_id?: string;
+      artifact_id?: string;
+      artifact_owner_user_id?: string;
     }
   | {
-      event_name: "gadget_interaction";
+      event_name: "artifact_interaction";
       user_id: string;
-      gadget_id?: string;
-      gadget_owner_user_id?: string;
-      /** Gadget-local id of the chat thread. */
+      artifact_id?: string;
+      artifact_owner_user_id?: string;
+      /** Artifact-local id of the chat thread. */
       chat_id?: number;
-      interaction_type: "gadget_ui_connected" | "chat_started" | "chat_message_sent" | "code_merged";
+      interaction_type: "artifact_ui_connected" | "chat_started" | "chat_message_sent" | "code_merged";
     }
   | {
       event_name: "connection_created";
       user_id: string;
-      gadget_id?: string;
-      gadget_owner_user_id?: string;
-      /** Gadget-local id of the connection. */
+      artifact_id?: string;
+      artifact_owner_user_id?: string;
+      /** Artifact-local id of the connection. */
       gatekeeper_id: number;
       /** What type of connection was created: gatekeeper, model, agent. */
       connection_type: ProductAnalyticsConnectionType;
@@ -72,18 +72,18 @@ export type ProductAnalyticsGadgetInput =
     }
   | {
       event_name: "connection_removed";
-      gadget_id?: string;
-      gadget_owner_user_id?: string;
+      artifact_id?: string;
+      artifact_owner_user_id?: string;
       gatekeeper_id: number;
       connection_type?: ProductAnalyticsConnectionType;
       vendor_id?: string;
     }
   | {
-      event_name: "blueprint_created";
+      event_name: "template_created";
       user_id: string;
-      gadget_id?: string;
-      gadget_owner_user_id?: string;
-      blueprint_id: string;
+      artifact_id?: string;
+      artifact_owner_user_id?: string;
+      template_id: string;
     };
 
 export type ProductAnalyticsInput =
@@ -98,11 +98,11 @@ export type ProductAnalyticsInput =
       source: "password" | "cf_access" | "session_token";
     }
   | {
-      event_name: "blueprint_imported";
+      event_name: "template_imported";
       user_id: string;
-      blueprint_id: string;
+      template_id: string;
     }
-  | ProductAnalyticsGadgetInput;
+  | ProductAnalyticsThreadInput;
 
 export function recordAnalytics(
     ctx: ExecutionContext | DurableObjectState,
@@ -114,15 +114,15 @@ export function recordAnalytics(
     }
 
     // Pull the common fields up to columns; everything else becomes properties.
-    let { event_name, user_id, gadget_id, ...properties } =
-        event as ProductAnalyticsInput & { user_id?: string; gadget_id?: string };
+    let { event_name, user_id, artifact_id, ...properties } =
+        event as ProductAnalyticsInput & { user_id?: string; artifact_id?: string };
 
     let record: ProductAnalyticsRecord = {
       event_id: crypto.randomUUID(),
       event_ts: new Date().toISOString(),
       event_name,
       user_id,
-      gadget_id,
+      artifact_id,
       properties,
     };
 

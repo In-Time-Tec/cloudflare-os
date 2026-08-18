@@ -19,47 +19,47 @@ describe("parseAdminConfig", () => {
   it("drops malformed format entries rather than the whole list", () => {
     let config = parseAdminConfig(JSON.stringify({
       formats: [
-        { blueprintId: "good", enabled: true, agentHint: "  prefer me  " },
-        { enabled: true },                       // no blueprintId
+        { templateId: "good", enabled: true, agentHint: "  prefer me  " },
+        { enabled: true },                       // no templateId
         "nonsense",
-        { blueprintId: "defaults-enabled" },     // enabled omitted
+        { templateId: "defaults-enabled" },     // enabled omitted
       ],
     }));
 
     expect(config.formats).toEqual([
-      { blueprintId: "good", enabled: true, agentHint: "prefer me" },
-      { blueprintId: "defaults-enabled", enabled: true },
+      { templateId: "good", enabled: true, agentHint: "prefer me" },
+      { templateId: "defaults-enabled", enabled: true },
     ]);
   });
 
-  // Everything downstream keys formats by blueprint id; setFormatOrder() in particular treats the
+  // Everything downstream keys formats by template id; setFormatOrder() in particular treats the
   // list as a set and refuses every reordering if it isn't one. A duplicate would make the menu
   // permanently unorderable, so it can't be allowed to survive a read.
-  it("keeps only the first entry for a repeated blueprint", () => {
+  it("keeps only the first entry for a repeated template", () => {
     let config = parseAdminConfig(JSON.stringify({
       formats: [
-        { blueprintId: "dup", enabled: true, agentHint: "first" },
-        { blueprintId: "other", enabled: true },
-        { blueprintId: "dup", enabled: false, agentHint: "second" },
+        { templateId: "dup", enabled: true, agentHint: "first" },
+        { templateId: "other", enabled: true },
+        { templateId: "dup", enabled: false, agentHint: "second" },
       ],
     }));
 
     expect(config.formats).toEqual([
-      { blueprintId: "dup", enabled: true, agentHint: "first" },
-      { blueprintId: "other", enabled: true },
+      { templateId: "dup", enabled: true, agentHint: "first" },
+      { templateId: "other", enabled: true },
     ]);
   });
 });
 
 describe("reorderFormats", () => {
   let promoted = [
-    { blueprintId: "a", enabled: true },
-    { blueprintId: "b", enabled: true },
-    { blueprintId: "c", enabled: true },
+    { templateId: "a", enabled: true },
+    { templateId: "b", enabled: true },
+    { templateId: "c", enabled: true },
   ];
 
   it("rearranges into the order given", () => {
-    expect(reorderFormats(promoted, ["c", "a", "b"]).map(f => f.blueprintId))
+    expect(reorderFormats(promoted, ["c", "a", "b"]).map(f => f.templateId))
         .toEqual(["c", "a", "b"]);
   });
 
@@ -79,7 +79,7 @@ describe("reorderFormats", () => {
 describe("format presentation", () => {
   let declared = { id: "presentation", noun: "Slides", plural: "Slides", icon: "presentation" } as const;
 
-  it("applies overrides over the blueprint's own declaration", () => {
+  it("applies overrides over the template's own declaration", () => {
     expect(resolveFormatOutput(declared, { noun: "Briefing", plural: "Briefings" }))
         .toEqual({ ...declared, noun: "Briefing", plural: "Briefings" });
   });

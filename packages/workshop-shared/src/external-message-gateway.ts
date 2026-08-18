@@ -1,37 +1,37 @@
 import type { RpcStub, RpcTarget } from "cloudflare:workers";
 
-/** A completed Gadget response that should be delivered back to the chat gateway. */
-export type GadgetResponse = {
+/** A completed Artifact response that should be delivered back to the chat gateway. */
+export type ArtifactResponse = {
   text: string;
 };
 
 /** RPC target provided by the chat gateway for the backend's eventual response. */
 export interface ChatGatewayRpcTarget extends RpcTarget {
   /**
-   * Deliver the completed Gadget response. Implementations must be idempotent because delivery is
+   * Deliver the completed Artifact response. Implementations must be idempotent because delivery is
    * at-least-once when response target acknowledgements fail.
    */
-  onGadgetResponse(response: GadgetResponse): Promise<void>;
+  onArtifactResponse(response: ArtifactResponse): Promise<void>;
 }
 
 /** External message submission accepted by the backend gateway. */
 export type SubmitExternalMessageInput = {
   /**
-   * Selects the Gadgets account used to submit the message.
+   * Selects the Artifacts account used to submit the message.
    * The backend trusts the gateway: supplying this email grants access as that account.
    */
   callerEmail: string;
-  /** Selects the workspace to create or reuse. */
-  gadgetKey: string;
+  /** Selects the thread to create or reuse. */
+  artifactKey: string;
   /** Selects the chat to create or reuse. */
   chatKey: string;
   /** Deduplicates the originating message and correlates the response target. */
   messageKey: string;
-  /** Names the workspace if it must be created. */
-  gadgetTitle: string;
-  /** User text sent to Gadgets. */
+  /** Names the thread if it must be created. */
+  artifactTitle: string;
+  /** User text sent to Artifacts. */
   prompt: string;
-  /** Persistent target invoked when the Gadget response is ready. */
+  /** Persistent target invoked when the Artifact response is ready. */
   chatGatewayRpcTarget: RpcStub<ChatGatewayRpcTarget>;
 };
 
@@ -49,6 +49,6 @@ export type SubmitExternalMessageResult =
 
 /** Service binding RPC interface used by chat gateway workers. */
 export interface ExternalMessageGateway {
-  /** Submit an external chat message for Gadget routing and execution. */
+  /** Submit an external chat message for Artifact routing and execution. */
   submitExternalMessage(input: SubmitExternalMessageInput): Promise<SubmitExternalMessageResult>;
 }

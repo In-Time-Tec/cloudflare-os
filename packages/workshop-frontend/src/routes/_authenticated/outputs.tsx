@@ -31,9 +31,9 @@ import NewFormatRow from '../../components/format/NewFormatRow'
 import DeleteConfirmationDialog from '../../components/DeleteConfirmationDialog'
 import { WorkshopButton, WorkshopIconButton } from '../../components/WorkshopControls'
 
-// The Outputs page: everything the user's workspaces have produced, in one place, so they don't
-// have to remember which workspace they made a thing in. Backed by an index in the user's own
-// account that each workspace pushes to (AuthenticatedApi.listOutputs()).
+// The Outputs page: everything the user's threads have produced, in one place, so they don't
+// have to remember which thread they made a thing in. Backed by an index in the user's own
+// account that each thread pushes to (AuthenticatedApi.listOutputs()).
 
 export const Route = createFileRoute('/_authenticated/outputs')({
   component: OutputsPage,
@@ -56,12 +56,12 @@ function formatRelativeTime(date: Date): string {
 }
 
 function outputKey(output: OutputSummary): string {
-  return `${output.workspaceId}:${output.workpieceId}`
+  return `${output.threadId}:${output.workpieceId}`
 }
 
-// Whether the user may rename or remove this output. Follows the workspace roles, not ownership: a
+// Whether the user may rename or remove this output. Follows the thread roles, not ownership: a
 // "build" collaborator holds the same capability over a workpiece as the owner (see
-// GadgetClientImpl). The user's own workspaces carry no role; a shared one must say so, since a
+// ArtifactClientImpl). The user's own threads carry no role; a shared one must say so, since a
 // role missing there predates role caching and may well be "use".
 function canModify(output: OutputSummary): boolean {
   return output.owner === undefined || output.role === 'build'
@@ -71,13 +71,13 @@ function canModify(output: OutputSummary): boolean {
 
 function OutputMenu({
   onOpen,
-  onOpenWorkspace,
+  onOpenThread,
   onRename,
   onRemove,
 }: {
   onOpen: () => void
-  onOpenWorkspace: () => void
-  // Undefined for a workspace shared with "use" access, which may open an output but not change
+  onOpenThread: () => void
+  // Undefined for a thread shared with "use" access, which may open an output but not change
   // it. See canModify().
   onRename?: () => void
   onRemove?: () => void
@@ -106,8 +106,8 @@ function OutputMenu({
           <DropdownMenu.Item onClick={onOpen} className={MENU_ITEM}>
             <ArrowSquareOut size={13} className="mr-2" /> Open
           </DropdownMenu.Item>
-          <DropdownMenu.Item onClick={onOpenWorkspace} className={MENU_ITEM}>
-            <Cube size={13} className="mr-2" /> Open workspace
+          <DropdownMenu.Item onClick={onOpenThread} className={MENU_ITEM}>
+            <Cube size={13} className="mr-2" /> Open thread
           </DropdownMenu.Item>
           {onRename && (
             <DropdownMenu.Item onClick={onRename} className={MENU_ITEM}>
@@ -127,18 +127,18 @@ function OutputMenu({
 
 // Secondary line under an output's title in the grid, where there's no room for meta columns.
 function subtitle(output: OutputSummary): string {
-  const parts = [output.workspaceTitle || 'Untitled workspace']
+  const parts = [output.threadTitle || 'Untitled thread']
   if (output.owner) parts.push(`Shared by ${output.owner.name}`)
-  parts.push(`Workspace active ${formatRelativeTime(output.lastActive)}`)
+  parts.push(`Thread active ${formatRelativeTime(output.lastActive)}`)
   return parts.join(' · ')
 }
 
-// Provenance for a list row: the output came out of the user's own workspace or a shared one.
+// Provenance for a list row: the output came out of the user's own thread or a shared one.
 function OutputProvenance({ owner }: { owner?: OutputSummary['owner'] }) {
   return (
     <span
       className="flex w-52 items-center gap-1 truncate whitespace-nowrap"
-      title={owner ? `In a workspace shared by ${owner.name}` : 'In a workspace you created'}
+      title={owner ? `In a thread shared by ${owner.name}` : 'In a thread you created'}
     >
       {owner ? <ShareNetwork size={11} /> : <User size={11} />}
       <span className="truncate">{owner ? `Shared by ${owner.name}` : 'Created by you'}</span>
@@ -148,25 +148,25 @@ function OutputProvenance({ owner }: { owner?: OutputSummary['owner'] }) {
 
 type OutputActions = {
   onOpen: () => void
-  onOpenWorkspace: () => void
+  onOpenThread: () => void
   onRename?: () => void
   onRemove?: () => void
 }
 
 function OutputCard({
-  output, onOpen, onOpenWorkspace, onRename, onRemove,
+  output, onOpen, onOpenThread, onRename, onRemove,
 }: { output: OutputSummary } & OutputActions) {
   const matchRoute = useMatchRoute()
   const pending = !!matchRoute({
-    to: '/workspace/$id',
-    params: { id: output.workspaceId },
+    to: '/thread/$id',
+    params: { id: output.threadId },
     search: { w: output.workpieceId },
     pending: true,
   })
   return (
     <Link
-      to="/workspace/$id"
-      params={{ id: output.workspaceId }}
+      to="/thread/$id"
+      params={{ id: output.threadId }}
       search={{ w: output.workpieceId }}
       aria-busy={pending}
       className={`themed-card-hover-shadow press group flex cursor-pointer flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base text-left transition-[border-color,box-shadow] duration-150 ease-out hover:border-kumo-fill ${pending ? 'opacity-70' : ''}`}
@@ -184,7 +184,7 @@ function OutputCard({
             {subtitle(output)}
           </p>
         </div>
-        <OutputMenu onOpen={onOpen} onOpenWorkspace={onOpenWorkspace}
+        <OutputMenu onOpen={onOpen} onOpenThread={onOpenThread}
                     onRename={onRename} onRemove={onRemove} />
       </div>
     </Link>
@@ -192,19 +192,19 @@ function OutputCard({
 }
 
 function OutputRow({
-  output, onOpen, onOpenWorkspace, onRename, onRemove,
+  output, onOpen, onOpenThread, onRename, onRemove,
 }: { output: OutputSummary } & OutputActions) {
   const matchRoute = useMatchRoute()
   const pending = !!matchRoute({
-    to: '/workspace/$id',
-    params: { id: output.workspaceId },
+    to: '/thread/$id',
+    params: { id: output.threadId },
     search: { w: output.workpieceId },
     pending: true,
   })
   return (
     <Link
-      to="/workspace/$id"
-      params={{ id: output.workspaceId }}
+      to="/thread/$id"
+      params={{ id: output.threadId }}
       search={{ w: output.workpieceId }}
       aria-busy={pending}
       className={`group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint ${pending ? 'opacity-70' : ''}`}
@@ -215,7 +215,7 @@ function OutputRow({
           {output.title || 'Untitled'}
         </p>
         <p className="mt-0.5 truncate text-[12px] leading-4 tracking-[-0.2px] text-kumo-subtle">
-          {formatOf(output.output).noun} · {output.workspaceTitle || 'Untitled workspace'}
+          {formatOf(output.output).noun} · {output.threadTitle || 'Untitled thread'}
         </p>
       </div>
       {/* Fixed-width meta columns so rows line up like a table. */}
@@ -223,10 +223,10 @@ function OutputRow({
         <OutputProvenance owner={output.owner} />
         <span className="flex w-40 items-center justify-end gap-1 whitespace-nowrap">
           <Clock size={10} />
-          Workspace active {formatRelativeTime(output.lastActive)}
+          Thread active {formatRelativeTime(output.lastActive)}
         </span>
       </div>
-      <OutputMenu onOpen={onOpen} onOpenWorkspace={onOpenWorkspace}
+      <OutputMenu onOpen={onOpen} onOpenThread={onOpenThread}
                   onRename={onRename} onRemove={onRemove} />
     </Link>
   )
@@ -369,10 +369,10 @@ function RenameOutputDialog({
               <Dialog.Title className="text-[15px] font-medium leading-5 tracking-[-0.3px] text-kumo-default">
                 Rename output
               </Dialog.Title>
-              {/* Renames the output itself, unlike the sidebar's workspace rename, which relabels
+              {/* Renames the output itself, unlike the sidebar's thread rename, which relabels
                   only your own copy. */}
               <Dialog.Description className="mt-1 text-[12px] leading-4 text-kumo-subtle">
-                Renames the output for everyone with access to “{output?.workspaceTitle}”.
+                Renames the output for everyone with access to “{output?.threadTitle}”.
               </Dialog.Description>
             </div>
             <WorkshopIconButton type="button" className="!h-7 !w-7" disabled={busy} aria-label="Close" onClick={onClose}>
@@ -450,14 +450,14 @@ function OutputsPage() {
 
   const openOutput = (output: OutputSummary) => {
     navigate({
-      to: '/workspace/$id',
-      params: { id: output.workspaceId },
+      to: '/thread/$id',
+      params: { id: output.threadId },
       search: { w: output.workpieceId },
     })
   }
 
-  const openWorkspace = (output: OutputSummary) => {
-    navigate({ to: '/workspace/$id', params: { id: output.workspaceId }, search: {} })
+  const openThread = (output: OutputSummary) => {
+    navigate({ to: '/thread/$id', params: { id: output.threadId }, search: {} })
   }
 
   const beginRename = (output: OutputSummary) => {
@@ -472,8 +472,8 @@ function OutputsPage() {
     let overseer
     let gadget
     try {
-      overseer = await authenticatedApi.openGadget(current.workspaceId)
-      gadget = overseer.getGadget(current.workpieceId)
+      overseer = await authenticatedApi.openThread(current.threadId)
+      gadget = overseer.getArtifact(current.workpieceId)
       const title = renameValue.trim()
       await gadget.setTitle(title)
       queryClient.setQueryData(outputsKey(), (list: OutputSummary[] | undefined) => (list ?? []).map((output) =>
@@ -496,8 +496,8 @@ function OutputsPage() {
     let overseer
     let gadget
     try {
-      overseer = await authenticatedApi.openGadget(current.workspaceId)
-      gadget = overseer.getGadget(current.workpieceId)
+      overseer = await authenticatedApi.openThread(current.threadId)
+      gadget = overseer.getArtifact(current.workpieceId)
       await gadget.remove()
       queryClient.setQueryData(outputsKey(), (list: OutputSummary[] | undefined) => (list ?? []).filter((output) => outputKey(output) !== outputKey(current)))
       setRemoveOutput(null)
@@ -542,7 +542,7 @@ function OutputsPage() {
     const format = formatOf(o.output)
     const searchable = [
       o.title,
-      o.workspaceTitle,
+      o.threadTitle,
       format.noun,
       format.plural,
       o.owner?.name ?? '',
@@ -633,7 +633,7 @@ function OutputsPage() {
               <p className="mt-1 text-[13px] leading-[18px] text-kumo-subtle">
                 {isFiltered
                   ? 'Try a different filter or search term.'
-                  : 'Anything your workspaces build will show up here.'}
+                  : 'Anything your threads build will show up here.'}
               </p>
             </div>
             {/* Offer the deployment's formats here rather than sending them to the home page. */}
@@ -644,7 +644,7 @@ function OutputsPage() {
             {filtered.map((output) => (
               <OutputCard key={outputKey(output)} output={output}
                           onOpen={() => openOutput(output)}
-                          onOpenWorkspace={() => openWorkspace(output)}
+                          onOpenThread={() => openThread(output)}
                           onRename={canModify(output) ? () => beginRename(output) : undefined}
                           onRemove={canModify(output) ? () => setRemoveOutput(output) : undefined} />
             ))}
@@ -654,7 +654,7 @@ function OutputsPage() {
             {filtered.map((output) => (
               <OutputRow key={outputKey(output)} output={output}
                          onOpen={() => openOutput(output)}
-                         onOpenWorkspace={() => openWorkspace(output)}
+                         onOpenThread={() => openThread(output)}
                          onRename={canModify(output) ? () => beginRename(output) : undefined}
                          onRemove={canModify(output) ? () => setRemoveOutput(output) : undefined} />
             ))}
@@ -675,9 +675,9 @@ function OutputsPage() {
         title={`Remove “${removeOutput?.title || 'Untitled'}”?`}
         description={
           <>
-            This permanently removes the output from “{removeOutput?.workspaceTitle}”
-            {removeOutput?.owner ? ', for everyone with access to that workspace' : ''}. Other
-            outputs in that workspace stay available. This can’t be undone.
+            This permanently removes the output from “{removeOutput?.threadTitle}”
+            {removeOutput?.owner ? ', for everyone with access to that thread' : ''}. Other
+            outputs in that thread stay available. This can’t be undone.
           </>
         }
         confirmLabel="Remove"

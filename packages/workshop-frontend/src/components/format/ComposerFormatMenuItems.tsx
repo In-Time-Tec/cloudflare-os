@@ -36,7 +36,7 @@ export default function ComposerFormatMenuItems({
       </p>
       {formats.map((format) => (
         <DropdownMenu.Item
-          key={format.blueprintId}
+          key={format.templateId}
           className={COMPOSER_MENU_ITEM}
           disabled={creating !== null}
           onClick={() => choose(format)}
@@ -45,11 +45,11 @@ export default function ComposerFormatMenuItems({
             <FormatGlyph
               output={format.output}
               size="md"
-              className={creating === format.blueprintId ? 'animate-pulse' : undefined}
+              className={creating === format.templateId ? 'animate-pulse' : undefined}
             />
           </span>
           <span className="flex-1 truncate">
-            {creating === format.blueprintId ? 'Creating…' : format.output.noun}
+            {creating === format.templateId ? 'Creating…' : format.output.noun}
           </span>
         </DropdownMenu.Item>
       ))}

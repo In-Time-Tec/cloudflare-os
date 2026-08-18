@@ -23,15 +23,15 @@ export async function createFromFormat(
   format: OutputFormatOffer,
 ): Promise<void> {
   if (format.requiresSetup) {
-    navigate({ to: '/blueprint/$id', params: { id: format.blueprintId } })
+    navigate({ to: '/template/$id', params: { id: format.templateId } })
     return
   }
 
   let overseer: RpcStub<Overseer> | undefined
   try {
-    overseer = await api.newGadgetFromBlueprint(format.blueprintId, {})
+    overseer = await api.newThreadFromTemplate(format.templateId, {})
     const { id } = await overseer.getMetadata()
-    navigate({ to: '/workspace/$id', params: { id } })
+    navigate({ to: '/thread/$id', params: { id } })
   } catch (err) {
     console.error('Failed to create from format:', err)
     toasts.add({ title: `Couldn't create a new ${format.output.noun}`, variant: 'error' })
@@ -49,7 +49,7 @@ export function useOutputFormats(): OutputFormats {
   const [creating, setCreating] = useState<string | null>(null)
 
   const create = useCallback(async (format: OutputFormatOffer) => {
-    setCreating(format.blueprintId)
+    setCreating(format.templateId)
     try {
       await createFromFormat(authenticatedApi, navigate, toasts, format)
     } catch {

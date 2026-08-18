@@ -1,6 +1,6 @@
 # Fixed-bid pricing
 
-The deployment ships `intimetec.fixed-bid-pricing` as a bundled Blueprint. It creates an independent,
+The deployment ships `intimetec.fixed-bid-pricing` as a bundled Template. It creates an independent,
 durable estimate Gadget for each engagement and exposes that Gadget's RPC methods to the workspace
 agent through the ordinary Cloudflare OS Gadget binding. It requires no MCP server and adds no
 pricing behavior to the Workshop kernel.
@@ -88,7 +88,7 @@ Policy `itt-fixed-bid-2026.1` is deliberately marked **initial**, not proven. It
 These sources do not establish In Time Tec's profitability. Leadership should calibrate the policy
 with normalized company data for actual fully burdened cost, effort variance, rework, warranty usage,
 realized margin, collections timing, and win/loss reasons. Do not put customer identities, contract
-text, or raw confidential SOWs into a bundled Blueprint or an external model prompt.
+text, or raw confidential SOWs into a bundled Template or an external model prompt.
 
 Individual estimates may record normalized comparable references in their own durable Gadget state.
 Only references scored 4–5 for similarity affect pricing. Their reference prices are escalated to
@@ -110,8 +110,8 @@ infer them.
 
 ## Versioning and existing estimates
 
-Each estimate records its policy version. Updating the repository and bundled Blueprint updates what
-new Gadget instances receive; Cloudflare OS intentionally does not overwrite existing Blueprint
+Each estimate records its policy version. Updating the repository and bundled Template updates what
+new Gadget instances receive; Cloudflare OS intentionally does not overwrite existing Template
 instances. That behavior protects approved and signed estimates from silent policy changes.
 
 A later centrally managed policy service may be justified when enough calibration data and migration

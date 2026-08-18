@@ -300,8 +300,8 @@ describe("compaction checkpoint state", () => {
     let state = buildState([
       record(0, agent, {
         type: "changes",
-        createdGadgets: [{gadgetId: 2, title: "New", bindingName: "NEW"}],
-        addedBindings: [{gadgetId: 2, name: "DB", target: 9}],
+        createdArtifacts: [{artifactId: 2, title: "New", bindingName: "NEW"}],
+        addedBindings: [{artifactId: 2, name: "DB", target: 9}],
       }),
     ], 1);
 

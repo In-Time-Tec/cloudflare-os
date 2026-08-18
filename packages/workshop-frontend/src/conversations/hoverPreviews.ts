@@ -1,5 +1,5 @@
 import type { ConversationSummary, EmailSummary } from '@gadgets/workshop-shared/gatekeeper'
-import type { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
+import type { ThreadMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
 import { formatPreviewTime, type SidebarHoverPreview } from '../components/AppShell/sidebarHover'
 
 export function conversationPreview(conversation: ConversationSummary): SidebarHoverPreview {
@@ -32,7 +32,7 @@ export function emailPreview(email: EmailSummary): SidebarHoverPreview {
   }
 }
 
-export function workspacePreview(gadget: GadgetMetadataWithTimestamps): SidebarHoverPreview {
+export function threadPreview(gadget: ThreadMetadataWithTimestamps): SidebarHoverPreview {
   const created = formatPreviewTime(gadget.created)
   const updated = formatPreviewTime(gadget.lastActive)
   const meta = [
@@ -40,7 +40,7 @@ export function workspacePreview(gadget: GadgetMetadataWithTimestamps): SidebarH
     updated ? `updated ${updated}` : '',
   ].filter(Boolean).join(', ')
   return {
-    title: gadget.title || 'Untitled workspace',
+    title: gadget.title || 'Untitled thread',
     meta: meta || undefined,
     footer: gadget.owner ? `Shared by ${gadget.owner.name}` : 'Yours',
   }

@@ -26,14 +26,14 @@ const validConfig = {
     defaultModel: "openai/gpt-5.6-luna",
   },
   resources: {
-    blueprintsKvNamespace: "acme-os-backend-blueprints",
+    templatesKvNamespace: "acme-os-backend-templates",
     avatarsKvNamespace: "acme-os-backend-avatars",
-    blueprintContentBucket: "acme-os-backend-blueprint-content",
+    templateContentBucket: "acme-os-backend-template-content",
     contextKvNamespace: "acme-os-context-collections",
   },
 };
 const resolvedResources = {
-  blueprintsKvNamespaceId: "11111111111111111111111111111111",
+  templatesKvNamespaceId: "11111111111111111111111111111111",
   avatarsKvNamespaceId: "22222222222222222222222222222222",
   contextKvNamespaceId: "33333333333333333333333333333333",
   workersSubdomain: "acme",
@@ -77,6 +77,7 @@ test("generates the workers.dev composition", async () => {
       accountId,
       await baseConfigs(),
       resolvedResources,
+      { MICROSOFT_CLIENT_ID: "client-id" },
   );
 
   assert.equal(generated.router.name, "acme-os");
@@ -91,9 +92,14 @@ test("generates the workers.dev composition", async () => {
 
   assert.equal(generated.backend.workers_dev, false);
   assert.deepEqual(generated.backend.vars.ADMINS, ["password:admin"]);
-  // Microsoft Entra is the only sign-in method.
+  // Microsoft Entra is the only sign-in method when its secrets are configured.
   assert.equal(generated.backend.vars.AUTH_GATEKEEPERS, "microsoft");
   assert.equal(generated.backend.vars.DISABLE_PASSWORD_AUTH, "true");
+
+  // Without Microsoft secrets, password auth stays on so the deployment isn't locked out.
+  const generatedNoAuth = generateConfigs(
+      validConfig, accountId, await baseConfigs(), resolvedResources, {});
+  assert.equal(generatedNoAuth.backend.vars.DISABLE_PASSWORD_AUTH, "false");
   assert.deepEqual(
       generated.backend.services.map(({ binding, service }) => ({ binding, service })), [
     { binding: "GATEKEEPER_CONTEXT", service: "acme-os-context" },
@@ -107,11 +113,11 @@ test("generates the workers.dev composition", async () => {
   assert.equal(generated.backend.vars.DEPLOYMENT_AI_DEFAULT_MODEL, "openai/gpt-5.6-luna");
   assert.deepEqual(generated.backend.ai, { binding: "WORKERS_AI" });
   assert.deepEqual(generated.backend.kv_namespaces, [
-    { binding: "BLUEPRINTS", id: resolvedResources.blueprintsKvNamespaceId },
+    { binding: "TEMPLATES", id: resolvedResources.templatesKvNamespaceId },
     { binding: "AVATARS", id: resolvedResources.avatarsKvNamespaceId },
   ]);
   assert.deepEqual(generated.backend.r2_buckets, [
-    { binding: "BLUEPRINT_CONTENT", bucket_name: "acme-os-backend-blueprint-content" },
+    { binding: "TEMPLATE_CONTENT", bucket_name: "acme-os-backend-template-content" },
   ]);
   assert.deepEqual(generated.backend.services[0], {
     binding: "GATEKEEPER_CONTEXT",
@@ -179,8 +185,8 @@ test("reuses storage created by a partial deployment and creates only missing re
   const requests = [];
   const existingNamespaces = [
     {
-      title: validConfig.resources.blueprintsKvNamespace,
-      id: resolvedResources.blueprintsKvNamespaceId,
+      title: validConfig.resources.templatesKvNamespace,
+      id: resolvedResources.templatesKvNamespaceId,
     },
     {
       title: validConfig.resources.avatarsKvNamespace,
@@ -204,7 +210,7 @@ test("reuses storage created by a partial deployment and creates only missing re
     if (url.pathname.endsWith("/workers/subdomain")) {
       return Response.json({ success: true, result: { subdomain: "acme" } });
     }
-    if (url.pathname.endsWith(`/${validConfig.resources.blueprintContentBucket}`) &&
+    if (url.pathname.endsWith(`/${validConfig.resources.templateContentBucket}`) &&
         (init.method ?? "GET") === "GET") {
       return Response.json(
           { success: false, errors: [{ code: 10006, message: "bucket not found" }] },
@@ -231,7 +237,7 @@ test("reuses storage created by a partial deployment and creates only missing re
     },
     {
       path: `/client/v4/accounts/${accountId}/r2/buckets/` +
-        validConfig.resources.blueprintContentBucket,
+        validConfig.resources.templateContentBucket,
       method: "GET",
     },
     {

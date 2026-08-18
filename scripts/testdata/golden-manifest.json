@@ -1062,8 +1062,8 @@
         "run_worker_first": [
           "/api",
           "/api/*",
-          "/blueprint-screenshot",
-          "/blueprint-screenshot/*",
+          "/template-screenshot",
+          "/template-screenshot/*",
           "/gatekeeper/*"
         ],
         "variants": {
@@ -1130,8 +1130,8 @@
     "workshop-backend": {
       "bindings": [
         {
-          "name": "BLUEPRINTS",
-          "namespace_id": "$KV_BLUEPRINTS_ID",
+          "name": "TEMPLATES",
+          "namespace_id": "$KV_TEMPLATES_ID",
           "type": "kv_namespace"
         },
         {
@@ -1140,8 +1140,8 @@
           "type": "kv_namespace"
         },
         {
-          "bucket_name": "$R2_BLUEPRINT_CONTENT_NAME",
-          "name": "BLUEPRINT_CONTENT",
+          "bucket_name": "$R2_TEMPLATE_CONTENT_NAME",
+          "name": "TEMPLATE_CONTENT",
           "type": "r2_bucket"
         },
         {

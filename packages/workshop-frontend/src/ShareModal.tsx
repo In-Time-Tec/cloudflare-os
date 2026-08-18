@@ -9,7 +9,7 @@ import {
   CollaboratorInfo,
   AffectedCollaborator,
   ShareLinkInfo,
-  GadgetMetadata,
+  ThreadMetadata,
   AiChatAuthorInfo,
   CollaboratorRole,
   ObserverBindingNeed,
@@ -30,7 +30,7 @@ type Props = {
   open: boolean
   onClose: () => void
   overseer: RpcStub<Overseer>
-  metadata: GadgetMetadata
+  metadata: ThreadMetadata
   currentUser: AiChatAuthorInfo | null
   authenticatedApi: RpcStub<AuthenticatedApi>
 }
@@ -51,7 +51,7 @@ function formatRelativeTime(date: Date): string {
 }
 
 const ROLE_LABELS: Record<CollaboratorRole, string> = {
-  build: 'Workspace',
+  build: 'Thread',
   use: 'Gadget only',
 }
 
@@ -220,7 +220,7 @@ function DependentKeepList({
   )
 }
 
-// What a recipient is asked to do before the workspace will open for them. Recipients don't
+// What a recipient is asked to do before the thread will open for them. Recipients don't
 // inherit the owner's connections: they must point their own account at each connection in scope
 // for the selected access level, so sharers should know that cost before they invite anyone.
 function RecipientVerification({
@@ -533,15 +533,15 @@ export default function ShareModal({ open, onClose, overseer, metadata, currentU
     }
   }
 
-  // Where an invited collaborator opens the workspace. Adding them already granted access, so this
+  // Where an invited collaborator opens the thread. Adding them already granted access, so this
   // carries no secret and is safe to show and re-show — unlike a share link, whose URL embeds a key.
-  const workspaceUrl = `${window.location.origin}/workspace/${metadata.id}`
+  const threadUrl = `${window.location.origin}/thread/${metadata.id}`
 
-  const copyWorkspaceUrl = async () => {
-    if (await copyToClipboard(workspaceUrl)) {
+  const copyThreadUrl = async () => {
+    if (await copyToClipboard(threadUrl)) {
       setInvitedLinkCopied(true)
     } else {
-      toasts.add({ title: 'Could not copy the workspace link.', variant: 'error' })
+      toasts.add({ title: 'Could not copy the thread link.', variant: 'error' })
     }
   }
 
@@ -590,7 +590,7 @@ export default function ShareModal({ open, onClose, overseer, metadata, currentU
     try {
       const { key, linkId } = await overseer.createShareLink(
         newLinkRole, newLinkNote.trim() || undefined)
-      const url = `${window.location.origin}/workspace/${metadata.id}#share=${key}`
+      const url = `${window.location.origin}/thread/${metadata.id}#share=${key}`
       setNewShareLink(url)
       setNewShareLinkCopied(false)
       setNewLinkNote('')
@@ -618,7 +618,7 @@ export default function ShareModal({ open, onClose, overseer, metadata, currentU
       let url = copiedUrlsRef.current.get(linkId)
       if (!url) {
         const { key } = await overseer.newShareLinkKey(linkId)
-        url = `${window.location.origin}/workspace/${metadata.id}#share=${key}`
+        url = `${window.location.origin}/thread/${metadata.id}#share=${key}`
         copiedUrlsRef.current.set(linkId, url)
       }
       const copied = await copyToClipboard(url)
@@ -780,13 +780,13 @@ export default function ShareModal({ open, onClose, overseer, metadata, currentU
                 <ShieldWarning size={22} weight="duotone" />
               </div>
               <p className="mt-3 text-[14px] leading-5 font-medium tracking-[-0.3px] text-kumo-default">
-                This workspace can’t be shared
+                This thread can’t be shared
               </p>
               <p className="mt-1.5 max-w-[320px] text-balance text-[12px] leading-[18px] tracking-[-0.1px] text-kumo-subtle">
                 It has observed sensitive data that can only be accessed by you, the owner.
               </p>
               <p className="mt-2 max-w-[320px] text-balance text-[12px] leading-[18px] tracking-[-0.1px] text-kumo-subtle">
-                To share something similar, create a blueprint from a gadget in this workspace, then use it to create a new workspace.
+                To share something similar, create a template from a gadget in this thread, then use it to create a new thread.
               </p>
             </div>
           ) : (
@@ -853,9 +853,9 @@ export default function ShareModal({ open, onClose, overseer, metadata, currentU
                     {invitedLinkCopied ? 'Link copied to your clipboard' : 'Send them this link to open it'}
                   </span>
                 </div>
-                <p className="truncate font-mono text-[11px] leading-4 text-kumo-subtle">{workspaceUrl}</p>
+                <p className="truncate font-mono text-[11px] leading-4 text-kumo-subtle">{threadUrl}</p>
               </div>
-              <WorkshopButton tone="primary" onClick={copyWorkspaceUrl} className="gap-1.5 !rounded-xl">
+              <WorkshopButton tone="primary" onClick={copyThreadUrl} className="gap-1.5 !rounded-xl">
                 {invitedLinkCopied ? <Check size={13} weight="bold" /> : <Copy size={13} />}
                 {invitedLinkCopied ? 'Copied' : 'Copy link'}
               </WorkshopButton>

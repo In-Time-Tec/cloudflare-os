@@ -3,9 +3,9 @@
 // installation of the Gadgets Workshop may have access to different adapters, typically based on
 // the set of internal services used at the particular company.
 //
-// For instance, there might be adapters for Google Workspace, GitHub, Jira, etc.
+// For instance, there might be adapters for Google Thread, GitHub, Jira, etc.
 //
-// Adapters provide access to resources. For instance, a Google Workspace adapter might provide
+// Adapters provide access to resources. For instance, a Google Thread adapter might provide
 // access to Google Docs, Spreadsheets, Gmail mailboxes, etc. Each Google Doc, for example, is a
 // separate "resource". Adapters are designed to provide object-oriented, capability-based access
 // to such resources, enabling the Gadget Workshop to grant a particular Gadget fine-grained
@@ -1395,12 +1395,12 @@ export type HookDescription = {
  * must not be used for authorization, identity, or storage scoping.
  */
 export type HookTargetMetadata = {
-  /** The workspace the hook delivers into. */
-  workspaceId: string;
+  /** The thread the hook delivers into. */
+  threadId: string;
 
   /**
-   * The specific gadget within that workspace, when the hook is pinned to one. Absent means the
-   * workspace's current default gadget.
+   * The specific gadget within that thread, when the hook is pinned to one. Absent means the
+   * thread's current default gadget.
    */
   gadgetId?: number;
 }

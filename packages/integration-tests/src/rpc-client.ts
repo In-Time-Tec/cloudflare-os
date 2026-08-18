@@ -56,7 +56,7 @@ export function connect(baseUrl: URL): RpcStub<PublicApi> {
  * Always mint callback stubs through here rather than importing `RpcStub` yourself. A stub is only
  * serialisable by the same capnweb instance that owns the session, and a consumer of this package can
  * easily end up with a second copy -- a repo that vendors this one as a `public/` submodule installs
- * its own workspace *and* the submodule's, so `capnweb` resolves to two different stores. The failure is
+ * its own thread *and* the submodule's, so `capnweb` resolves to two different stores. The failure is
  * `Cannot serialize value: [object RpcStub]`, and it appears only once those installs are separate, so
  * a single-install dev machine will not show it and CI will.
  */

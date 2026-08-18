@@ -36,7 +36,7 @@ export const Route = createFileRoute("/_authenticated/")({
     }),
 });
 
-// The Home page is the "new workspace" launcher. Persistent navigation (recents, favorites) lives
+// The Home page is the "new thread" launcher. Persistent navigation (recents, favorites) lives
 // in the AppShell rail, so this page focuses on a single thing: composing the first message of a
 // new gadget — a centered column with a hero, the prompt composer, and a few task suggestions.
 function HomePage() {
@@ -78,7 +78,7 @@ export function HomePageContent({ prompt }: HomeSearch) {
 
   const ensureProvisionalGadget = useCallback(() => {
     if (!provisionalOverseerRef.current) {
-      const overseer = authenticatedApi.newGadget();
+      const overseer = authenticatedApi.newThread();
       provisionalOverseerRef.current = { stub: overseer };
     }
   }, [authenticatedApi]);
@@ -102,24 +102,24 @@ export function HomePageContent({ prompt }: HomeSearch) {
         ensureProvisionalGadget();
         const overseer = provisionalOverseerRef.current!.stub;
         // Pipeline both independent calls in one batch, but settle both before releasing the stub.
-        const [chat, {id}] = await Promise.all([
+        const [, {id}] = await Promise.all([
           overseer.newChat(message, modelId, capsules, attachments, formats),
           overseer.getMetadata(),
         ]);
         provisionalOverseerRef.current?.stub[Symbol.dispose]();
         provisionalOverseerRef.current = null;
-        // Open the conversation we just started.
-        navigate({ to: "/workspace/$id", params: { id }, search: { chat } });
+        // Open the thread we just started (the thread IS the conversation).
+        navigate({ to: "/thread/$id", params: { id } });
       } catch (err) {
         const transient = logRpcFailure("Failed to create gadget:", err,
-            { reportSite: "workspace.create" });
+            { reportSite: "thread.create" });
         // A retry reuses the provisional gadget while the draft contains gadget-scoped references.
         if (!attachments?.length && !capsules?.length) {
           provisionalOverseerRef.current?.stub[Symbol.dispose]();
           provisionalOverseerRef.current = null;
         }
         if (!transient) {
-          toasts.add({ title: "Failed to create workspace", variant: "error" });
+          toasts.add({ title: "Failed to create thread", variant: "error" });
         }
         throw err;
       }

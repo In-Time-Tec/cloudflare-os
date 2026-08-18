@@ -7,8 +7,8 @@
     ".": "./src/pricing.ts"
   },
   "scripts": {
-    "build": "tsc && tsc -p tsconfig.gadget.json && node scripts/build-blueprint.mjs --check",
-    "build:blueprint": "node scripts/build-blueprint.mjs --write",
+    "build": "tsc && tsc -p tsconfig.template.json && node scripts/build-template.mjs --check",
+    "build:template": "node scripts/build-template.mjs --write",
     "test": "vitest run"
   },
   "devDependencies": {

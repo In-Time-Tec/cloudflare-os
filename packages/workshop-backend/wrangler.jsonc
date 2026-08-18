@@ -69,8 +69,8 @@
   // reached via ctx.exports and need no explicit durable_objects binding.
   "kv_namespaces": [
     {
-      "binding": "BLUEPRINTS",
-      "preview_id": "gadgets-blueprint-metadata"
+      "binding": "TEMPLATES",
+      "preview_id": "gadgets-template-metadata"
     },
     {
       "binding": "AVATARS",
@@ -79,8 +79,8 @@
   ],
   "r2_buckets": [
     {
-      "binding": "BLUEPRINT_CONTENT",
-      "bucket_name": "gadgets-blueprint-content"
+      "binding": "TEMPLATE_CONTENT",
+      "bucket_name": "gadgets-template-content"
     }
   ],
   "worker_loaders": [
@@ -95,7 +95,7 @@
   // "assets": {
   //   "directory": "../workshop-frontend/dist",
   //   "not_found_handling": "single-page-application",
-  //   "run_worker_first": ["/api", "/api/*", "/blueprint-screenshot/*"]
+  //   "run_worker_first": ["/api", "/api/*", "/template-screenshot/*"]
   // },
   "observability": {
     "enabled": true,

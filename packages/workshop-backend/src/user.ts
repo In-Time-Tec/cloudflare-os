@@ -1,5 +1,5 @@
 import { RpcStub } from "capnweb";
-import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, BlueprintMetadata, BlueprintLibrarySummary, BlueprintSource, BlueprintUserSummary, BLUEPRINT_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, BlueprintOutput, OutputSummary, WorkpieceId, ListOutputsResult, AccountCapabilityGroup, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
+import { ThreadMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ThreadMetadata, TemplateMetadata, TemplateLibrarySummary, TemplateSource, TemplateUserSummary, TEMPLATE_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, TemplateOutput, OutputSummary, WorkpieceId, ListOutputsResult, AccountCapabilityGroup, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
 import { AuthenticatedIdentity, Capability, ConversationsApi, Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
 import { shouldAutoProvisionAccount, ambientGatekeeperMode } from "./provisioning-policy.js";
 import { CloudflareGatekeeperUser } from "@gadgets/workshop-shared/cloudflare-gatekeeper";
@@ -9,14 +9,14 @@ import { createWorkshopLogger } from "./observability";
 import { getManagedAiConfig } from "./ai-gateway.js";
 import { utcDayKey, nextUtcMidnightIso, DailyQuotaResult } from "./ai-gateway-billing/limits/config.js";
 import type { AdminSettings } from "./admin-settings.js";
-import { isReservedBlueprintKey, readBlueprintKvRecord } from "./blueprint-archive.js";
+import { isReservedTemplateKey, readTemplateKvRecord } from "./template-archive.js";
 import { filterEnabledResources, isResourceDisabled, readAdminConfig } from "./admin-config.js";
 import { buildGatekeeperVendorMap } from "./auth/auth-vendors.js";
 import { SessionPrincipal } from "./auth/identity-directory.js";
 
 const logger = createWorkshopLogger("workshop.user");
 
-// How many workspaces one Outputs catch-up pass examines, bounding the Durable Objects a single
+// How many threads one Outputs catch-up pass examines, bounding the Durable Objects a single
 // listOutputs() call wakes and how long it waits. The client calls again until catch-up is done.
 const OUTPUTS_BACKFILL_PAGE = 16;
 
@@ -101,51 +101,51 @@ type LoginSessionRecord = {
 /** How long a session token stays valid. Expired sessions require a fresh sign-in. */
 export const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
-// Blueprint record stored in the user's `blueprints` collection.
-type BlueprintUserRecord = {
+// Template record stored in the user's `templates` collection.
+type TemplateUserRecord = {
   id: string;
-  metadata: BlueprintMetadata;
-  gadgetId?: string;
-  // Source of truth for whether the blueprint is featured deployment-wide.
+  metadata: TemplateMetadata;
+  threadId?: string;
+  // Source of truth for whether the template is featured deployment-wide.
   featured?: boolean;
 };
 
-type LibraryBlueprintRecord = {
+type LibraryTemplateRecord = {
   id: string;
-  metadata: BlueprintMetadata;
+  metadata: TemplateMetadata;
   addedAt: Date;
   uploaded: boolean;
 };
 
-type GadgetRecord = GadgetMetadata & {
+type ArtifactRecord = ThreadMetadata & {
   created: Date;
-  lastActive?: Date;  // if missing, gadget is provisional
-  // If we're not the gadget owner (it was shared with us), `owner` is set (inherited from
-  // GadgetMetadata).
+  lastActive?: Date;  // if missing, thread is provisional
+  // If we're not the thread owner (it was shared with us), `owner` is set (inherited from
+  // ThreadMetadata).
 };
 
-function isFullyCreated(g: GadgetRecord): g is GadgetMetadataWithTimestamps {
+function isFullyCreated(g: ArtifactRecord): g is ThreadMetadataWithTimestamps {
   return g.lastActive !== undefined;
 }
 
 /**
- * One output of a workspace, as pushed into a user's output index by the Overseer that owns it
- * (see `syncWorkspaceOutputs()`). Carries only what the workspace itself knows: its title,
- * activity time and ownership are joined in from the `gadgets` collection on read, so they can't
+ * One output of a thread, as pushed into a user's output index by the Overseer that owns it
+ * (see `syncThreadOutputs()`). Carries only what the thread itself knows: its title,
+ * activity time and ownership are joined in from the `threads` collection on read, so they can't
  * go stale here.
  */
-export type WorkspaceOutputEntry = {
+export type ThreadOutputEntry = {
   workpieceId: WorkpieceId;
   title: string;
   created: Date;
 
-  /** The format the gadget was built as, if it was instantiated from a blueprint declaring one. */
-  output?: BlueprintOutput;
+  /** The format the thread was built as, if it was instantiated from a template declaring one. */
+  output?: TemplateOutput;
 };
 
-type OutputRecord = WorkspaceOutputEntry & {
-  // The workspace containing this output (an Overseer DO id).
-  workspaceId: string;
+type OutputRecord = ThreadOutputEntry & {
+  // The thread containing this output (an Overseer DO id).
+  threadId: string;
 };
 
 // AI Gateway billing state for the optional top-up flow: which Cloudflare account to bill and a
@@ -179,7 +179,7 @@ function makeUserStorage(storage: DurableObjectStorage) {
       aiModels: collection<UserAiModelRecord>()({
         primaryKey: record => record.profile.id,
       }),
-      gadgets: collection<GadgetRecord>()({
+      gadgets: collection<ArtifactRecord>()({
         primaryKey: "id"
       }),
       connectedAccounts: collection<ConnectedAccountRecord>()({
@@ -188,20 +188,20 @@ function makeUserStorage(storage: DurableObjectStorage) {
       sessions: collection<LoginSessionRecord>()({
         primaryKey: "tokenId",
       }),
-      blueprints: collection<BlueprintUserRecord>()({
+      templates: collection<TemplateUserRecord>()({
         primaryKey: "id",
       }),
-      libraryBlueprints: collection<LibraryBlueprintRecord>()({
+      libraryTemplates: collection<LibraryTemplateRecord>()({
         primaryKey: "id",
       }),
-      // Outputs of every workspace in `gadgets`, mirrored here by each workspace's Overseer so the
+      // Outputs of every thread in `threads`, mirrored here by each thread's Overseer so the
       // Outputs page is one cheap read of the user's own DO. Entries are meaningful only while the
-      // corresponding `gadgets` record exists; `syncWorkspaceOutputs()` and the `gadgets` deletion
+      // corresponding `threads` record exists; `syncThreadOutputs()` and the `threads` deletion
       // paths keep the two in step.
       outputs: collection<OutputRecord>()({
-        primaryKey: record => `${record.workspaceId}:${record.workpieceId}`,
+        primaryKey: record => `${record.threadId}:${record.workpieceId}`,
         nonUniqueIndexes: {
-          byWorkspace(record: OutputRecord) { return record.workspaceId; },
+          byThread(record: OutputRecord) { return record.threadId; },
         },
       }),
     },
@@ -223,16 +223,16 @@ function makeUserStorage(storage: DurableObjectStorage) {
       preferredModel: <string | null>null,
       onboardingCompleted: false,
 
-      // Set once the user's pre-existing workspaces have been asked to populate the outputs index
-      // (see #backfillOutputs()). Workspaces created since push on their own.
+      // Set once the user's pre-existing threads have been asked to populate the outputs index
+      // (see #backfillOutputs()). Threads created since push on their own.
       outputsBackfilled: false,
 
-      // How far that catch-up has got: the last workspace id examined. The sweep runs a page at a
+      // How far that catch-up has got: the last thread id examined. The sweep runs a page at a
       // time and resumes here on the next visit.
       outputsBackfillCursor: "",
 
       nextAccountId: 0,
-      pinnedBlueprints: <string[]>[],
+      pinnedTemplates: <string[]>[],
 
       // Per-user free-tier daily LLM-call counter (only used when ENABLE_CLOUDFLARE_LIMITS is on).
       // Stores the current UTC day and the calls made that day; a stale `day` implicitly resets the
@@ -309,10 +309,10 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
 
-    // Migrate data created prior to the minions -> gadgets rename.
+    // Migrate data created prior to the minions -> threads rename.
     // TODO(cleanup): Eventually remove this, very few people ever used it as "minions".
     for (let [key, value] of Array.from(ctx.storage.kv.list({prefix: "minions:"}))) {
-      let newKey = "gadgets:" + key.slice("minions:".length);
+      let newKey = "threads:" + key.slice("minions:".length);
       ctx.storage.kv.put(newKey, value);
       ctx.storage.kv.delete(key);
     }
@@ -510,19 +510,19 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Called by the overseer every time a collaborator opens a shared gadget.
+   * Called by the overseer every time a collaborator opens a shared thread.
    * Creates the record on first open; updates lastActive on subsequent opens.
    *
    * `role` is cached so listings built from this DO can offer the actions it permits without
-   * reopening the workspace to ask. Presentation only: every operation is still authorized by the
+   * reopening the thread to ask. Presentation only: every operation is still authorized by the
    * Overseer when attempted.
    */
-  async recordSharedGadgetOpen(
-      gadgetId: string, title: string, ownerProfile: AiChatAuthorInfo, role?: CollaboratorRole
+  async recordSharedThreadOpen(
+      threadId: string, title: string, ownerProfile: AiChatAuthorInfo, role?: CollaboratorRole
   ): Promise<void> {
-    let record = this.storage.gadgets.get(gadgetId);
+    let record = this.storage.gadgets.get(threadId);
     if (record && !record.owner) {
-      throw new Error("User owns this workspace; it's not shared with them.");
+      throw new Error("User owns this thread; it's not shared with them.");
     }
     let now = new Date();
     if (record) {
@@ -533,9 +533,9 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       record.role = role;
       this.storage.gadgets.put(record);
     } else {
-      // First time opening this shared gadget.
+      // First time opening this shared thread.
       this.storage.gadgets.put({
-        id: gadgetId,
+        id: threadId,
         title,
         owner: ownerProfile,
         role,
@@ -546,27 +546,27 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Updates the presentation-only role cached for a shared workspace listing. Authorization still
+   * Updates the presentation-only role cached for a shared thread listing. Authorization still
    * comes from the Overseer's live sharing graph; this only keeps the listing's available actions
    * accurate after a collaborator is downgraded.
    */
-  async updateSharedGadgetRole(gadgetId: string, role: CollaboratorRole): Promise<void> {
-    let record = this.storage.gadgets.get(gadgetId);
+  async updateSharedThreadRole(threadId: string, role: CollaboratorRole): Promise<void> {
+    let record = this.storage.gadgets.get(threadId);
     if (!record?.owner) return;
     record.role = role;
     this.storage.gadgets.put(record);
   }
 
   /**
-   * Forgets a gadget shared with this user: drops it from their workspace listing and its outputs
+   * Forgets a thread shared with this user: drops it from their thread listing and its outputs
    * from their Outputs index. Called both when the user dismisses it and when their access is
    * revoked (Overseer.refreshAffectedCollaboratorListings()); it grants and revokes nothing.
    */
-  async forgetSharedGadget(gadgetId: string): Promise<void> {
-    let record = this.storage.gadgets.get(gadgetId);
+  async forgetSharedThread(threadId: string): Promise<void> {
+    let record = this.storage.gadgets.get(threadId);
     if (record && record.owner) {
-      this.storage.gadgets.delete(gadgetId);
-      this.storage.outputs.byWorkspace.delete(gadgetId);
+      this.storage.gadgets.delete(threadId);
+      this.storage.outputs.byThread.delete(threadId);
     }
   }
 
@@ -789,76 +789,78 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return this.getChatContext(selectedModel?.id ?? null);
   }
 
-  async listGadgets(): Promise<GadgetMetadataWithTimestamps[]> {
-    let result: GadgetMetadataWithTimestamps[] = [];
-    for (let gadget of this.storage.gadgets.list()) {
-      if (isFullyCreated(gadget)) {
-        result.push(gadget);
+  async listThreads(): Promise<ThreadMetadataWithTimestamps[]> {
+    let result: ThreadMetadataWithTimestamps[] = [];
+    for (let thread of this.storage.gadgets.list()) {
+      if (isFullyCreated(thread)) {
+        result.push(thread);
       }
     }
     return result;
   }
 
-  async updateTitle(gadgetId: string, title: string) {
-    let record = this.storage.gadgets.get(gadgetId);
+  async updateTitle(threadId: string, title: string) {
+    let record = this.storage.gadgets.get(threadId);
     if (!record) {
-      throw new Error("No such workspace belonging to user.");
+      throw new Error("No such thread belonging to user.");
     }
     record.title = title;
     this.storage.gadgets.put(record);
   }
 
-  async updatePinned(gadgetId: string, pinned: boolean) {
-    let record = this.storage.gadgets.get(gadgetId);
+  async updatePinned(threadId: string, pinned: boolean) {
+    let record = this.storage.gadgets.get(threadId);
     if (!record) {
-      throw new Error("No such workspace belonging to user.");
+      throw new Error("No such thread belonging to user.");
     }
     record.pinned = pinned;
     this.storage.gadgets.put(record);
   }
 
-  async getGadget(id: string): Promise<GadgetMetadata | null> {
+  async getThread(id: string): Promise<ThreadMetadata | null> {
     return this.storage.gadgets.get(id) || null;
   }
 
-  async newGadget(id: string, title: string): Promise<void> {
+  async newThread(id: string, title: string, parentThreadId?: string): Promise<void> {
     let created = new Date();
-    this.storage.gadgets.put({id, title, created});
+    let record: ArtifactRecord = {id, title, created};
+    if (parentThreadId) record.parentThreadId = parentThreadId;
+    this.storage.gadgets.put(record);
   }
 
-  async ensureGadgetRegistered(id: string, title: string): Promise<void> {
+  async ensureThreadRegistered(id: string, title: string, parentThreadId?: string): Promise<void> {
     if (this.storage.gadgets.get(id)) return;
-    await this.newGadget(id, title);
+    await this.newThread(id, title, parentThreadId);
   }
 
-  async setGadgetLastActive(id: string, time: Date, totalCost: number | undefined): Promise<void> {
-    let gadget = this.storage.gadgets.get(id);
-    if (gadget) {
-      gadget.lastActive = time;
+  async setThreadLastActive(id: string, time: Date, totalCost: number | undefined): Promise<void> {
+    let thread = this.storage.gadgets.get(id);
+    if (thread) {
+      thread.lastActive = time;
       if (totalCost) {
-        gadget.totalCost = totalCost;
+        thread.totalCost = totalCost;
       }
-      this.storage.gadgets.put(gadget);
+      this.storage.gadgets.put(thread);
     }
   }
 
-  async deleteGadget(id: string): Promise<void> {
+  async deleteThread(id: string): Promise<void> {
     this.storage.gadgets.delete(id);
-    this.storage.outputs.byWorkspace.delete(id);
+    this.storage.outputs.byThread.delete(id);
   }
 
   /**
-   * Replace the set of outputs recorded for one workspace. Called by that workspace's Overseer
-   * whenever its gadget registry changes and whenever it is opened.
+   * Replace the set of outputs recorded for one thread. Called by that thread's Overseer
+   * whenever its thread registry changes and whenever it is opened.
    *
-   * A workspace the user no longer tracks (deleted, or a shared one they dismissed) has its
+   * A thread the user no longer tracks (deleted, or a shared one they dismissed) has its
    * entries dropped.
    */
-  syncWorkspaceOutputs(workspaceId: string, entries: WorkspaceOutputEntry[]): void {
-    this.storage.outputs.byWorkspace.delete(workspaceId);
-    if (!this.storage.gadgets.get(workspaceId)) return;
+  syncThreadOutputs(threadId: string, entries: ThreadOutputEntry[]): void {
+    this.storage.outputs.byThread.delete(threadId);
+    if (!this.storage.gadgets.get(threadId)) return;
     for (let entry of entries) {
-      this.storage.outputs.put({...entry, workspaceId});
+      this.storage.outputs.put({...entry, threadId});
     }
   }
 
@@ -867,11 +869,11 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return {outputs: this.#readOutputs(), catchingUp};
   }
 
-  // Ask the user's pre-existing workspaces to populate the outputs index, once. Workspaces push as
+  // Ask the user's pre-existing threads to populate the outputs index, once. Threads push as
   // they change and when opened, so only those predating the index need this.
   //
   // Sweeps one bounded page and reports whether more remains, rather than sweeping everything: a
-  // first Outputs load must not wait on every workspace the user has ever created. The caller
+  // first Outputs load must not wait on every thread the user has ever created. The caller
   // drains the rest, so the list fills in while the page is open.
   async #backfillOutputs(): Promise<boolean> {
     if (this.storage.outputsBackfilled.get()) return false;
@@ -880,11 +882,11 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let cursor = startAfter ?? "";
     let targets: string[] = [];
     let examined = 0;
-    for (let gadget of this.storage.gadgets.list({startAfter, limit: OUTPUTS_BACKFILL_PAGE})) {
+    for (let thread of this.storage.gadgets.list({startAfter, limit: OUTPUTS_BACKFILL_PAGE})) {
       ++examined;
-      cursor = gadget.id;
-      // A shared workspace is mirrored on open, not swept; a half-created one has nothing yet.
-      if (!gadget.owner && isFullyCreated(gadget)) targets.push(gadget.id);
+      cursor = thread.id;
+      // A shared thread is mirrored on open, not swept; a half-created one has nothing yet.
+      if (!thread.owner && isFullyCreated(thread)) targets.push(thread.id);
     }
     let done = examined < OUTPUTS_BACKFILL_PAGE;
 
@@ -897,7 +899,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let firstError: unknown;
     for (let [index, result] of results.entries()) {
       if (result.status === "fulfilled") {
-        if (result.value) this.syncWorkspaceOutputs(targets[index], result.value);
+        if (result.value) this.syncThreadOutputs(targets[index], result.value);
       } else {
         if (failureCount === 0) firstError = result.reason;
         ++failureCount;
@@ -905,16 +907,16 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     }
 
     if (failureCount > 0) {
-      logger.warn("failed to backfill outputs for some workspaces", {
+      logger.warn("failed to backfill outputs for some threads", {
         event: "outputs.backfill.partial",
         failureCount,
         error: firstError,
       });
     }
 
-    // Advance past workspaces that failed, rather than retrying them. The index is self-healing,
+    // Advance past threads that failed, rather than retrying them. The index is self-healing,
     // so one missed here reappears the moment it is touched, whereas holding the cursor lets a
-    // single unwakeable workspace stall the sweep forever.
+    // single unwakeable thread stall the sweep forever.
     if (done) {
       this.storage.outputsBackfilled.put(true);
     } else {
@@ -930,36 +932,36 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   #readOutputs(): OutputSummary[] {
     let result: OutputSummary[] = [];
     for (let output of this.storage.outputs.list()) {
-      let workspace = this.storage.gadgets.get(output.workspaceId);
-      if (!workspace || !isFullyCreated(workspace)) continue;
+      let thread = this.storage.gadgets.get(output.threadId);
+      if (!thread || !isFullyCreated(thread)) continue;
       result.push({
-        workspaceId: output.workspaceId,
+        threadId: output.threadId,
         workpieceId: output.workpieceId,
         ...(output.output ? {output: output.output} : {}),
         title: output.title,
-        workspaceTitle: workspace.title,
+        threadTitle: thread.title,
         created: output.created,
-        lastActive: workspace.lastActive,
-        ...(workspace.owner ? {owner: workspace.owner} : {}),
-        ...(workspace.role ? {role: workspace.role} : {}),
+        lastActive: thread.lastActive,
+        ...(thread.owner ? {owner: thread.owner} : {}),
+        ...(thread.role ? {role: thread.role} : {}),
       });
     }
     result.sort((a, b) => b.lastActive.getTime() - a.lastActive.getTime());
     return result;
   }
 
-  // --- Blueprint methods (called by Overseer during propagation) ---
+  // --- Template methods (called by Overseer during propagation) ---
 
-  async updateBlueprint(id: string, metadata: BlueprintMetadata, gadgetId: string): Promise<boolean> {
-    let existing = this.storage.blueprints.get(id);
+  async updateTemplate(id: string, metadata: TemplateMetadata, threadId: string): Promise<boolean> {
+    let existing = this.storage.templates.get(id);
     // Preserve the featured bit across metadata-only/code updates.
     let featured = existing?.featured === true;
-    this.storage.blueprints.put({id, metadata, gadgetId, featured});
+    this.storage.templates.put({id, metadata, threadId, featured});
     return featured;
   }
 
-  async importBlueprint(id: string, metadata: BlueprintMetadata): Promise<void> {
-    this.storage.libraryBlueprints.put({
+  async importTemplate(id: string, metadata: TemplateMetadata): Promise<void> {
+    this.storage.libraryTemplates.put({
       id,
       metadata,
       addedAt: new Date(),
@@ -967,43 +969,43 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     });
   }
 
-  async deleteBlueprint(id: string): Promise<void> {
-    this.storage.blueprints.delete(id);
-    this.storage.pinnedBlueprints.put(
-      this.storage.pinnedBlueprints.get().filter(existing => existing !== id));
+  async deleteTemplate(id: string): Promise<void> {
+    this.storage.templates.delete(id);
+    this.storage.pinnedTemplates.put(
+      this.storage.pinnedTemplates.get().filter(existing => existing !== id));
   }
 
-  isBlueprintPinned(id: string): boolean {
-    return this.storage.pinnedBlueprints.get().includes(id);
+  isTemplatePinned(id: string): boolean {
+    return this.storage.pinnedTemplates.get().includes(id);
   }
 
-  async setBlueprintPinned(id: string, pinned: boolean): Promise<void> {
-    let pinnedBlueprints = this.storage.pinnedBlueprints.get().filter(existing => existing !== id);
+  async setTemplatePinned(id: string, pinned: boolean): Promise<void> {
+    let pinnedTemplates = this.storage.pinnedTemplates.get().filter(existing => existing !== id);
 
     if (pinned) {
-      if (!this.storage.blueprints.get(id) && !this.storage.libraryBlueprints.get(id)) {
-        await this.addBlueprintToLibrary(id);
+      if (!this.storage.templates.get(id) && !this.storage.libraryTemplates.get(id)) {
+        await this.addTemplateToLibrary(id);
       }
-      pinnedBlueprints.unshift(id);
+      pinnedTemplates.unshift(id);
     }
 
-    this.storage.pinnedBlueprints.put(pinnedBlueprints);
+    this.storage.pinnedTemplates.put(pinnedTemplates);
   }
 
-  async addBlueprintToLibrary(id: string): Promise<void> {
-    let kvRecord = await readBlueprintKvRecord(this.env, id);
+  async addTemplateToLibrary(id: string): Promise<void> {
+    let kvRecord = await readTemplateKvRecord(this.env, id);
     if (!kvRecord) {
-      throw new Error("Blueprint not found.");
+      throw new Error("Template not found.");
     }
 
-    let existing = this.storage.libraryBlueprints.get(id);
+    let existing = this.storage.libraryTemplates.get(id);
     if (existing) {
       existing.metadata = kvRecord.metadata;
-      this.storage.libraryBlueprints.put(existing);
+      this.storage.libraryTemplates.put(existing);
       return;
     }
 
-    this.storage.libraryBlueprints.put({
+    this.storage.libraryTemplates.put({
       id,
       metadata: kvRecord.metadata,
       addedAt: new Date(),
@@ -1011,70 +1013,70 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     });
   }
 
-  async removeBlueprintFromLibrary(id: string): Promise<void> {
-    let record = this.storage.libraryBlueprints.get(id);
+  async removeTemplateFromLibrary(id: string): Promise<void> {
+    let record = this.storage.libraryTemplates.get(id);
     if (!record) {
       return;
     }
 
     if (record.uploaded) {
-      await this.deleteOwnedBlueprint(id);
+      await this.deleteOwnedTemplate(id);
     } else {
-      this.storage.libraryBlueprints.delete(id);
-      await this.setBlueprintPinned(id, false);
+      this.storage.libraryTemplates.delete(id);
+      await this.setTemplatePinned(id, false);
     }
   }
 
-  async isBlueprintInLibrary(id: string): Promise<{ uploaded: boolean } | null> {
-    const record = this.storage.libraryBlueprints.get(id);
+  async isTemplateInLibrary(id: string): Promise<{ uploaded: boolean } | null> {
+    const record = this.storage.libraryTemplates.get(id);
     if (!record) return null;
     return { uploaded: record.uploaded };
   }
 
-  async deleteOwnedBlueprint(id: string): Promise<void> {
-    if (isReservedBlueprintKey(id)) {
-      throw new Error("Blueprint not found.");
+  async deleteOwnedTemplate(id: string): Promise<void> {
+    if (isReservedTemplateKey(id)) {
+      throw new Error("Template not found.");
     }
 
-    let publishedRecord = this.storage.blueprints.get(id);
-    let libraryRecord = this.storage.libraryBlueprints.get(id);
+    let publishedRecord = this.storage.templates.get(id);
+    let libraryRecord = this.storage.libraryTemplates.get(id);
     let uploadedRecord = libraryRecord?.uploaded ? libraryRecord : undefined;
-    let kvRecord = await readBlueprintKvRecord(this.env, id);
+    let kvRecord = await readTemplateKvRecord(this.env, id);
 
     if (!publishedRecord && !uploadedRecord && !kvRecord) {
-      throw new Error("Blueprint not found.");
+      throw new Error("Template not found.");
     }
 
     if (kvRecord) {
       if (kvRecord.ownerId !== this.ctx.id.toString()) {
-        throw new Error("You don't own this blueprint.");
+        throw new Error("You don't own this template.");
       }
 
-      // Delete all R2 objects with the blueprint ID prefix.
+      // Delete all R2 objects with the template ID prefix.
       for (let v = 1; v <= kvRecord.metadata.version; v++) {
-        await this.env.BLUEPRINT_CONTENT.delete(`${id}/${v}`);
+        await this.env.TEMPLATE_CONTENT.delete(`${id}/${v}`);
       }
-      await this.env.BLUEPRINT_CONTENT.delete(`${BLUEPRINT_SCREENSHOT_R2_PREFIX}${id}`);
+      await this.env.TEMPLATE_CONTENT.delete(`${TEMPLATE_SCREENSHOT_R2_PREFIX}${id}`);
 
       // Delete from KV.
-      await this.env.BLUEPRINTS.delete(id);
+      await this.env.TEMPLATES.delete(id);
     }
 
     if (publishedRecord?.featured === true) {
-      await this.adminSettings.getByName("").deleteFeaturedBlueprint(id);
+      await this.adminSettings.getByName("").deleteFeaturedTemplate(id);
     }
 
     if (publishedRecord) {
-      this.storage.blueprints.delete(id);
+      this.storage.templates.delete(id);
     }
     if (uploadedRecord) {
-      this.storage.libraryBlueprints.delete(id);
+      this.storage.libraryTemplates.delete(id);
     }
-    await this.setBlueprintPinned(id, false);
+    await this.setTemplatePinned(id, false);
   }
 
-  async isBlueprintFeatured(id: string): Promise<boolean | null> {
-    let record = this.storage.blueprints.get(id);
+  async isTemplateFeatured(id: string): Promise<boolean | null> {
+    let record = this.storage.templates.get(id);
     if (!record) {
       return null;
     }
@@ -1082,63 +1084,63 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return record.featured === true;
   }
 
-  async setBlueprintFeatured(id: string, featured: boolean): Promise<void> {
-    let record = this.storage.blueprints.get(id);
+  async setTemplateFeatured(id: string, featured: boolean): Promise<void> {
+    let record = this.storage.templates.get(id);
     if (!record) {
-      throw new Error("No such blueprint.");
+      throw new Error("No such template.");
     }
 
     record.featured = featured;
-    this.storage.blueprints.put(record);
+    this.storage.templates.put(record);
   }
 
-  getBlueprint(id: string): BlueprintUserSummary | null {
-    let record = this.storage.blueprints.get(id);
-    return record ? this.blueprintSummary(record, new Set(this.storage.pinnedBlueprints.get())) : null;
+  getTemplate(id: string): TemplateUserSummary | null {
+    let record = this.storage.templates.get(id);
+    return record ? this.templateSummary(record, new Set(this.storage.pinnedTemplates.get())) : null;
   }
 
-  async listBlueprints(): Promise<BlueprintUserSummary[]> {
-    let result: BlueprintUserSummary[] = [];
-    let pinnedBlueprintIds = new Set(this.storage.pinnedBlueprints.get());
-    for (let record of this.storage.blueprints.list()) {
-      result.push(this.blueprintSummary(record, pinnedBlueprintIds));
+  async listTemplates(): Promise<TemplateUserSummary[]> {
+    let result: TemplateUserSummary[] = [];
+    let pinnedTemplateIds = new Set(this.storage.pinnedTemplates.get());
+    for (let record of this.storage.templates.list()) {
+      result.push(this.templateSummary(record, pinnedTemplateIds));
     }
     result.sort((a, b) => b.lastUpdated.valueOf() - a.lastUpdated.valueOf());
     return result;
   }
 
-  private blueprintSummary(record: BlueprintUserRecord, pinnedBlueprintIds: Set<string>): BlueprintUserSummary {
+  private templateSummary(record: TemplateUserRecord, pinnedTemplateIds: Set<string>): TemplateUserSummary {
     return {
       id: record.id,
       title: record.metadata.title,
       description: record.metadata.description,
-      source: this.blueprintSource(record),
+      source: this.templateSource(record),
       version: record.metadata.version,
       lastUpdated: record.metadata.lastUpdated,
-      pinned: pinnedBlueprintIds.has(record.id) || undefined,
+      pinned: pinnedTemplateIds.has(record.id) || undefined,
     };
   }
 
-  // A blueprint with no `gadgetId` was added to the library rather than published from one of this
-  // user's workspaces; one whose workspace is no longer registered here was published from a
-  // workspace that has since been deleted.
-  private blueprintSource(record: BlueprintUserRecord): BlueprintSource {
-    if (!record.gadgetId) return { type: "imported" };
-    let workspace = this.storage.gadgets.get(record.gadgetId);
-    if (!workspace) return { type: "deletedWorkspace" };
-    return { type: "workspace", workspaceId: record.gadgetId, workspaceTitle: workspace.title };
+  // A template with no `threadId` was added to the library rather than published from one of this
+  // user's threads; one whose thread is no longer registered here was published from a
+  // thread that has since been deleted.
+  private templateSource(record: TemplateUserRecord): TemplateSource {
+    if (!record.threadId) return { type: "imported" };
+    let thread = this.storage.gadgets.get(record.threadId);
+    if (!thread) return { type: "deletedThread" };
+    return { type: "thread", threadId: record.threadId, threadTitle: thread.title };
   }
 
-  async listLibraryBlueprints(): Promise<BlueprintLibrarySummary[]> {
-    let result: BlueprintLibrarySummary[] = [];
-    let pinnedBlueprintIds = new Set(this.storage.pinnedBlueprints.get());
-    for (let record of this.storage.libraryBlueprints.list()) {
+  async listLibraryTemplates(): Promise<TemplateLibrarySummary[]> {
+    let result: TemplateLibrarySummary[] = [];
+    let pinnedTemplateIds = new Set(this.storage.pinnedTemplates.get());
+    for (let record of this.storage.libraryTemplates.list()) {
       result.push({
         id: record.id,
         metadata: record.metadata,
         addedAt: record.addedAt,
         uploaded: record.uploaded,
-        pinned: pinnedBlueprintIds.has(record.id) || undefined,
+        pinned: pinnedTemplateIds.has(record.id) || undefined,
       });
     }
     result.sort((a, b) => b.addedAt.valueOf() - a.addedAt.valueOf());
@@ -1337,7 +1339,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
   // Dedup concurrent #ensureAutoProvisionedAccounts() calls. The provisioning loop awaits cross-worker
   // RPCs (describe/createAccount), which releases the DO input gate; without this, two overlapping
-  // calls (e.g. the nav listing apps while a gadget opens) could both see "not provisioned" and
+  // calls (e.g. the nav listing apps while a thread opens) could both see "not provisioned" and
   // create duplicate accounts. Cleared on completion so a later call re-checks (e.g. for a gatekeeper
   // bound after this DO started).
   #ensureAccountsPromise?: Promise<void>;
@@ -1378,7 +1380,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   /**
    * Ensure the user's auto-provisioned accounts exist (idempotent; see #ensureAutoProvisionedAccounts),
    * then list those that declare an agent singleton and/or a management UI. Folding the ensure in lets
-   * callers (gadget open, app nav) provision and read the accounts back in a single round trip to this
+   * callers (thread open, app nav) provision and read the accounts back in a single round trip to this
    * DO. Callers filter on `description.singleton` (ambient capsules / catalog) or
    * `description.providesUi` (management-UI listing).
    */
@@ -1398,8 +1400,8 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
   /**
    * Get the gatekeeper class implementing a singleton account's agent session. The overseer installs
-   * this gatekeeper into the owner's gadgets (as a Facet) like any other gatekeeper, so the session
-   * and catalog run gadget-side in the gatekeeper's own worker — no further round-trips through this
+   * this gatekeeper into the owner's threads (as a Facet) like any other gatekeeper, so the session
+   * and catalog run thread-side in the gatekeeper's own worker — no further round-trips through this
    * DO. The account capability stays encapsulated here; only the class reference crosses out.
    */
   async getSingletonGatekeeperClass(accountId: number)
@@ -1834,7 +1836,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
     // Block whole gatekeepers + disabled resources at this single core-side chokepoint where a
     // resourceUrl becomes a capability (reached only via the user/UI-facing Overseer.newGatekeeper
-    // and blueprint instantiation — never from gadget or agent code).
+    // and template instantiation — never from thread or agent code).
     let config = await readAdminConfig(this.env);
     let vendorId = account.vendorId.toLowerCase();
     if (config.disabledGatekeepers.includes(vendorId)) {

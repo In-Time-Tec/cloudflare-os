@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { afterEach, describe, expect, it } from 'vitest'
 import { emailDetailOptions, emailsOptions } from './query/conversations'
-import { gadgetsOptions, whoamiOptions } from './query/hooks'
+import { threadsOptions, whoamiOptions } from './query/hooks'
 import type { WorkshopSession } from './session'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -27,7 +27,7 @@ function sessionStub(): WorkshopSession {
 function WarmEmail({ session }: { session: WorkshopSession }) {
   const emailList = useQuery(emailsOptions(session))
   const selected = useQuery(emailDetailOptions(session, 'm1'))
-  const gadgetList = useQuery(gadgetsOptions(session))
+  const gadgetList = useQuery(threadsOptions(session))
   const user = useQuery(whoamiOptions(session))
   return (
     <div>
@@ -52,7 +52,7 @@ describe('warm boot from persisted query cache', () => {
     const session = sessionStub()
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
     client.setQueryData(whoamiOptions(session).queryKey, { type: 'user', id: 'u1', name: 'Ada' })
-    client.setQueryData(gadgetsOptions(session).queryKey, [
+    client.setQueryData(threadsOptions(session).queryKey, [
       { id: 'g1', title: 'Quarterly', pinned: false, lastActive: new Date(), created: new Date(), totalCost: 0 },
     ])
     client.setQueryData(emailsOptions(session).queryKey, [

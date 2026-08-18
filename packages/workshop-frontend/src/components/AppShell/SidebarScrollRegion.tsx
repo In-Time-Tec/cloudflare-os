@@ -18,7 +18,7 @@ export default function SidebarScrollRegion({ children }: { children: ReactNode 
   }, [])
 
   // Re-check on scroll, on viewport resize, and whenever the lists inside grow/shrink
-  // (sections collapse, workspaces load, conversations arrive).
+  // (sections collapse, threads load, conversations arrive).
   useEffect(() => {
     const el = scrollerRef.current
     if (!el) return

@@ -40,11 +40,11 @@ function makeRouter(initial: string) {
   })
   const otherRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/workspaces',
+    path: '/threads',
     loader: async () => {
       await new Promise((resolve) => setTimeout(resolve, 50))
     },
-    component: () => <p data-page>workspaces</p>,
+    component: () => <p data-page>threads</p>,
   })
   const history = createMemoryHistory({ initialEntries: [initial] })
   return createRouter({

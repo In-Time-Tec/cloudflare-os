@@ -57,7 +57,7 @@ describe("normalizeFrontendErrorReport", () => {
       ...report,
       userId: "secret",
       attributes: { prompt: "secret" },
-      routeTemplate: "/gadget/:id",
+      routeTemplate: "/artifact/:id",
       chatId: "chat-123",
       browser: { family: "Chromium", mobile: false, rawUserAgent: "secret" },
     });
@@ -78,9 +78,9 @@ describe("normalizeFrontendErrorReport", () => {
       severity: "critical",
       handled: "yes",
       captureMechanism: "unknown",
-      surface: "gadget",
+      surface: "artifact",
       sessionId: 42,
-      gadgetId: { invalid: true },
+      artifactId: { invalid: true },
       browser: { family: "Netscape", platform: "Linux", mobile: "sometimes" },
       exception: { type: 42, message: "m".repeat(MAX_MESSAGE_CHARS + 1) },
       truncated: false,
@@ -98,7 +98,7 @@ describe("normalizeFrontendErrorReport", () => {
       truncated: true,
     });
     expect(decoded).not.toHaveProperty("sessionId");
-    expect(decoded).not.toHaveProperty("gadgetId");
+    expect(decoded).not.toHaveProperty("artifactId");
   });
 
   it("rejects only invalid envelopes", () => {
@@ -127,7 +127,7 @@ describe("extractFrontendFrameReport", () => {
         handled: false,
         captureMechanism: "react",
         exception: { type: "Error", message: "boom" },
-        surface: "gadget",
+        surface: "artifact",
         sessionId: "frame-claimed-session",
       },
     };

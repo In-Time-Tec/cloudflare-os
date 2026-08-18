@@ -2,18 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_GATEKEEPER_APP_PROMPT_LENGTH,
   normalizeGatekeeperAppPrompt,
-  parseGatekeeperAppWorkspaceTarget,
+  parseGatekeeperAppThreadTarget,
 } from "./gatekeeperAppNavigation";
 
-const WORKSPACE_ID = "a".repeat(64);
+const THREAD_ID = "a".repeat(64);
 
-describe("parseGatekeeperAppWorkspaceTarget", () => {
-  it("accepts a workspace ID with an optional gadget", () => {
-    expect(parseGatekeeperAppWorkspaceTarget(WORKSPACE_ID, undefined)).toEqual({
-      workspaceId: WORKSPACE_ID,
+describe("parseGatekeeperAppThreadTarget", () => {
+  it("accepts a thread ID with an optional gadget", () => {
+    expect(parseGatekeeperAppThreadTarget(THREAD_ID, undefined)).toEqual({
+      threadId: THREAD_ID,
     });
-    expect(parseGatekeeperAppWorkspaceTarget(WORKSPACE_ID, 0)).toEqual({
-      workspaceId: WORKSPACE_ID,
+    expect(parseGatekeeperAppThreadTarget(THREAD_ID, 0)).toEqual({
+      threadId: THREAD_ID,
       gadgetId: 0,
     });
   });
@@ -21,15 +21,15 @@ describe("parseGatekeeperAppWorkspaceTarget", () => {
   it.each([
     ["", undefined],
     ["../admin", undefined],
-    [WORKSPACE_ID.toUpperCase(), undefined],
-    [`${WORKSPACE_ID}a`, undefined],
-    [WORKSPACE_ID, -1],
-    [WORKSPACE_ID, 1.5],
-    [WORKSPACE_ID, 9_007_199_254_740_992],
-    [WORKSPACE_ID, "1"],
-  ])("rejects (%s, %s)", (workspaceId, gadgetId) => {
-    expect(() => parseGatekeeperAppWorkspaceTarget(workspaceId, gadgetId)).toThrow(
-      "Invalid gatekeeper app workspace target",
+    [THREAD_ID.toUpperCase(), undefined],
+    [`${THREAD_ID}a`, undefined],
+    [THREAD_ID, -1],
+    [THREAD_ID, 1.5],
+    [THREAD_ID, 9_007_199_254_740_992],
+    [THREAD_ID, "1"],
+  ])("rejects (%s, %s)", (threadId, gadgetId) => {
+    expect(() => parseGatekeeperAppThreadTarget(threadId, gadgetId)).toThrow(
+      "Invalid gatekeeper app thread target",
     );
   });
 });

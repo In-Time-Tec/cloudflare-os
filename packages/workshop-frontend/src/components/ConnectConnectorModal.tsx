@@ -324,7 +324,7 @@ export default function ConnectConnectorModal({
                     Gatekeeper sits between {vendorDescription.displayName} and your Gadgets.
                   </span>{' '}
                   <span className="text-kumo-subtle">
-                    Each Gadget only sees the resources you connect. If the workspace is shared,
+                    Each Gadget only sees the resources you connect. If the thread is shared,
                     Gatekeeper verifies other users have the required permissions before they can
                     access those resources.
                   </span>

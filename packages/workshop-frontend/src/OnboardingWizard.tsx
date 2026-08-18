@@ -701,7 +701,7 @@ const SHOWCASE_FEATURES: ShowcaseFeature[] = [
     iconBg: 'bg-compute-200',
     title: 'Collaborate in real time',
     description:
-      'Share a workspace with teammates and work on it together, live.',
+      'Share a thread with teammates and work on it together, live.',
   },
   {
     icon: Key,

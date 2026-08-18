@@ -71,14 +71,14 @@ export function isCompactionTurn(messages: AiChatMessage[]): boolean {
 }
 
 /**
- * A message that begins an agent turn: the user or a gadget prompted, a callback or nudge arrived,
+ * A message that begins an agent turn: the user or a artifact prompted, a callback or nudge arrived,
  * or an accepted connection resumed the agent. Each produces a `user` model message, so cutting
  * here keeps the retained messages from opening mid-turn. protectRetainedReverts may still lower
  * the cut past one of these; the summary then stands in for the turn's opening.
  */
 export function startsAgentTurn(message: AiChatMessage): boolean {
   switch (message.type) {
-    case "message": return message.author.type === "user" || message.author.type === "gadget";
+    case "message": return message.author.type === "user" || message.author.type === "artifact";
     case "agentCallback": case "agentNudge": return true;
     default: return false;
   }
@@ -86,7 +86,7 @@ export function startsAgentTurn(message: AiChatMessage): boolean {
 
 /**
  * One batch of code changes, addressed by the chat sequence that recorded it. `update` is absent for
- * a batch that records only gadget creations or binding additions.
+ * a batch that records only artifact creations or binding additions.
  */
 export type ChangeBatch = {sequence: number, update?: Uint8Array};
 
@@ -293,8 +293,8 @@ export function buildCompactionState(
       for (let call of message.toolCalls ?? []) {
         observedCodeVersion ??= call.observedCodeVersion;
         if (call.error) continue;
-        if (call.toolName === "createGadget" && call.output !== undefined) {
-          chatBindings.set(call.input.bindingName, {type: "workpiece", id: call.output.gadgetId});
+        if (call.toolName === "createArtifact" && call.output !== undefined) {
+          chatBindings.set(call.input.bindingName, {type: "workpiece", id: call.output.artifactId});
         }
       }
     } else if (message.type === "agentCallback") {
@@ -304,9 +304,9 @@ export function buildCompactionState(
       } while (chatBindings.has(name));
       chatBindings.set(name, {type: "value", messageSequence: message.sequence});
     } else if (message.type === "changes") {
-      for (let {gadgetId, bindingName} of message.createdGadgets ?? []) {
+      for (let {artifactId, bindingName} of message.createdArtifacts ?? []) {
         if (!chatBindings.has(bindingName)) {
-          chatBindings.set(bindingName, {type: "workpiece", id: gadgetId});
+          chatBindings.set(bindingName, {type: "workpiece", id: artifactId});
         }
       }
       observedCodeVersion ??= message.observedCodeVersion;

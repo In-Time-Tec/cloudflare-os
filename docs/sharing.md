@@ -3,7 +3,7 @@
 Gadgets supports sharing gadgets with other users. There are two sharing mechanisms:
 
 1. **Collaborators** -- granting other users direct access to a gadget, so they can work on it alongside the owner. (Covered in this file.)
-2. **Blueprints** -- sharing a snapshot of a gadget's source code, so others can create independent gadgets from it. (Documented elsewhere.)
+2. **Templates** -- sharing a snapshot of a gadget's source code, so others can create independent gadgets from it. (Documented elsewhere.)
 
 This document describes the collaborator system.
 

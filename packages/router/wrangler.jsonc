@@ -24,8 +24,8 @@
     "run_worker_first": [
       "/api",
       "/api/*",
-      "/blueprint-screenshot",
-      "/blueprint-screenshot/*",
+      "/template-screenshot",
+      "/template-screenshot/*",
       "/gatekeeper/*"
     ]
   },

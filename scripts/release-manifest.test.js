@@ -98,11 +98,11 @@ test("worker entries carry the deploy contract", () => {
   // Backend: provisioned resources are placeholders; gatekeeper calls use GatekeeperVendor.
   const backend = workers["workshop-backend"];
   assert.deepEqual(
-      backend.bindings.find((b) => b.name === "BLUEPRINTS"),
-      { type: "kv_namespace", name: "BLUEPRINTS", namespace_id: "$KV_BLUEPRINTS_ID" });
+      backend.bindings.find((b) => b.name === "TEMPLATES"),
+      { type: "kv_namespace", name: "TEMPLATES", namespace_id: "$KV_TEMPLATES_ID" });
   assert.deepEqual(
-      backend.bindings.find((b) => b.name === "BLUEPRINT_CONTENT"),
-      { type: "r2_bucket", name: "BLUEPRINT_CONTENT", bucket_name: "$R2_BLUEPRINT_CONTENT_NAME" });
+      backend.bindings.find((b) => b.name === "TEMPLATE_CONTENT"),
+      { type: "r2_bucket", name: "TEMPLATE_CONTENT", bucket_name: "$R2_TEMPLATE_CONTENT_NAME" });
   assert.deepEqual(
       backend.bindings.find((b) => b.name === "LOADER"),
       { type: "worker_loader", name: "LOADER" });

@@ -1,0 +1,340 @@
+import { Link } from '@tanstack/react-router'
+import { PendingIcon, useLinkPending } from './PendingIcon'
+import {
+  Blueprint as BlueprintIcon,
+  Clock,
+  Compass,
+  DotsThreeVertical,
+  MagnifyingGlass,
+  Star,
+  Trash,
+  UploadSimple,
+} from '@phosphor-icons/react'
+import { useCallback, useMemo, useRef, useState, type ChangeEvent, type RefObject } from 'react'
+import { DropdownMenu, useKumoToastManager } from '@cloudflare/kumo'
+import { useAuthenticatedApi } from '../AuthContext'
+import { useQueryClient } from '@tanstack/react-query'
+import { useLibraryTemplates, useOwnTemplates } from '../query/hooks'
+import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './menuStyles'
+
+// A unified row item, merged from the user's published templates (`listOwnTemplates`) and their
+// library (`listLibraryTemplates`). Mirrors the sidebar's SidebarTemplateItem but adds the bits
+// the full-page list shows (description, timestamp) and tracks whether the user owns it.
+type TemplateItem = {
+  id: string
+  title: string
+  description: string
+  recency: number
+  pinned: boolean
+  inLibrary: boolean
+  isOwn: boolean
+}
+
+// Chrome shared by the page's secondary actions. `w-full` + `justify-center` are what let a pair of
+// these sit in a 2-column grid and come out the same width whatever their labels say.
+const ACTION_BUTTON =
+  'press inline-flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-kumo-line bg-kumo-base px-3.5 text-[13px] font-medium tracking-[-0.25px] text-kumo-default transition-colors hover:bg-kumo-tint disabled:cursor-default disabled:opacity-50'
+
+function formatRelativeTime(date: Date): string {
+  const diff = Date.now() - date.getTime()
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+function sortItems(items: TemplateItem[]): TemplateItem[] {
+  return items.toSorted((a, b) => {
+    if (a.pinned && !b.pinned) return -1
+    if (!a.pinned && b.pinned) return 1
+    return b.recency - a.recency
+  })
+}
+
+function TemplateRow({
+  item,
+  onTogglePin,
+  onRemoveFromLibrary,
+}: {
+  item: TemplateItem
+  onTogglePin: (b: TemplateItem) => void
+  onRemoveFromLibrary: (b: TemplateItem) => void
+}) {
+  const pending = useLinkPending({ to: '/template/$id', params: { id: item.id } })
+  return (
+    <Link
+      to="/template/$id"
+      params={{ id: item.id }}
+      aria-busy={pending}
+      className="group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint"
+    >
+      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-kumo-fill text-kumo-subtle">
+        <PendingIcon pending={pending} size={20}>
+          <BlueprintIcon size={16} weight="regular" />
+        </PendingIcon>
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          {item.pinned && <Star size={12} weight="fill" className="flex-shrink-0 text-kumo-brand" />}
+          <h3 className="truncate text-sm font-medium text-kumo-default">
+            {item.title || 'Untitled template'}
+          </h3>
+        </div>
+        {item.description && (
+          <p className="mt-0.5 truncate text-xs text-kumo-subtle">{item.description}</p>
+        )}
+      </div>
+
+      <span className="hidden flex-shrink-0 items-center gap-1 text-xs text-kumo-inactive lg:flex">
+        <Clock size={10} />
+        {formatRelativeTime(new Date(item.recency))}
+      </span>
+
+      {/* Inside the row's <Link>: stopPropagation blocks the Link's SPA handler, so preventDefault
+          is needed to stop the native <a> from navigating. */}
+      <div onClick={(e) => { e.stopPropagation(); e.preventDefault() }}>
+        <DropdownMenu>
+          <DropdownMenu.Trigger
+            render={
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-kumo-subtle transition-colors hover:bg-kumo-fill hover:text-kumo-default focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+              >
+                <DotsThreeVertical size={16} />
+              </button>
+            }
+          />
+          <DropdownMenu.Content className={MENU_CONTENT}>
+            <DropdownMenu.Item onClick={() => onTogglePin(item)} className={MENU_ITEM}>
+              <Star size={13} className="mr-2" weight={item.pinned ? 'fill' : 'regular'} />
+              {item.pinned ? 'Unfavorite' : 'Favorite'}
+            </DropdownMenu.Item>
+            {item.inLibrary && (
+              <DropdownMenu.Item variant="danger" onClick={() => onRemoveFromLibrary(item)} className={MENU_ITEM_DANGER}>
+                <Trash size={13} className="mr-2" />
+                Remove from library
+              </DropdownMenu.Item>
+            )}
+          </DropdownMenu.Content>
+        </DropdownMenu>
+      </div>
+    </Link>
+  )
+}
+
+export default function TemplateList({
+  hideToolbarActions = false,
+  uploadInputRef: uploadInputRefProp,
+}: {
+  hideToolbarActions?: boolean
+  uploadInputRef?: RefObject<HTMLInputElement | null>
+} = {}) {
+  const { authenticatedApi } = useAuthenticatedApi()
+  const toasts = useKumoToastManager()
+
+  const queryClient = useQueryClient()
+  const { data: own = [], isLoading: loading, isError: loadError } = useOwnTemplates()
+  const { data: library = [] } = useLibraryTemplates()
+  const items = useMemo(() => {
+    const map = new Map<string, TemplateItem>()
+    const ensure = (id: string): TemplateItem => {
+      let it = map.get(id)
+      if (!it) {
+        it = { id, title: 'Untitled template', description: '', recency: 0, pinned: false, inLibrary: false, isOwn: false }
+        map.set(id, it)
+      }
+      return it
+    }
+    for (const b of library) {
+      const it = ensure(b.id)
+      it.title = b.metadata.title || it.title
+      it.description = b.metadata.description || it.description
+      it.pinned ||= b.pinned === true
+      it.recency = Math.max(it.recency, b.addedAt.getTime())
+      it.inLibrary = true
+    }
+    for (const b of own) {
+      const it = ensure(b.id)
+      it.title = b.title || it.title
+      it.description = b.description || it.description
+      it.pinned ||= b.pinned === true
+      it.recency = Math.max(it.recency, b.lastUpdated.getTime())
+      it.isOwn = true
+    }
+    return sortItems(Array.from(map.values()))
+  }, [own, library])
+
+  const load = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['ownTemplates'] })
+    void queryClient.invalidateQueries({ queryKey: ['libraryTemplates'] })
+  }, [queryClient])
+
+  const [search, setSearch] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const internalUploadRef = useRef<HTMLInputElement>(null)
+  const uploadInputRef = uploadInputRefProp ?? internalUploadRef
+
+  // Import a `.template` archive exported from another Workshop instance, then refresh the list.
+  const handleTemplateSelected = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    // Clear immediately so re-picking the same file fires `change` again.
+    event.target.value = ''
+    if (!file) return
+    setUploading(true)
+    try {
+      await authenticatedApi.importTemplate(file.stream() as ReadableStream<Uint8Array>)
+      toasts.add({ title: 'Template uploaded', variant: 'success' })
+      load()
+    } catch (err) {
+      console.error('Failed to upload template:', err)
+      toasts.add({ title: 'Failed to upload template', variant: 'error' })
+    } finally {
+      setUploading(false)
+    }
+  }, [authenticatedApi, load, toasts])
+
+  // Overlapping setTemplatePinned calls have no ordering guarantee, so ignore clicks while
+  // one is in flight.
+  const pinsInFlight = useRef(new Set<string>())
+  const handleTogglePin = async (item: TemplateItem) => {
+    if (pinsInFlight.current.has(item.id)) return
+    pinsInFlight.current.add(item.id)
+    const nextPinned = !item.pinned
+    void load()
+    try {
+      await authenticatedApi.setTemplatePinned(item.id, nextPinned)
+    } catch (err) {
+      console.error('Failed to update template pin:', err)
+      void load()
+      toasts.add({ title: 'Failed to update favorite', variant: 'error' })
+    } finally {
+      pinsInFlight.current.delete(item.id)
+    }
+  }
+
+  const handleRemoveFromLibrary = async (item: TemplateItem) => {
+    try {
+      await authenticatedApi.removeTemplateFromLibrary(item.id)
+      // If the user also owns it, it stays in the list (just no longer in the library); otherwise
+      // it leaves the list entirely.
+      void load()
+      toasts.add({ title: 'Removed from library', variant: 'success' })
+    } catch (err) {
+      console.error('Failed to remove template from library:', err)
+      toasts.add({ title: 'Failed to remove template', variant: 'error' })
+    }
+  }
+
+  const filtered = items.filter((b) => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return b.title.toLowerCase().includes(q) || b.description.toLowerCase().includes(q)
+  })
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Hidden picker backing both Upload buttons. */}
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept=".template"
+        className="hidden"
+        onChange={handleTemplateSelected}
+      />
+
+      {/* Toolbar — search plus the page's actions. Hidden when the user has no templates, since
+          the empty state carries its own copies of the same two actions. */}
+      {!loading && items.length > 0 && (
+        <div className="mb-4 flex items-center gap-2 px-3">
+          <div className="relative flex-1">
+            <MagnifyingGlass size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-kumo-inactive" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search templates…"
+              className="h-9 w-full rounded-lg border border-kumo-line bg-kumo-base pl-9 pr-4 text-[13px] tracking-[-0.25px] text-kumo-default placeholder:text-kumo-inactive transition-[border-color,box-shadow] duration-150 ease-out focus:border-kumo-ring focus:outline-none focus:ring-[3px] focus:ring-kumo-ring/15"
+            />
+          </div>
+          {/* Grid, not flex: 1fr columns give the two buttons a matching width, where flex would
+              size each to its own label. */}
+          {!hideToolbarActions && (
+            <div className="grid shrink-0 grid-cols-2 gap-2">
+              <Link to="/explore" className={ACTION_BUTTON}>
+                <Compass size={14} />
+                Explore
+              </Link>
+              <button
+                type="button"
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={uploading}
+                title="Upload a .template archive"
+                className={ACTION_BUTTON}
+              >
+                <UploadSimple size={14} weight="bold" />
+                {uploading ? 'Uploading…' : 'Upload'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* List. Rows carry the px-3 inset; the scroll container has none so the scrollbar sits just
+          past the aligned content. */}
+      <div className="chat-panel flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pt-1">
+        {loading ? (
+          null
+        ) : loadError ? (
+          <div className="py-12 text-center text-sm">
+            <p className="text-kumo-danger">Something went wrong loading your templates.</p>
+            <button type="button" onClick={load} className="mt-1 text-kumo-brand underline">Try again</button>
+          </div>
+        ) : filtered.length === 0 ? (
+          search ? (
+            <div className="py-12 text-center text-sm text-kumo-inactive">No templates found</div>
+          ) : (
+            <div className="flex flex-col items-center gap-3 px-3 py-16 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-kumo-fill text-kumo-subtle">
+                <BlueprintIcon size={18} />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-kumo-default">No templates yet</p>
+                <p className="mt-1 text-[13px] leading-[18px] text-kumo-subtle">
+                  Publish a thread as a template, or add one from Explore.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Link to="/explore" className={ACTION_BUTTON}>
+                  <Compass size={14} />
+                  Explore templates
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => uploadInputRef.current?.click()}
+                  disabled={uploading}
+                  className={ACTION_BUTTON}
+                >
+                  <UploadSimple size={14} weight="bold" />
+                  {uploading ? 'Uploading…' : 'Upload .template'}
+                </button>
+              </div>
+            </div>
+          )
+        ) : (
+          filtered.map((item) => (
+            <TemplateRow
+              key={item.id}
+              item={item}
+              onTogglePin={handleTogglePin}
+              onRemoveFromLibrary={handleRemoveFromLibrary}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  )
+}

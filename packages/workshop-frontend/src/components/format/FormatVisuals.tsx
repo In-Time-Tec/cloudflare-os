@@ -1,6 +1,6 @@
 // The ways an output format is drawn:
 //
-//   <FormatGlyph>     bare icon             workspace tab, menus, pickers, command palette
+//   <FormatGlyph>     bare icon             thread tab, menus, pickers, command palette
 //   <FormatMiniature> icon on a small tile  chat cards
 //   <FormatTile>      icon on a tile        Outputs list rows
 //   <FormatThumbnail> wireframe drawing     Outputs grid cards
@@ -9,7 +9,7 @@
 // The wireframes are abstract: unlike a screenshot they look right before the output has any
 // content, which is when the user is deciding what to make.
 
-import type { BlueprintOutput } from '@gadgets/workshop-shared/api'
+import type { TemplateOutput } from '@gadgets/workshop-shared/api'
 import { PendingIcon } from '../PendingIcon'
 import { FORMAT_ICONS, formatOf, wireframeOf, type FormatWireframe } from './formats'
 
@@ -23,7 +23,7 @@ export function FormatGlyph({
   className,
   weight,
 }: {
-  output?: BlueprintOutput
+  output?: TemplateOutput
   size?: keyof typeof GLYPH_SIZES
   className?: string
   weight?: 'regular' | 'fill'
@@ -47,7 +47,7 @@ export function FormatTile({
   className = '',
   pending = false,
 }: {
-  output?: BlueprintOutput
+  output?: TemplateOutput
   size?: keyof typeof TILE_SIZES
   className?: string
   pending?: boolean
@@ -227,7 +227,7 @@ export function FormatThumbnail({
   output,
   className = '',
 }: {
-  output?: BlueprintOutput
+  output?: TemplateOutput
   className?: string
 }) {
   const Wireframe = WIREFRAMES[wireframeOf(output)]
@@ -252,7 +252,7 @@ const PREVIEW_HEIGHT = 150
  * A self-contained miniature of the Outputs card at any width, for showing the thumbnail itself
  * (the admin icon picker) rather than filling a card.
  */
-export function FormatPreview({ output, width = 120 }: { output?: BlueprintOutput; width?: number }) {
+export function FormatPreview({ output, width = 120 }: { output?: TemplateOutput; width?: number }) {
   const scale = width / PREVIEW_WIDTH
   return (
     <div
@@ -273,7 +273,7 @@ export function FormatPreview({ output, width = 120 }: { output?: BlueprintOutpu
  * The same drawing at card-inset scale, for places that need a small self-contained picture rather
  * than an absolutely-positioned backdrop (e.g. the chat "created app" card). Sized by its parent.
  */
-export function FormatMiniature({ output }: { output?: BlueprintOutput }) {
+export function FormatMiniature({ output }: { output?: TemplateOutput }) {
   const Wireframe = WIREFRAMES[wireframeOf(output)]
   return (
     <span

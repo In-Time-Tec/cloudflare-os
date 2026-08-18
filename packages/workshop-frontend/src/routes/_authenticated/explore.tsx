@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import BlueprintsPage from '../../BlueprintsPage'
+import TemplatesPage from '../../TemplatesPage'
 import { useDocumentTitle } from '../../useDocumentTitle'
 
 export const Route = createFileRoute('/_authenticated/explore')({
@@ -9,5 +9,5 @@ export const Route = createFileRoute('/_authenticated/explore')({
 function ExplorePage() {
   useDocumentTitle('Explore')
 
-  return <BlueprintsPage />
+  return <TemplatesPage />
 }

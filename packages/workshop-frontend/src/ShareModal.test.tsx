@@ -9,7 +9,7 @@ import type {
   AiChatAuthorInfo,
   AuthenticatedApi,
   CollaboratorRole,
-  GadgetMetadata,
+  ThreadMetadata,
   ObserverBindingNeed,
   Overseer,
   ShareLinkInfo,
@@ -70,8 +70,8 @@ vi.mock('./clipboard', () => ({ copyToClipboard: (text: string) => copyToClipboa
 
 import ShareModal from './ShareModal'
 
-const METADATA = { id: 'trip-planner', title: 'Trip planner' } as GadgetMetadata
-const WORKSPACE_URL = `${window.location.origin}/workspace/trip-planner`
+const METADATA = { id: 'trip-planner', title: 'Trip planner' } as ThreadMetadata
+const THREAD_URL = `${window.location.origin}/thread/trip-planner`
 
 const CURRENT_USER: AiChatAuthorInfo = { type: 'user', id: 'dan@cloudflare.com', name: 'Dan' }
 
@@ -195,23 +195,23 @@ describe('ShareModal', () => {
     return container
   }
 
-  it('reveals the workspace link to send after a direct invite', async () => {
+  it('reveals the thread link to send after a direct invite', async () => {
     const rendered = await render(fakeOverseer())
-    expect(rendered.textContent).not.toContain(WORKSPACE_URL)
+    expect(rendered.textContent).not.toContain(THREAD_URL)
 
     await invite(rendered, 'ada')
 
     expect(rendered.textContent).toContain('Added Ada')
-    expect(rendered.textContent).toContain(WORKSPACE_URL)
+    expect(rendered.textContent).toContain(THREAD_URL)
   })
 
-  it('copies the plain workspace link, never a share-link secret', async () => {
+  it('copies the plain thread link, never a share-link secret', async () => {
     const rendered = await render(fakeOverseer())
     await invite(rendered, 'ada')
 
     await click(button(rendered, 'Copy link'))
 
-    expect(copyToClipboard).toHaveBeenCalledWith(WORKSPACE_URL)
+    expect(copyToClipboard).toHaveBeenCalledWith(THREAD_URL)
     expect(rendered.textContent).toContain('Link copied')
   })
 
@@ -224,7 +224,7 @@ describe('ShareModal', () => {
     expect(rendered.textContent).toContain('Q3 planning')
     expect(rendered.textContent).not.toContain('Pipeline dashboard')
 
-    await click(roleOption(rendered, 'Workspace'))
+    await click(roleOption(rendered, 'Thread'))
 
     expect(rendered.textContent).toContain('Pipeline dashboard')
   })
@@ -240,7 +240,7 @@ describe('ShareModal', () => {
     expect(rendered.querySelector('#link-verification-heading')).toBeNull()
 
     const buildOptions = [...rendered.querySelectorAll<HTMLButtonElement>('[data-testid="role-option"]')]
-      .filter(option => option.textContent?.startsWith('Workspace'))
+      .filter(option => option.textContent?.startsWith('Thread'))
     expect(buildOptions).toHaveLength(2)
     await click(buildOptions[1])
 

@@ -2,9 +2,9 @@ import { Link } from '@tanstack/react-router'
 import { PendingIcon, useLinkPending } from './PendingIcon'
 import { Clock, ArrowRight } from '@phosphor-icons/react'
 import { useMemo } from 'react'
-import { useGadgets } from '../query/hooks'
+import { useThreads } from '../query/hooks'
 import { asTime } from '../query/time'
-import { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
+import { ThreadMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
 
 // A simple deterministic gradient based on the gadget ID
 function getGradient(id: string): string {
@@ -34,13 +34,13 @@ function formatRelativeTime(date: Date | string | number): string {
   return `${days}d ago`
 }
 
-function AppRow({ gadget }: { gadget: GadgetMetadataWithTimestamps }) {
+function AppRow({ gadget }: { gadget: ThreadMetadataWithTimestamps }) {
   const gradient = getGradient(gadget.id)
-  const pending = useLinkPending({ to: '/workspace/$id', params: { id: gadget.id } })
+  const pending = useLinkPending({ to: '/thread/$id', params: { id: gadget.id } })
 
   return (
     <Link
-      to="/workspace/$id"
+      to="/thread/$id"
       params={{ id: gadget.id }}
       aria-busy={pending}
       className="group flex items-center gap-4 p-3 rounded-xl border border-kumo-line bg-kumo-base hover:border-kumo-fill transition-all cursor-pointer"
@@ -56,7 +56,7 @@ function AppRow({ gadget }: { gadget: GadgetMetadataWithTimestamps }) {
       {/* Info */}
       <div className="flex-1 min-w-0">
         <h3 className="text-sm font-medium text-kumo-default truncate">
-          {gadget.title || 'Untitled Workspace'}
+          {gadget.title || 'Untitled Thread'}
         </h3>
         {gadget.owner && (
           <p className="text-xs text-kumo-subtle truncate mt-0.5">
@@ -78,7 +78,7 @@ function AppRow({ gadget }: { gadget: GadgetMetadataWithTimestamps }) {
 }
 
 export default function RecentApps() {
-  const { data: rawGadgets, isError: loadError } = useGadgets()
+  const { data: rawGadgets, isError: loadError } = useThreads()
   const gadgets = useMemo(
     () => [...(rawGadgets ?? [])].toSorted((a, b) => asTime(b.lastActive) - asTime(a.lastActive)).slice(0, 4),
     [rawGadgets])
@@ -91,7 +91,7 @@ export default function RecentApps() {
     return (
       <section className="w-full max-w-2xl mx-auto">
         <div className="text-center py-8 text-sm text-kumo-danger">
-          Unable to load your workspaces. Check your connection and try refreshing.
+          Unable to load your threads. Check your connection and try refreshing.
         </div>
       </section>
     )
@@ -101,7 +101,7 @@ export default function RecentApps() {
     return (
       <section className="w-full max-w-2xl mx-auto">
         <div className="text-center py-8 text-kumo-inactive text-sm">
-          No workspaces yet. Create your first one above!
+          No threads yet. Create your first one above!
         </div>
       </section>
     )
@@ -111,7 +111,7 @@ export default function RecentApps() {
     <section className="w-full max-w-2xl mx-auto">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-medium text-kumo-default">
-          Recent workspaces
+          Recent threads
         </h2>
         <Link
           to="/"
