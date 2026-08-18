@@ -7,7 +7,7 @@
     "dev": "echo \"run 'pnpm dev-server' in the root directory instead\" >&2 && exit 1",
     "deploy": "wrangler deploy",
     "build:worker": "node build-browser-runtime.mjs && node scripts/build-orb-harness.mjs && pnpm exec capnweb-validate build --out .wrangler/validate",
-    "build": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && node scripts/build-orb-harness.mjs && tsc",
+    "build": "rm -rf .wrangler/validate && node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && node scripts/build-orb-harness.mjs && tsc",
     "clean": "rm -rf dist",
     "test": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && node scripts/build-orb-harness.mjs && vitest run && vitest run --config vitest.integration.config.ts",
     "test:integration": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && node scripts/build-orb-harness.mjs && vitest run --config vitest.integration.config.ts",
