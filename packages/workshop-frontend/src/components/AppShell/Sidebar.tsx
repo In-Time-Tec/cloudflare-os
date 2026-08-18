@@ -8,7 +8,6 @@ import {
   House,
   MagnifyingGlass,
   SidebarSimple,
-  SquaresFour,
   Stack,
 } from '@phosphor-icons/react'
 import { useSiteName } from '../../ServerConfigContext'
@@ -47,9 +46,9 @@ export default function Sidebar({
   const homePending = useLinkPending({ to: '/' })
   const gatekeeperApps = useGatekeeperApps()
   const brand = (
-    <PendingIcon pending={homePending} size={20}>
-      <SiteLogo size={20} className="shrink-0">
-        <Hexagon size={20} weight="bold" className="text-kumo-brand shrink-0" />
+    <PendingIcon pending={homePending} size={16}>
+      <SiteLogo size={16} className="shrink-0">
+        <Hexagon size={16} weight="bold" className="text-kumo-brand shrink-0" />
       </SiteLogo>
     </PendingIcon>
   )
@@ -67,8 +66,8 @@ export default function Sidebar({
     >
       <div
         className={[
-          'flex h-14 shrink-0 items-center border-b border-kumo-line',
-          collapsed ? 'justify-center px-1.5' : 'justify-between gap-2 px-3',
+          'flex h-9 shrink-0 items-center border-b border-kumo-line',
+          collapsed ? 'justify-center px-1.5' : 'justify-between gap-1.5 px-2.5',
         ].join(' ')}
       >
         {collapsed ? (
@@ -93,9 +92,9 @@ export default function Sidebar({
           </div>
         ) : (
           <>
-            <Link to="/" aria-label={siteName} aria-busy={homePending} className="flex min-w-0 items-center gap-2">
+            <Link to="/" aria-label={siteName} aria-busy={homePending} className="flex min-w-0 items-center gap-1.5">
               {brand}
-              <span className="truncate text-[14px] leading-5 font-semibold tracking-[-0.25px] text-kumo-default">
+              <span className="truncate text-sm font-medium text-kumo-default">
                 {siteName}
               </span>
             </Link>
@@ -146,12 +145,6 @@ export default function Sidebar({
               to="/"
               label="Home"
               icon={<House size={14} weight="regular" />}
-              collapsed={collapsed}
-            />
-            <SidebarItem
-              to="/threads"
-              label="Threads"
-              icon={<SquaresFour size={14} weight="regular" />}
               collapsed={collapsed}
             />
             <SidebarItem
@@ -224,8 +217,8 @@ export default function Sidebar({
             under the nav rather than below the communications sections. */}
         <div className="mt-1 pb-2">
           <SidebarFavorites collapsed={collapsed} />
-          <SidebarConversations collapsed={collapsed} />
           <SidebarRecentThreads collapsed={collapsed} />
+          <SidebarConversations collapsed={collapsed} />
         </div>
         </SidebarScrollRegion>
       </SidebarThreadsProvider>

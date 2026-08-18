@@ -1180,7 +1180,7 @@ export default function ThreadEditor() {
 
   // ── back ──────────────────────────────────────────────────────────────────────
   const handleGoToThreads = () => {
-    navigate({ to: '/threads' })
+    navigate({ to: '/' })
   }
 
   // ── delete ────────────────────────────────────────────────────────────────────

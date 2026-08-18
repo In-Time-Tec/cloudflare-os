@@ -52,12 +52,12 @@ export default function SidebarGadgetRow({
   const title = gadget.title || 'Untitled thread'
   const rowClass = hoverRowClassName({
     hasActions: !collapsed && !renaming,
-    className: `h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
+    className: `h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-sm font-medium leading-5 tracking-normal text-kumo-default${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
   })
   const activeClass = hoverRowClassName({
     active: true,
     hasActions: !collapsed && !renaming,
-    className: `h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-strong${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
+    className: `h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-sm font-medium leading-5 tracking-normal text-kumo-strong${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
   })
 
   return (
@@ -96,13 +96,13 @@ export default function SidebarGadgetRow({
                   if (event.key === 'Enter') commit()
                   if (event.key === 'Escape') setRenaming(false)
                 }}
-                className="min-w-0 flex-1 border-b border-kumo-brand bg-transparent text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default outline-none"
+                className="min-w-0 flex-1 border-b border-kumo-brand bg-transparent text-sm font-medium leading-5 tracking-normal text-kumo-default outline-none"
                 onClick={(event) => event.preventDefault()}
                 onDoubleClick={(event) => event.preventDefault()}
               />
             ) : (
               <HoverRowTrail>
-                <HoverFadeLabel className="text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default">
+                <HoverFadeLabel className="text-sm font-medium leading-5 tracking-normal text-kumo-default">
                   {title}
                 </HoverFadeLabel>
                 <HoverActionBar

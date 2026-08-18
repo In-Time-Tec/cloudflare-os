@@ -8,7 +8,6 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { Link } from '@tanstack/react-router'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import type { RpcStub } from 'capnweb'
 import {
@@ -22,9 +21,6 @@ import { useThreadMutations } from '../../query/useThreadMutations'
 import ShareModal from '../../ShareModal'
 import DeleteConfirmationDialog from '../DeleteConfirmationDialog'
 import SidebarGadgetRow from './SidebarGadgetRow'
-
-// Cap on items shown in the Recent list before the user clicks through to /threads.
-const RECENT_INITIAL_LIMIT = 6
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shape of the threads state shared between the rail's pinned tools (search) and the scrolling
@@ -273,8 +269,6 @@ export function SidebarRecentThreads({ collapsed = false }: { collapsed?: boolea
     )
   }
 
-  const recentShown = recent.slice(0, RECENT_INITIAL_LIMIT)
-
   return (
     <div className="flex flex-col pb-3">
       <SidebarSection
@@ -284,27 +278,19 @@ export function SidebarRecentThreads({ collapsed = false }: { collapsed?: boolea
         onToggle={() => setRecentOpen((o) => !o)}
       >
         {recent.length > 0 ? (
-          <>
-            <div className="flex flex-col">
-              {recentShown.map((g) => (
-                <ThreadRowWithChildren
-                  key={g.id}
-                  gadget={g}
-                  childrenByParent={childrenByParent}
-                  onTogglePin={onTogglePin}
-                  onRename={onRename}
-                  onShare={onShare}
-                  onDelete={onDelete}
-                />
-              ))}
-            </div>
-            <Link
-              to="/threads"
-              className="mt-0.5 flex h-7 items-center px-2.5 text-[12px] tracking-[-0.2px] text-kumo-inactive transition-colors hover:text-kumo-default"
-            >
-              Show all
-            </Link>
-          </>
+          <div className="flex flex-col">
+            {recent.map((g) => (
+              <ThreadRowWithChildren
+                key={g.id}
+                gadget={g}
+                childrenByParent={childrenByParent}
+                onTogglePin={onTogglePin}
+                onRename={onRename}
+                onShare={onShare}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
         ) : null}
       </SidebarSection>
     </div>
@@ -381,7 +367,7 @@ function SidebarSection({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex h-6 w-full cursor-pointer items-center gap-2 px-1.5 text-[11px] font-medium tracking-[-0.1px] text-kumo-inactive transition-colors hover:text-kumo-subtle"
+        className="flex h-6 w-full cursor-pointer items-center gap-2 px-1.5 text-[10px] font-medium text-kumo-inactive transition-colors hover:text-kumo-subtle"
       >
         <span className="shrink-0">{label}</span>
         <span className="h-px min-w-2 flex-1 bg-kumo-line" aria-hidden="true" />

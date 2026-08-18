@@ -197,12 +197,6 @@ export default function CommandPalette({
       },
       ...formatCommands,
       {
-        id: 'nav-threads',
-        label: 'Threads',
-        icon: <SquaresFour size={15} />,
-        run: () => navigate({ to: '/threads' }),
-      },
-      {
         id: 'nav-templates',
         label: 'Templates',
         icon: <BlueprintIcon size={15} />,

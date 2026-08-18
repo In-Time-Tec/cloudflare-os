@@ -20,8 +20,8 @@ import {
 } from './sidebarHidden'
 
 const SECTION_HEADER =
-  'flex h-6 w-full cursor-pointer items-center gap-2 px-1.5 text-[11px] font-medium ' +
-  'tracking-[-0.1px] text-kumo-inactive transition-colors hover:text-kumo-subtle'
+  'flex h-6 w-full cursor-pointer items-center gap-2 px-1.5 text-[10px] font-medium ' +
+  'text-kumo-inactive transition-colors hover:text-kumo-subtle'
 
 const INITIAL_LIMIT = 6
 

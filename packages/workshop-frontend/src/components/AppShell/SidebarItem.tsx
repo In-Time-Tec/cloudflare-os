@@ -51,7 +51,7 @@ export default function SidebarItem({
       title={collapsed ? label : undefined}
       aria-busy={pending}
       className={[
-        'group relative flex h-7 items-center rounded-md text-[12.5px] leading-[18px] tracking-[-0.1px] transition-colors',
+        'group relative flex h-7 items-center rounded-md text-sm leading-5 tracking-normal transition-colors',
         collapsed ? 'justify-center' : 'gap-1.5 px-2.5',
         isActive
           ? 'bg-kumo-fill font-medium text-kumo-strong'
