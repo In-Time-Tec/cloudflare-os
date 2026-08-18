@@ -50,6 +50,8 @@ import { useThreadOpen } from './useThreadOpen'
 import { takeThreadBoot } from './query/thread-session'
 import { reportIssue } from './errorReporting'
 import ArtifactExportMenu from './ArtifactExportMenu'
+import { useRowPreview } from './components/AppShell/SidebarHoverRow'
+import type { SidebarHoverPreview } from './components/AppShell/sidebarHover'
 
 const NO_GADGETS: ReadonlySet<WorkpieceId> = new Set()
 
@@ -152,6 +154,30 @@ function formatHeaderCost(cost: number) {
   if (cost === 0) return '$0'
   if (cost < 0.01) return '<$0.01'
   return `$${cost.toFixed(2)}`
+}
+
+function usagePreview(cost: number, tokens?: number): SidebarHoverPreview {
+  return {
+    title: 'Usage',
+    meta: tokens != null ? `${tokens.toLocaleString()} tokens` : undefined,
+    footer: `$${cost.toFixed(4)}`,
+  }
+}
+
+function HeaderUsage({ cost, tokens }: { cost: number; tokens?: number }) {
+  const preview = useMemo(() => usagePreview(cost, tokens), [cost, tokens])
+  const { rowRef, previewBind } = useRowPreview(preview, { placement: 'below' })
+  return (
+    <button
+      type="button"
+      ref={(el) => { rowRef.current = el }}
+      className="ml-3 mr-2 text-[12px] leading-4 font-normal tracking-[-0.2px] text-kumo-subtle"
+      aria-label="Usage"
+      {...previewBind}
+    >
+      {formatHeaderCost(cost)}
+    </button>
+  )
 }
 
 // The first tab is named after what the selected workpiece is ("Document" for a gadget built from
@@ -447,6 +473,8 @@ export default function ThreadEditor() {
   const isEditingTitleRef = useRef(false)
   isEditingTitleRef.current = isEditingTitle
   const [titleInput, setTitleInput] = useState('')
+  const [chatUsage, setChatUsage] = useState<{ tokens?: number; cost?: number }>({})
+  useEffect(() => { setChatUsage({}) }, [id])
 
   const {
     overseer,
@@ -1374,9 +1402,7 @@ export default function ThreadEditor() {
           />
 
           {metadata.totalCost != null && (
-            <span className="ml-3 mr-2 text-[12px] leading-4 font-normal tracking-[-0.2px] text-kumo-subtle">
-              {formatHeaderCost(metadata.totalCost)}
-            </span>
+            <HeaderUsage cost={metadata.totalCost} tokens={chatUsage.tokens} />
           )}
 
           <WorkshopIconButton
@@ -1468,6 +1494,7 @@ export default function ThreadEditor() {
                   onSelectedChatHasProposedChangesChange={setSelectedChatHasProposedChanges}
                   onOpenGadget={handleSelectWorkpiece}
                   outputOfWorkpiece={outputOfWorkpiece}
+                  onUsageChange={setChatUsage}
                 />
               </div>
 

@@ -70,15 +70,19 @@ export function HoverActionBar({ actions }: { actions: SidebarHoverAction[] }) {
   )
 }
 
-function PreviewCard({ preview, top, left }: {
+export type PreviewPlacement = 'beside' | 'below'
+
+function PreviewCard({ preview, top, left, placement }: {
   preview: SidebarHoverPreview
   top: number
   left: number
+  placement: PreviewPlacement
 }) {
   return (
     <div
       role="tooltip"
       data-sidebar-preview=""
+      data-placement={placement}
       className="sidebar-hover-preview themed-floating-shadow pointer-events-none fixed z-[1000] w-[280px] rounded-xl border border-kumo-line bg-kumo-base px-3.5 py-3"
       style={{ top, left }}
     >
@@ -108,17 +112,24 @@ type ShownPreview = {
   preview: SidebarHoverPreview
   top: number
   left: number
+  placement: PreviewPlacement
 }
 
 type PreviewController = {
-  show(preview: SidebarHoverPreview, row: HTMLElement): void
+  show(preview: SidebarHoverPreview, row: HTMLElement, placement?: PreviewPlacement): void
   hide(): void
 }
 
 const PreviewContext = createContext<PreviewController | null>(null)
 
-function previewBox(row: HTMLElement): { top: number; left: number } {
+function previewBox(row: HTMLElement, placement: PreviewPlacement): { top: number; left: number } {
   const rect = row.getBoundingClientRect()
+  if (placement === 'below') {
+    return {
+      left: Math.min(Math.max(8, rect.right - 280), window.innerWidth - 288),
+      top: Math.min(rect.bottom + 8, Math.max(8, window.innerHeight - 168)),
+    }
+  }
   return {
     left: Math.min(rect.right + 8, Math.max(8, window.innerWidth - 296)),
     top: Math.max(8, Math.min(rect.top, window.innerHeight - 168)),
@@ -142,7 +153,7 @@ export function SidebarHoverPreviewProvider({ children }: { children: ReactNode 
     setShown(null)
   }, [clearTimers])
 
-  const show = useCallback((preview: SidebarHoverPreview, row: HTMLElement) => {
+  const show = useCallback((preview: SidebarHoverPreview, row: HTMLElement, placement: PreviewPlacement = 'beside') => {
     const hover = window.matchMedia?.('(hover: hover)')
     const coarse = window.matchMedia?.('(pointer: coarse)')
     if (hover?.matches === false && coarse?.matches === true) return
@@ -150,7 +161,7 @@ export function SidebarHoverPreviewProvider({ children }: { children: ReactNode 
     window.clearTimeout(showTimerRef.current)
     const reveal = () => {
       openRef.current = true
-      setShown({ preview, ...previewBox(row) })
+      setShown({ preview, placement, ...previewBox(row, placement) })
     }
     if (openRef.current) reveal()
     else showTimerRef.current = window.setTimeout(reveal, SIDEBAR_PREVIEW_DELAY_MS)
@@ -176,13 +187,24 @@ export function SidebarHoverPreviewProvider({ children }: { children: ReactNode 
     <PreviewContext.Provider value={controller}>
       {children}
       {shown
-        ? createPortal(<PreviewCard preview={shown.preview} top={shown.top} left={shown.left} />, document.body)
+        ? createPortal(
+            <PreviewCard
+              preview={shown.preview}
+              top={shown.top}
+              left={shown.left}
+              placement={shown.placement}
+            />,
+            document.body,
+          )
         : null}
     </PreviewContext.Provider>
   )
 }
 
-export function useRowPreview(preview: SidebarHoverPreview | undefined): {
+export function useRowPreview(
+  preview: SidebarHoverPreview | undefined,
+  options?: { placement?: PreviewPlacement },
+): {
   rowRef: RefObject<HTMLElement | null>
   previewBind: {
     onMouseEnter(): void
@@ -196,17 +218,25 @@ export function useRowPreview(preview: SidebarHoverPreview | undefined): {
   const controller = useContext(PreviewContext)
   const previewRef = useRef(preview)
   previewRef.current = preview
+  const placement = options?.placement ?? 'beside'
+  const hoveringRef = useRef(false)
 
   const show = useCallback(() => {
     const next = previewRef.current
     const row = rowRef.current
     if (!next || !row) return
-    controller?.show(next, row)
-  }, [controller])
+    hoveringRef.current = true
+    controller?.show(next, row, placement)
+  }, [controller, placement])
 
   const hide = useCallback(() => {
+    hoveringRef.current = false
     controller?.hide()
   }, [controller])
+
+  useEffect(() => {
+    if (hoveringRef.current) show()
+  }, [preview, show])
 
   return {
     rowRef,

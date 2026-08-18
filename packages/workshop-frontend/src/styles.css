@@ -876,6 +876,18 @@ body:has([role="dialog"], [role="alertdialog"]) .app-header {
   }
 }
 
+.sidebar-hover-preview[data-placement="below"] {
+  transform: translateY(-6px);
+  animation-name: sidebar-hover-preview-in-below;
+}
+
+@keyframes sidebar-hover-preview-in-below {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sidebar-hover-actions,
   .sidebar-hover-preview {

@@ -1772,7 +1772,6 @@ export const ChatInput = ({
   onStop,
   showThinkingTraces = true,
   onToggleThinkingTraces,
-  usage,
   docked = false,
 }: {
   createCapsuleGatekeeper: (
@@ -1826,7 +1825,6 @@ export const ChatInput = ({
   onStop?: () => void;
   showThinkingTraces?: boolean;
   onToggleThinkingTraces?: () => void;
-  usage?: { tokens?: number; cost?: number };
   docked?: boolean;
   /** Show the "Pre-approve actions" menu item (only when there are uncovered candidates). */
   /** Open the pre-approval dialog (owned by the parent). */
@@ -2849,8 +2847,6 @@ export const ChatInput = ({
   const selectedModelLabel = selectedModel == null
     ? "No agent"
     : selectedModelInfo?.name ?? selectedModel;
-  const hasUsage = usage?.tokens != null || usage?.cost != null;
-
   const hasReadyAttachment = pendingAttachments.some(
     (attachment) => attachment.uploadState === "ready" && attachment.ref,
   );
@@ -2867,7 +2863,7 @@ export const ChatInput = ({
     // captured-log floating chip with z-10, the textarea/mirror with z-[1])
     // so they can't paint on top of body-level portaled popovers like the
     // model picker dropdown opening above the composer.
-    <div className={`relative isolate ${docked ? "" : hasUsage ? "px-4 pb-4 pt-8" : "px-4 py-4"} ${styles.chatInputRoot}`}>
+    <div className={`relative isolate ${docked ? "" : "px-4 py-4"} ${styles.chatInputRoot}`}>
       <input
         ref={attachmentInputRef}
         type="file"
@@ -2932,26 +2928,6 @@ export const ChatInput = ({
         onDragLeave={handleAttachmentDragLeave}
         onDrop={handleAttachmentDrop}
       >
-        {hasUsage && (
-          <div
-            className={`absolute right-4 top-0 z-10 flex -translate-y-[calc(100%-1px)] items-center gap-3 rounded-t-lg border border-b-0 border-kumo-line px-2.5 py-1 font-mono text-[11px] leading-4 text-kumo-inactive ${
-              draftUpdateBanner ? "bg-kumo-elevated" : docked ? "bg-kumo-base" : "bg-kumo-control"
-            }`}
-          >
-            {usage?.tokens != null && (
-              <span>{usage.tokens.toLocaleString()} tokens</span>
-            )}
-            {usage?.cost != null && (
-              <span>${usage.cost.toFixed(4)}</span>
-            )}
-            <span
-              aria-hidden
-              className={`pointer-events-none absolute inset-x-px -bottom-px h-[2px] ${
-                draftUpdateBanner ? "bg-kumo-elevated" : docked ? "bg-kumo-base" : "bg-kumo-control"
-              }`}
-            />
-          </div>
-        )}
         {isAttachmentDragActive && (
           <div className={`themed-inset-outline pointer-events-none absolute inset-0 z-20 grid place-items-center border-2 border-dashed p-4 backdrop-blur-[1px] transition-[opacity,transform] duration-150 ease-out ${docked ? "rounded-t-2xl" : "rounded-2xl"} ${canAttachMore ? "border-kumo-brand/55 bg-kumo-brand/10" : "border-kumo-warning/60 bg-kumo-warning/10"}`}>
             <div className={`themed-floating-shadow flex items-center gap-2 rounded-full border bg-kumo-base/90 px-3 py-2 text-[13px] font-medium leading-4 tracking-[-0.2px] text-kumo-default ${canAttachMore ? "border-kumo-brand/25" : "border-kumo-warning/30"}`}>
@@ -3969,6 +3945,7 @@ interface ChatInterfaceProps {
   initialChats?: AiChatMetadata[];
   initialModels?: AiChatAuthorInfo[];
   initialHistory?: { chatId: number; page: AiChatHistoryPage };
+  onUsageChange?: (usage: { tokens?: number; cost?: number }) => void;
 }
 
 /** A compaction checkpoint reported with a history page. */
@@ -4097,6 +4074,7 @@ function ChatInterface({
   initialChats,
   initialModels,
   initialHistory,
+  onUsageChange,
 }: ChatInterfaceProps) {
   // Persistent cache that survives reconnects
   const toasts = useKumoToastManager();
@@ -4355,6 +4333,15 @@ function ChatInterface({
   // Get metadata for selected chat
   const currentChatMetadata =
     selectedChatId !== null ? cacheRef.current.chats.get(selectedChatId) : null;
+
+  const onUsageChangeRef = useRef(onUsageChange);
+  onUsageChangeRef.current = onUsageChange;
+  useEffect(() => {
+    onUsageChangeRef.current?.({
+      tokens: currentChatMetadata?.totalTokens,
+      cost: currentChatMetadata?.totalCost,
+    });
+  }, [currentChatMetadata?.totalTokens, currentChatMetadata?.totalCost]);
 
   // Download a committed chat attachment. Image bytes are already inlined on the message; other
   // attachments are fetched on demand over the authenticated RPC connection.
@@ -6530,10 +6517,6 @@ function ChatInterface({
                     selectedModel={selectedModel}
                     onModelChange={handleModelChange}
                     docked
-                    usage={currentChatMetadata ? {
-                      tokens: currentChatMetadata.totalTokens,
-                      cost: currentChatMetadata.totalCost,
-                    } : undefined}
                     pendingConsoleLogCount={pendingConsoleLogCount}
                     consoleLogPreview={consoleLogPreview}
                     consoleLogSeverity={consoleLogSeverity}
