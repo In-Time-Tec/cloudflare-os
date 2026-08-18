@@ -26,6 +26,10 @@ import { ExternalMessageGateway } from "./external-message-gateway";
 import { RpcStub as NativeRpcStub } from "cloudflare:workers";
 import { recordAnalytics } from "./analytics";
 import { handleClientErrorRequest } from "./client-errors.js";
+import { ORB_INFERENCE_PATH, handleOrbInference } from "./orb/orb-inference.js";
+import { getOrbSigningKey } from "./orb/inference-grant.js";
+import { OrbSessionError, verifyOrbSession } from "./orb/session-token.js";
+import type { OrbHooks } from "@gadgets/workshop-shared/orb-harness";
 import { verifyCfAccessJwt } from "./access.js";
 import { resolveUiFeatureFlags } from "./feature-flags";
 import { serveSiteLogo, SITE_LOGO_PATH } from "./site-logo.js";
@@ -665,6 +669,39 @@ class LoginAttemptImpl extends RpcTarget implements LoginAttempt {
   }
 }
 
+async function authenticateOrbHarnessSession(
+    ctx: ExecutionContext, env: Env, jwt: string): Promise<OrbHooks> {
+  const key = getOrbSigningKey(env);
+  if (!key) throw new Error("Orb harness authentication is not configured.");
+  let claims;
+  try {
+    claims = await verifyOrbSession(key, jwt);
+  } catch (error) {
+    if (error instanceof OrbSessionError) throw error;
+    throw new Error("Invalid orb session.", { cause: error });
+  }
+  let overseerId;
+  try {
+    overseerId = ctx.exports.OverseerDurableObject.idFromString(claims.threadId);
+  } catch {
+    throw new Error("Invalid orb session.");
+  }
+  // @ts-expect-error Cap'n Web RPC stubs and native RPC stubs are compatible but the type
+  //     system doesn't know this.
+  return ctx.exports.OverseerDurableObject.get(overseerId).getOrbHooks(claims.gen, claims.userId);
+}
+
+@validateRpc()
+class OrbHarnessApi extends RpcTarget {
+  constructor(private ctx: ExecutionContext, private env: Env) {
+    super();
+  }
+
+  async authenticateOrbHarness(jwt: string): Promise<OrbHooks> {
+    return authenticateOrbHarnessSession(this.ctx, this.env, jwt);
+  }
+}
+
 @validateRpc()
 class PublicApiImpl extends RpcTarget implements PublicApi {
   users: DurableObjectNamespace<UserDurableObject>;
@@ -727,6 +764,10 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
     });
     return new AuthenticatedApiImpl(
         this.ctx, this.env, userId, principal, this.abortSession, split[1]);
+  }
+
+  async authenticateOrbHarness(jwt: string): Promise<OrbHooks> {
+    return authenticateOrbHarnessSession(this.ctx, this.env, jwt);
   }
 
   async authenticateFromCfAccess(): Promise<AuthenticatedApi> {
@@ -864,6 +905,19 @@ export default {
 
     if (url.pathname === "/api/client-errors") {
       return handleClientErrorRequest(req, env, ctx);
+    }
+
+    // Inference for agent loops running in a thread's orb. The caller authenticates with a
+    // turn-scoped grant and never sees a provider credential (see orb/orb-inference.ts).
+    // The harness addresses the proxy as `${origin}${ORB_INFERENCE_PATH}${providerPath}`
+    // (each provider SDK appends its own action path, e.g. /chat/completions), so match the
+    // whole /orb-api/inference subtree.
+    if (url.pathname === ORB_INFERENCE_PATH || url.pathname.startsWith(ORB_INFERENCE_PATH + "/")) {
+      return handleOrbInference(req, env, ctx);
+    }
+
+    if (url.pathname === "/orb-api/harness") {
+      return await newWorkersRpcResponse(req, new OrbHarnessApi(ctx, env));
     }
 
     if (url.pathname === "/api") {

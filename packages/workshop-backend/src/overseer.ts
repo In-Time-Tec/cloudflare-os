@@ -1,6 +1,9 @@
 import { RpcCompatible, RpcStub, RpcTarget } from "capnweb";
 import { validateRpc } from "capnweb-validate";
 import { Overseer, ThreadMetadata, UiBundle, WorkpieceId, WorkpieceSummary, WorkpiecesSubscriber, ArtifactClient, ArtifactBindingInfo, GatekeeperClient, ActionState, ActionLogEntry, ActionsSubscriber, CodeUpdate, CodeSubscriber, AiChatMetadata, AiChatMessage, AiChatHistoryPage, AiChatSubscriber, AiChatAuthorInfo, AiModelConfig, AgentSpawnerConfig, ConsoleLogSubscriber, ConsoleLogEvent, CapsuleSpecifier, CollaboratorInfo, CollaboratorRole, AffectedCollaborator, ShareLinkInfo, GatekeeperCreationSpec, ObserverConfigCallback, ObserverBindingNeed, ObserverBindingFailure, TemplateBindingAnnotation, TemplateBinding, TemplateMetadata, TemplateOutput, MessageFormatRef, isOutputIcon, SpawnerEnvTarget, TemplateArtifactSummary, AiChatStreamEvent, TemplateScreenshotUpload, TEMPLATE_SCREENSHOT_R2_PREFIX, templateScreenshotUrl, ChatAttachmentUpload, ChatAttachmentHandle, ChatAttachmentRef, BoundHookInfo, ActionFailure, PresenceParticipant, PresenceSubscriber, SlashCommandChoice, SlashCommandRequest, validateBindingName, createOpenThreadError, OPEN_THREAD_ERROR_CODES, resolveSiteName } from '@gadgets/workshop-shared/api';
+import type {
+  OrbHarnessTarget, OrbHooks, OrbTurnOutcome, OrbTurnRecord,
+} from "@gadgets/workshop-shared/orb-harness";
 import { Gatekeeper, HookInitiator, ResourceDescription, ActionRecorder, ActionHandle, ActionCapability, ActionDescription, ObservationAuthorizer, ObservationDescription, HookController, HookDescription, AGENT_CATALOG_MAX_ENTRIES } from "@gadgets/workshop-shared/gatekeeper";
 import {
   DurableObject, WorkerEntrypoint, RpcStub as NativeRpcStub,
@@ -13,26 +16,30 @@ import {
   getModel,
   UserGatewayRouting,
 } from "./ai-models";
-import { AgentTurnError, completeText } from "./ai-invoke";
+import { completeText } from "@gadgets/agent-core";
 import {
   AiGatewayLogRetryableError,
   getAiGatewayConfig,
   getAiGatewayLogCost,
   type AiGatewayLogRoute,
 } from "./ai-gateway";
-import { AgentArtifactInfo, AgentHooks, AiChatAgentContext, ChatBindingEntry, SeedBindingInfo, runAgent, makeStorableArgs, summarizeArgs, type AiChatMessageBodyWithModelData, type CompactionCheckpoint, type StoredAssistantMessage } from "./agent";
+import { AgentHooks, makeStorableArgs, summarizeArgs } from "./agent";
+import type {
+  AgentArtifactInfo, AiChatAgentContext, AiChatMessageBodyWithModelData, ChatBindingEntry,
+  CompactionCheckpoint, ModelHandle, SeedBindingInfo, StoredAssistantMessage,
+} from "@gadgets/workshop-shared/agent-types";
 import { deploymentOutputForTemplate, FormatOffer, isActionKindDisabled, listFormatOffers, readAdminConfig } from "./admin-config";
-import { foldProposedChanges, isCompactionTurn, type ChangeBatch } from "./agent-compaction";
+import { foldProposedChanges, isCompactionTurn, type ChangeBatch } from "@gadgets/agent-core";
 import { ambientGatekeeperMode } from "./provisioning-policy";
 import { listFeaturedTemplatesFromKv, readTemplateContent, readTemplateKvRecord, sanitizeTemplateOutput } from "./template-archive";
-import { WebFetchEnv } from "./web-fetch";
+import { WebFetchEnv, formatWebFetchResult, webFetch } from "./web-fetch";
 import { UserDurableObject, UserAiModelRecord, type UserChatContext, type ThreadOutputEntry } from "./user";
 import { AgentSpawnerBinding } from "./agent-spawner-binding";
 import { recordAnalytics } from "./analytics";
 import { reportIssue } from "@gadgets/backend-utils/error-reporting";
 import type { ProductAnalyticsConnectionType, ProductAnalyticsThreadInput } from "./analytics";
 import { checkUsageAndBalance } from "./ai-gateway-billing/limits/usage-checker";
-import { completeAgentCatalogSnapshot, normalizeAgentCatalog } from "./agent-catalog";
+import { completeAgentCatalogSnapshot, normalizeAgentCatalog } from "@gadgets/agent-core";
 import { refreshCachedBalance } from "./ai-gateway-billing/cloudflare/connection-service";
 import { SharingManager, SharingCaller, CollaboratorRecord, ShareKeyRecord } from "./sharing";
 import { collectSlashCommands, invokeSlashCommand } from "./slash-commands";
@@ -46,8 +53,15 @@ import {
 } from "./chat-attachment-validation";
 import { renderArtifactPdf } from "./browser-export";
 import { DEFAULT_ORB_SETTINGS, destroyOrb, orbIdleExpired, sleepOrb, touchOrb, wakeOrb, type OrbSettings, type OrbState, type OrbStatus } from "./orb/orb-manager";
-import { runCommand as runOrbCommand } from "./orb/envd";
-import { Effect } from "effect";
+import { runCommandPromise as runOrbCommand } from "./orb/envd";
+import { mintInferenceGrant as mintTurnInferenceGrant, getOrbSigningKey } from "./orb/inference-grant.js";
+import { mintOrbSession } from "./orb/session-token.js";
+import {
+  inferenceProxyBase, orbTurnUnavailableReason, publicOrigin, snapshotOrbModel, stripLogRoute,
+} from "./orb/orb-turn.js";
+import { ensureHarnessProcess } from "./orb/harness-supervise.js";
+import { OrbHooksImpl } from "./orb/orb-hooks.js";
+import type { OrbInferenceAuthorization } from "./orb/orb-inference.js";
 
 const logger = createWorkshopLogger("workshop.overseer");
 export const AGENT_RUNNING_ERROR_MESSAGE = "Agent is running, wait for it to finish.";
@@ -691,6 +705,22 @@ type ActiveAgentRecord = {
   callbackInitiated: boolean;
 };
 
+type StoredOrbTurn = {
+  turnId: string;
+  chatId: number;
+  status: "queued" | "running";
+  callbackInitiated: boolean;
+  stopAfterCompaction: boolean;
+  hasBeenNudged: boolean;
+  initiatorUserId: string;
+  model: string;
+  provider: AiModelConfig["provider"];
+  logRoute?: AiGatewayLogRoute;
+  userGateway?: UserGatewayRouting;
+  sessionAffinity?: string;
+  record: OrbTurnRecord;
+};
+
 // One agent step's model-facing snapshot (see StoredAssistantMessage in agent.ts), keyed by the
 // chatId.sequence of the step's "message" record.
 type ChatModelDataRecord = {
@@ -937,6 +967,15 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
         primaryKey: "chatId"
       }),
 
+      orbTurns: collection<StoredOrbTurn>()({
+        primaryKey: "turnId",
+        uniqueIndexes: {
+          byChatId(record: StoredOrbTurn) {
+            return record.chatId;
+          },
+        },
+      }),
+
       artifactResponseDeliveries: collection<ExternalMessageRecord>()({
         primaryKey: "idempotencyKey",
         uniqueIndexes: {
@@ -1156,6 +1195,9 @@ class OverseerImpl implements AgentHooks {
   // Set of chatIds that currently have a running agent turn. Used to manage the DO alarm (held
   // while any agent runs) and to let `alarm()` wait for all agents to finish.
   #runningAgents = new Set<number>();
+  #harnessTarget?: RpcStub<OrbHarnessTarget>;
+  #executorEpoch = 0;
+  #byokOwnerByChat = new Map<number, DurableObjectStub<UserDurableObject>>();
 
   // If `alarm()` is currently waiting for all agents to finish, this resolves its wait. Invoked
   // when the running-agent count drops to zero.
@@ -1290,6 +1332,14 @@ class OverseerImpl implements AgentHooks {
     // Cancel running agent.
     ctx.cancelController?.abort(error);
 
+    let turn = this.storage.orbTurns.byChatId.get(chatId);
+    if (turn) {
+      try { this.#harnessTarget?.abortTurn(turn.turnId); } catch { }
+      this.storage.orbTurns.delete(turn.turnId);
+    }
+    this.#unregisterRunningAgent(chatId);
+    this.#releaseOrbTurn(chatId);
+
     // Reject all active agent callback returns.
     for (let [, cb] of ctx.activeAgentCallbacks) cb.reject(error);
 
@@ -1377,10 +1427,15 @@ class OverseerImpl implements AgentHooks {
 
   /** Destroy the orb (thread deletion). */
   async destroyThreadOrb(): Promise<void> {
-    let settings = this.orbSettings();
-    if (!this.env.E2B_API_KEY) return;
-    await destroyOrb(this.env.E2B_API_KEY, this.ctx.id.toString(), this.#orbStore()).catch(() => {});
-    void settings;
+    let state = this.storage.orbState.get();
+    let nextGen = (state.sessionGen ?? 1) + 1;
+    if (this.env.E2B_API_KEY) {
+      await destroyOrb(this.env.E2B_API_KEY, this.ctx.id.toString(), this.#orbStore()).catch(() => {});
+    }
+    this.storage.orbState.put({ ...this.storage.orbState.get(), sessionGen: nextGen });
+    this.#executorEpoch++;
+    this.#harnessTarget?.[Symbol.dispose]();
+    this.#harnessTarget = undefined;
   }
 
   /** Current orb status for the UI. */
@@ -1460,6 +1515,8 @@ class OverseerImpl implements AgentHooks {
   // Resolves once no agents are running. Used by `alarm()` to keep the DO alive until all running
   // agents complete.
   async waitForAllAgentsToComplete(): Promise<void> {
+    if (this.#runningAgents.size === 0) return;
+    await this.ensureOrbHarness(false).catch(() => {});
     if (this.#runningAgents.size === 0) return;
 
     await new Promise<void>(resolve => { this.#allAgentsIdleWaiters.push(resolve); });
@@ -2194,6 +2251,15 @@ class OverseerImpl implements AgentHooks {
       Y.applyUpdateV2(ydoc, version.update);
     });
     return {ydoc, version};
+  }
+
+  getCodeDocState(version: number | "current"): {update: Uint8Array, version: number} {
+    let built = this.buildYDoc(version);
+    try {
+      return { update: Y.encodeStateAsUpdateV2(built.ydoc), version: built.version };
+    } finally {
+      built.ydoc.destroy();
+    }
   }
 
   // Apply a Yjs-encoded (V2) update to the code, incrementing the code version.
@@ -3102,7 +3168,7 @@ class OverseerImpl implements AgentHooks {
 
   // Provides web-fetch with the Workers AI binding and AI Gateway config it needs to call
   // `env.WORKERS_AI.toMarkdown()`. The initiator is needed for AI Gateway metadata.
-  getWebFetchEnv(): WebFetchEnv {
+  #getWebFetchEnv(): WebFetchEnv {
     if (this.storage.prohibitAllSharing.get()) {
       // TODO: Disallwing fetches is a bit draconian. Ideally, we would have some way to detect
       //   if a URL is well-known, and therefore not a leak problem. E.g. if the URL is already in
@@ -3117,6 +3183,32 @@ class OverseerImpl implements AgentHooks {
       ai: this.env.WORKERS_AI,
       gateway: getAiGatewayConfig(this.env),
     };
+  }
+
+  // Runs the agent's webFetch tool server-side: the SSRF-checked fetch, the Workers AI
+  // document-to-Markdown conversion, and the observation record all stay here, so a loop running
+  // outside this DO (the orb harness) reaches the web only through this chokepoint and can
+  // neither skip the checks nor suppress the audit entry. Returns the formatted result the tool
+  // hands to the model.
+  async executeWebFetch(chatId: number, url: string, raw?: boolean): Promise<string> {
+    let result = await webFetch(this.#getWebFetchEnv(), {url, raw});
+
+    let host = new URL(result.finalUrl).host;
+    await this.recordAgentObservation(
+        chatId,
+        `Web fetch: ${host}`,
+        result.finalUrl,
+        {
+          title: `Fetched ${host}`,
+          description:
+              `GET \`${result.finalUrl}\`\n\n` +
+              `Status: ${result.status}\n` +
+              `Content-Type: \`${result.contentType || "(unspecified)"}\`\n` +
+              `Body: ${result.body.length} chars` +
+              (result.truncated ? ", truncated" : ""),
+        });
+
+    return formatWebFetchResult(result);
   }
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
@@ -4026,11 +4118,18 @@ class OverseerImpl implements AgentHooks {
     this.#updateExternalMessageResponseDeliveryAlarm();
   }
 
-  cancelAgent(chatId: number) {
+  async cancelAgent(chatId: number): Promise<void> {
     let ctx = this.#liveChats.get(chatId);
     if (ctx) {
       ctx.cancelController.abort(new Error("User requested to stop agent."));
     }
+    let turn = this.storage.orbTurns.byChatId.get(chatId);
+    if (!turn) return;
+    try { this.#harnessTarget?.abortTurn(turn.turnId); } catch { }
+    await this.reportOrbTurnTerminal(turn.turnId, {
+      kind: "failed",
+      error: "User requested to stop agent.",
+    });
   }
 
   // Describe a workpiece -- a artifact or a gatekeeper -- reachable as `envName` in a chat's env,
@@ -4274,107 +4373,30 @@ class OverseerImpl implements AgentHooks {
       let controller = liveChat.cancelController;
       controller.signal.throwIfAborted();
 
-      let hasBeenNudged = false;
-      let outcome: "ok" | "callbacks_stalled" = "ok";
-      while (true) {
-        let checkpoint = this.getActiveChatCompaction(chatId);
-        let chatMessages = this.#listChatTail(chatId, checkpoint);
-        let callbackCountBefore = liveChat.activeAgentCallbacks.size;
-
-        let compactionTurn = isCompactionTurn(chatMessages);
-        let newCheckpoint = await runAgent(
-            this, chosenModel, chatId, aiModel.profile, chatMessages, controller.signal,
-            initiator, callbackInitiated, {
-              checkpoint,
-              modelConfig: aiModel.config,
-              measuredTokens: this.getChatMetaOrThrow(chatId).totalTokens ?? 0,
-            });
-        if (newCheckpoint) this.#commitChatCompaction(chatId, newCheckpoint);
-        // `/compact` is done once it has compacted. An automatic compaction returned before
-        // prompting the model, so rerun the turn now that the history is shorter. Each compaction
-        // moves the boundary strictly forward and can never pass the newest turn start, so this
-        // reruns a bounded number of times.
-        if (compactionTurn) break;
-        if (newCheckpoint) continue;
-
-        // If not callback-initiated, or all callbacks are resolved, we're done.
-        if (!callbackInitiated || liveChat.activeAgentCallbacks.size === 0) {
-          break;
-        }
-
-        // Callbacks still outstanding. Check if the agent made progress.
-        // On the first run we always nudge once (the agent may not have understood what
-        // was expected). After a nudge, we bail out if no progress was made.
-        if (hasBeenNudged && liveChat.activeAgentCallbacks.size >= callbackCountBefore) {
-          // No progress after being nudged — reject remaining callbacks and bail out.
-          let count = liveChat.activeAgentCallbacks.size;
-          this.rejectAllAgentCallbacks(chatId,
-              "Agent failed to resolve callbacks after multiple attempts.");
-          this.postAgentErrorMessage(chatId, aiModel.profile,
-              `Failed to resolve ${count} outstanding callback(s).`);
-          outcome = "callbacks_stalled";
-          break;
-        }
-
-        // Progress was made but callbacks remain. Nudge the agent with details about
-        // which callbacks are still outstanding so it knows exactly what to resolve.
-        let outstandingSeqs = new Set(liveChat.activeAgentCallbacks.keys());
-        let outstandingDescriptions: string[] = [];
-        // Reconstruct the PARAMS_<n> names the agent loop assigned to each callback (see
-        // chatScopeNames, which simulates the replay loop's allocation).
-        let reloadedMessages = [...this.storage.chats.list({prefix: `${keyString(chatId)}.`})];
-        let callbackNames = new Map<number, string>();
-        this.chatScopeNames(chatId, reloadedMessages, callbackNames);
-        for (let msg of reloadedMessages) {
-          if (msg.type === "agentCallback" && outstandingSeqs.has(msg.sequence)) {
-            outstandingDescriptions.push(
-                `env.${callbackNames.get(msg.sequence)} (self.${msg.methodName}())`);
-          }
-        }
-
-        let nudgeText =
-            `You still have ${outstandingDescriptions.length} unresolved callback(s): ` +
-            `${outstandingDescriptions.join(", ")}. ` +
-            `Use executeCode to call env.PARAMS_N.resolve(value) or env.PARAMS_N.reject(error) ` +
-            `for each, or use giveUp to reject them all with an error.`;
-        this.addChatMessages(chatId, initiator, [{
-          type: "agentNudge",
-          text: nudgeText,
-        }]);
-        hasBeenNudged = true;
+      let unavailable = orbTurnUnavailableReason(this.env);
+      if (unavailable) {
+        let existing = this.storage.orbTurns.byChatId.get(chatId);
+        if (existing) this.storage.orbTurns.delete(existing.turnId);
+        this.postAgentErrorMessage(chatId, aiModel.profile, unavailable);
+        turnLogger.debug("agent run finished", {
+          event: "agent.run.finished", outcome: "error",
+          durationMs: Date.now() - startedAt,
+        });
+        return;
       }
-      turnLogger.debug("agent run finished", {
-        event: "agent.run.finished", outcome,
-        durationMs: Date.now() - startedAt,
-      });
+
+      if (byokOwnerStub) this.#byokOwnerByChat.set(chatId, byokOwnerStub);
+      await this.dispatchOrbTurn(
+          chatId, aiModel, initiator, callbackInitiated, liveChat, chosenModel,
+          false, byokRouting, sessionAffinity);
+      this.ctx.waitUntil(this.#holdOrbTurn(chatId));
+      return;
     } catch (err: unknown) {
-      // A failed model request surfaces as AgentTurnError (pi reports provider failures as data;
-      // runAgent converts them back to a throw), carrying the failing request's HTTP status when
-      // one was observed.
-      let apiError = err instanceof AgentTurnError ? err : null;
-
-      // Report unexpected failures for triage. Skip expected provider 4xx (auth,
-      // rate limit, quota/billing), which are ordinary control flow, not incidents.
-      const apiStatus = apiError?.statusCode;
-      if (apiStatus === undefined || apiStatus >= 500) {
-        reportIssue("overseer.run-agent", err, {
-          attributes: obsContext.get(),
-          http: apiStatus === undefined
-            ? undefined
-            : { kind: "client", responseStatusCode: apiStatus },
-        });
-      }
-
+      reportIssue("overseer.run-agent", err, { attributes: obsContext.get() });
       let errorMessage = stringifyError(err);
-      if (apiError) {
-        turnLogger.error("runAgent failed", {
-          event: "agent.run.failed", statusCode: apiError.statusCode, error: err,
-        });
-      } else {
-        turnLogger.error("runAgent failed", {
-          event: "agent.run.failed", error: err,
-        });
-      }
+      turnLogger.error("runAgent failed", {
+        event: "agent.run.failed", error: err,
+      });
       turnLogger.debug("agent run finished", {
         event: "agent.run.finished", outcome: "error",
         durationMs: Date.now() - startedAt,
@@ -4382,60 +4404,351 @@ class OverseerImpl implements AgentHooks {
 
       this.postAgentErrorMessage(chatId, aiModel.profile, errorMessage);
 
-      // Reject any pending agent callback return promises.
       let error = err instanceof Error ? err : new Error(`${err}`);
       for (let [, cb] of liveChat.activeAgentCallbacks) {
         cb.reject(error);
       }
       liveChat.activeAgentCallbacks.clear();
     } finally {
-      // If this turn billed the user's own Cloudflare account, refresh their cached balance now (in
-      // the background) so the next turn's billing decision reflects the spend just incurred. Runs
-      // on both the success and error paths — an "insufficient funds" failure is exactly when an
-      // up-to-date balance matters most.
-      if (byokOwnerStub) {
-        this.ctx.waitUntil(refreshCachedBalance(this.env, byokOwnerStub));
+      if (!this.storage.orbTurns.byChatId.get(chatId)) {
+        await this.#finishAgentTurn(chatId, liveChat, byokOwnerStub);
       }
+    }
+  }
 
-      // Belt-and-suspenders: reap any provisional artifact this turn created whose creation ended
-      // up backed by nothing in the log. (Normally the turn's final flush -- which runs even on
-      // error, in runAgent's own finally -- records every buffered creation, so this only
-      // matters when that flush couldn't write, e.g. the chat was deleted mid-turn.) Never
-      // throws, so it can't mask an error propagating out of the turn.
-      await this.reconcilePendingArtifacts(chatId);
+  #orbTurnWaiters = new Map<number, { resolve: () => void, promise: Promise<void> }>();
 
-      // Note: We no longer emit a stream "clear" event here. The client performs a full clear of
-      // provisional streaming state when it observes that the agent is no longer running (i.e. when
-      // chat metadata's activeAgent becomes unset, which happens just below).
+  #holdOrbTurn(chatId: number): Promise<void> {
+    let existing = this.#orbTurnWaiters.get(chatId);
+    if (existing) return existing.promise;
+    let resolve!: () => void;
+    let promise = new Promise<void>(r => { resolve = r; });
+    this.#orbTurnWaiters.set(chatId, { resolve, promise });
+    return promise;
+  }
 
-      let meta = this.storage.chatMeta.get(chatId);
-      if (meta) {
-        delete meta.activeAgent;
-        meta.lastActive = this.getChatTimestamp();
-        this.storage.chatMeta.put(meta);
+  #releaseOrbTurn(chatId: number): void {
+    this.#orbTurnWaiters.get(chatId)?.resolve();
+    this.#orbTurnWaiters.delete(chatId);
+  }
+
+  executorEpoch(): number {
+    return this.#executorEpoch;
+  }
+
+  getOrbHooks(gen: number, userId: string): OrbHooks {
+    if (!this.ownerId) throw new Error("Thread has been deleted.");
+    if (userId !== this.ownerId) throw new Error("Orb session is not valid for this thread.");
+    let current = this.storage.orbState.get().sessionGen ?? 1;
+    if (gen !== current) throw new Error("Orb session has been revoked.");
+    this.#executorEpoch++;
+    for (let turn of this.storage.orbTurns.list()) {
+      if (turn.status === "running") {
+        try { this.#harnessTarget?.abortTurn(turn.turnId); } catch { }
+        turn.status = "queued";
+        this.storage.orbTurns.put(turn);
       }
+    }
+    return new OrbHooksImpl(this, this.#executorEpoch);
+  }
 
-      // Tear down the registry entry, persistent `activeAgents` record, and keep-alive alarm in the
-      // same synchronous step as clearing `activeAgent` above, so the chat never appears idle while
-      // stale records of this agent linger. If pending callbacks below restart the agent, they'll
-      // re-register everything consistently.
-      this.#unregisterRunningAgent(chatId);
+  async refreshOrbSession(): Promise<string> {
+    let key = getOrbSigningKey(this.env);
+    if (!key || !this.ownerId) throw new Error("Orb session cannot be refreshed.");
+    return mintOrbSession(key, {
+      threadId: this.ctx.id.toString(),
+      userId: this.ownerId,
+      gen: this.storage.orbState.get().sessionGen ?? 1,
+    });
+  }
 
-      // Resolve any agent callback returns that weren't explicitly returned (they get undefined).
-      for (let [, cb] of liveChat.activeAgentCallbacks) {
-        cb.resolve(undefined);
+  async mintTurnGrant(turnId: string): Promise<string> {
+    let key = getOrbSigningKey(this.env);
+    if (!key) throw new Error("Orb authentication is not configured.");
+    let stored = this.storage.orbTurns.get(turnId);
+    if (!stored) throw new Error("Unknown turn.");
+    if (!this.ownerId) throw new Error("Thread has been deleted.");
+    let jwt = await mintTurnInferenceGrant(key, {
+      threadId: this.ctx.id.toString(),
+      turnId,
+      userId: this.ownerId,
+      model: stored.model,
+      provider: stored.provider,
+      initiator: stored.record.initiator,
+    });
+    stored.record = { ...stored.record, grantJwt: jwt };
+    this.storage.orbTurns.put(stored);
+    return jwt;
+  }
+
+  async claimPendingTurn(): Promise<OrbTurnRecord | undefined> {
+    let stored = [...this.storage.orbTurns.list()].find((turn) => turn.status === "queued");
+    if (!stored) return undefined;
+    stored.status = "running";
+    this.storage.orbTurns.put(stored);
+    let grantJwt = await this.mintTurnGrant(stored.turnId);
+    return { ...stored.record, grantJwt };
+  }
+
+  attachHarness(target: RpcStub<OrbHarnessTarget>): void {
+    this.#harnessTarget?.[Symbol.dispose]();
+    this.#harnessTarget = target;
+    for (let turn of this.storage.orbTurns.list()) {
+      if (turn.status === "running") {
+        turn.status = "queued";
+        this.storage.orbTurns.put(turn);
       }
+      if (turn.status === "queued") {
+        void this.#deliverQueuedTurn(turn, target);
+      }
+    }
+  }
+
+  async #deliverQueuedTurn(
+      turn: StoredOrbTurn, target: RpcStub<OrbHarnessTarget>): Promise<void> {
+    let grantJwt = await this.mintTurnGrant(turn.turnId);
+    let stored = this.storage.orbTurns.get(turn.turnId);
+    if (!stored || stored.status !== "queued") return;
+    stored.status = "running";
+    stored.record = { ...stored.record, grantJwt };
+    this.storage.orbTurns.put(stored);
+    try { target.runTurn({ ...stored.record, grantJwt }); } catch { }
+  }
+
+  async ensureOrbHarness(restart: boolean): Promise<void> {
+    let unavailable = orbTurnUnavailableReason(this.env);
+    if (unavailable) throw new Error(unavailable);
+    let origin = publicOrigin(this.env)!;
+    let key = getOrbSigningKey(this.env)!;
+    if (!this.ownerId) throw new Error("Thread has been deleted.");
+    let state = this.storage.orbState.get();
+    let gen = state.sessionGen ?? 1;
+    if (state.sessionGen === undefined) {
+      this.storage.orbState.put({ ...state, sessionGen: gen });
+    }
+    let sessionJwt = await mintOrbSession(key, {
+      threadId: this.ctx.id.toString(),
+      userId: this.ownerId,
+      gen,
+    });
+    if (this.#harnessTarget && !restart) {
+      try {
+        await Promise.race([
+          Promise.resolve(this.#harnessTarget.ping()),
+          scheduler.wait(3000).then(() => { throw new Error("timeout"); }),
+        ]);
+        return;
+      } catch {
+        this.#harnessTarget = undefined;
+      }
+    }
+    await ensureHarnessProcess({
+      apiKey: this.env.E2B_API_KEY!,
+      threadId: this.ctx.id.toString(),
+      settings: this.orbSettings(),
+      store: this.#orbStore(),
+      origin,
+      sessionJwt,
+      restart: true,
+    });
+  }
+
+  async dispatchOrbTurn(
+      chatId: number,
+      aiModel: UserAiModelRecord,
+      initiator: AiChatAuthorInfo,
+      callbackInitiated: boolean,
+      liveChat: LiveChatContext,
+      chosenModel: ModelHandle,
+      hasBeenNudged = false,
+      userGateway?: UserGatewayRouting,
+      sessionAffinity?: string): Promise<void> {
+    let existing = this.storage.orbTurns.byChatId.get(chatId);
+    if (existing) {
+      if (existing.status === "running") {
+        existing.status = "queued";
+        this.storage.orbTurns.put(existing);
+      }
+      await this.ensureOrbHarness(false);
+      if (existing.status === "queued" && this.#harnessTarget) {
+        await this.#deliverQueuedTurn(existing, this.#harnessTarget);
+      }
+      liveChat.cancelController.signal.addEventListener("abort", () => {
+        try { this.#harnessTarget?.abortTurn(existing.turnId); } catch { }
+      }, { once: true });
+      return;
+    }
+
+    let origin = publicOrigin(this.env);
+    let key = getOrbSigningKey(this.env);
+    if (!origin || !key || !this.ownerId) {
+      throw new Error(orbTurnUnavailableReason(this.env) ?? "Orb turns are unavailable.");
+    }
+
+    let checkpoint = this.getActiveChatCompaction(chatId);
+    let chatMessages = this.#listChatTail(chatId, checkpoint);
+    let codeDoc = this.getCodeDocState(checkpoint?.observedCodeVersion ?? "current");
+    let turnId = crypto.randomUUID();
+    let stopAfterCompaction = isCompactionTurn(chatMessages);
+    let grantJwt = await mintTurnInferenceGrant(key, {
+      threadId: this.ctx.id.toString(),
+      turnId,
+      userId: this.ownerId,
+      model: aiModel.config.model,
+      provider: aiModel.config.provider,
+      initiator,
+    });
+    let record: OrbTurnRecord = {
+      turnId,
+      chatId,
+      model: snapshotOrbModel(chosenModel.model, inferenceProxyBase(origin)),
+      codeDoc,
+      aiGatewayLogRoute: stripLogRoute(chosenModel.aiGatewayLogRoute),
+      grantJwt,
+      chatMessages,
+      author: aiModel.profile,
+      initiator,
+      callbackInitiated,
+      compaction: {
+        checkpoint,
+        modelConfig: { ...aiModel.config, apiToken: "" },
+        measuredTokens: this.getChatMetaOrThrow(chatId).totalTokens ?? 0,
+      },
+      agentContext: this.getChatAgentContext(chatId),
+      artifactInfos: this.listArtifactInfo(chatId),
+      modelData: [...this.storage.chatModelData.list({ prefix: `${keyString(chatId)}.` })]
+          .map((entry) => ({ sequence: entry.sequence, message: entry.message })),
+      stopAfterCompaction,
+    };
+    let stored: StoredOrbTurn = {
+      turnId,
+      chatId,
+      status: "queued",
+      callbackInitiated,
+      stopAfterCompaction,
+      hasBeenNudged,
+      initiatorUserId: this.storage.activeAgents.get(chatId)?.initiatorUserId ?? this.ownerId,
+      model: aiModel.config.model,
+      provider: aiModel.config.provider,
+      logRoute: chosenModel.aiGatewayLogRoute,
+      userGateway,
+      sessionAffinity,
+      record,
+    };
+    this.storage.orbTurns.put(stored);
+    try {
+      await this.ensureOrbHarness(false);
+    } catch (error) {
+      this.storage.orbTurns.delete(turnId);
+      throw error;
+    }
+    if (this.#harnessTarget) {
+      await this.#deliverQueuedTurn(stored, this.#harnessTarget);
+    }
+    liveChat.cancelController.signal.addEventListener("abort", () => {
+      try { this.#harnessTarget?.abortTurn(turnId); } catch { }
+    }, { once: true });
+  }
+
+  async reportOrbTurnTerminal(turnId: string, outcome: OrbTurnOutcome): Promise<void> {
+    let stored = this.storage.orbTurns.get(turnId);
+    if (!stored) return;
+    let chatId = stored.chatId;
+    let liveChat = this.#getLiveChat(chatId);
+    let active = this.storage.activeAgents.get(chatId);
+    let author = active?.initiator ?? stored.record.author;
+
+    if (outcome.kind === "compacted") {
+      this.#commitChatCompaction(chatId, outcome.checkpoint);
+      return;
+    }
+
+    this.storage.orbTurns.delete(turnId);
+
+    if (outcome.kind === "failed") {
+      this.postAgentErrorMessage(chatId, author, outcome.error);
+      let error = new Error(outcome.error);
+      for (let [, cb] of liveChat.activeAgentCallbacks) cb.reject(error);
       liveChat.activeAgentCallbacks.clear();
+      await this.#finishAgentTurn(chatId, liveChat, this.#byokOwnerByChat.get(chatId));
+      return;
+    }
 
-      // If any new messages were queued waiting for the agent to finish, deliver them now.
-      if (liveChat.pendingAgentCallbacks.length > 0) {
-        this.#startAgentForCallbacks(meta, liveChat);
-      } else {
-        this.#deliverWaitingExternalMessageResponse(chatId);
+    if (outcome.checkpoint) this.#commitChatCompaction(chatId, outcome.checkpoint);
+    await this.#finishAgentTurn(chatId, liveChat, this.#byokOwnerByChat.get(chatId));
+  }
 
-        // LiveChatContext is now empty.
-        this.#liveChats.delete(chatId);
+  listChatTail(chatId: number): AiChatMessage[] {
+    return this.#listChatTail(chatId, this.getActiveChatCompaction(chatId));
+  }
+
+  nudgeOutstandingCallbacks(chatId: number, initiator: AiChatAuthorInfo): void {
+    this.#nudgeOutstandingCallbacks(chatId, initiator, this.#getLiveChat(chatId));
+  }
+
+  authorizeOrbInference(turnId: string, grantJwt: string): OrbInferenceAuthorization | undefined {
+    let stored = this.storage.orbTurns.get(turnId);
+    if (!stored || stored.status !== "running") return undefined;
+    if (stored.record.grantJwt !== grantJwt) return undefined;
+    return {
+      userGateway: stored.userGateway,
+      sessionAffinity: stored.sessionAffinity,
+    };
+  }
+
+  #nudgeOutstandingCallbacks(
+      chatId: number, initiator: AiChatAuthorInfo, liveChat: LiveChatContext): void {
+    let outstandingSeqs = new Set(liveChat.activeAgentCallbacks.keys());
+    let outstandingDescriptions: string[] = [];
+    let reloadedMessages = [...this.storage.chats.list({prefix: `${keyString(chatId)}.`})];
+    let callbackNames = new Map<number, string>();
+    this.chatScopeNames(chatId, reloadedMessages, callbackNames);
+    for (let msg of reloadedMessages) {
+      if (msg.type === "agentCallback" && outstandingSeqs.has(msg.sequence)) {
+        outstandingDescriptions.push(
+            `env.${callbackNames.get(msg.sequence)} (self.${msg.methodName}())`);
       }
+    }
+    let nudgeText =
+        `You still have ${outstandingDescriptions.length} unresolved callback(s): ` +
+        `${outstandingDescriptions.join(", ")}. ` +
+        `Use executeCode to call env.PARAMS_N.resolve(value) or env.PARAMS_N.reject(error) ` +
+        `for each, or use giveUp to reject them all with an error.`;
+    this.addChatMessages(chatId, initiator, [{
+      type: "agentNudge",
+      text: nudgeText,
+    }]);
+  }
+
+  async #finishAgentTurn(
+      chatId: number, liveChat: LiveChatContext,
+      byokOwnerStub?: DurableObjectStub<UserDurableObject>): Promise<void> {
+    if (byokOwnerStub) {
+      this.ctx.waitUntil(refreshCachedBalance(this.env, byokOwnerStub));
+    }
+    this.#byokOwnerByChat.delete(chatId);
+    await this.reconcilePendingArtifacts(chatId);
+
+    let meta = this.storage.chatMeta.get(chatId);
+    if (meta) {
+      delete meta.activeAgent;
+      meta.lastActive = this.getChatTimestamp();
+      this.storage.chatMeta.put(meta);
+    }
+
+    this.#unregisterRunningAgent(chatId);
+    this.#releaseOrbTurn(chatId);
+
+    for (let [, cb] of liveChat.activeAgentCallbacks) {
+      cb.resolve(undefined);
+    }
+    liveChat.activeAgentCallbacks.clear();
+
+    if (liveChat.pendingAgentCallbacks.length > 0) {
+      this.#startAgentForCallbacks(meta, liveChat);
+    } else {
+      this.#deliverWaitingExternalMessageResponse(chatId);
+      this.#liveChats.delete(chatId);
     }
   }
 
@@ -5856,7 +6169,7 @@ class OverseerImpl implements AgentHooks {
     return result;
   }
 
-  async executeShellInOrb(command: string, timeoutMs: number)
+  async executeShell(command: string, timeoutMs: number)
       : Promise<{stdout: string, stderr: string, exitCode: number}> {
     let settings = this.orbSettings();
     if (!settings.enabled) {
@@ -5870,7 +6183,8 @@ class OverseerImpl implements AgentHooks {
           get: () => this.storage.orbState.get(),
           put: (state) => { this.storage.orbState.put(state); },
         });
-    let result = await Effect.runPromise(runOrbCommand(sandboxId, undefined, command, timeoutMs));
+    let result = await runOrbCommand(
+        sandboxId, this.storage.orbState.get().envdAccessToken, command, timeoutMs);
     this.touchOrbActivity();
     return result;
   }
@@ -6680,6 +6994,8 @@ class OverseerImpl implements AgentHooks {
   }
 }
 
+export type { OverseerImpl };
+
 type OverseerRestoreParams = {
   // This is a stub pointing at the artifact. [restore]() will return the facet stub.
   type: "artifact";
@@ -6708,6 +7024,14 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
     this.impl = new OverseerImpl(ctx, env);
+  }
+
+  getOrbHooks(gen: number, userId: string): OrbHooks {
+    return this.impl.getOrbHooks(gen, userId);
+  }
+
+  authorizeOrbInference(turnId: string, grantJwt: string): OrbInferenceAuthorization | undefined {
+    return this.impl.authorizeOrbInference(turnId, grantJwt);
   }
 
   /**
@@ -8728,7 +9052,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
   }
 
   async stopAgent(chatId: number): Promise<void> {
-    this.impl.cancelAgent(chatId);
+    await this.impl.cancelAgent(chatId);
   }
 
   async retryAgent(chatId: number, modelId: string): Promise<void> {

@@ -1,0 +1,25 @@
+{
+  "name": "@gadgets/orb-harness",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.83.0",
+    "@gadgets/agent-core": "workspace:*",
+    "@gadgets/workshop-shared": "workspace:*",
+    "capnweb": "catalog:",
+    "effect": "catalog:",
+    "yjs": "^13.6.31"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260722.1",
+    "@types/node": "26.1.0",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

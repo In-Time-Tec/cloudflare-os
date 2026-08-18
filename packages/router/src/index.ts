@@ -35,6 +35,7 @@ export default {
     }
 
     if (url.pathname === "/api" || url.pathname.startsWith("/api/") ||
+        url.pathname === "/orb-api" || url.pathname.startsWith("/orb-api/") ||
         url.pathname === "/template-screenshot" ||
         url.pathname.startsWith("/template-screenshot/")) {
       return env.WORKSHOP_BACKEND.fetch(req);

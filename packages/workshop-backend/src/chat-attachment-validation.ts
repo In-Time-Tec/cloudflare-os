@@ -1,6 +1,6 @@
 import { isTextLikeAttachmentMimeType } from "@gadgets/workshop-shared/api";
 import type { AiModelConfig, AiModelProvider, ChatAttachmentUpload } from "@gadgets/workshop-shared/api";
-import { PDF_MIME_TYPE } from "./chat-attachment-pdf";
+import { PDF_MIME_TYPE } from "@gadgets/agent-core";
 
 // Bounds attachment storage and the bytes replayed into model requests.
 const MAX_CHAT_ATTACHMENT_BYTES = 1024 * 1024;

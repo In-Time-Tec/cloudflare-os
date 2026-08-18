@@ -236,3 +236,115 @@ without touching the credential or transport architecture. Revisit batonfx as it
 when (a) its Effect pin matches the repo's, (b) you are prepared to migrate the chat-log
 vocabulary with a dual-read window, and (c) you want its Runtime to replace the thread-graph
 machinery — evaluated then against what pi has become in the meantime.
+
+
+---
+
+## Appendix A — seam verification and what landed (as-built)
+
+Verified against the tree at `a9ab365` + the working changes, pi-ai 0.83.0 (openai SDK 6.26.0).
+These are the answers to the questions the plan left open; they correct two assumptions in the
+design (the proxy addressing, and baseUrl not being a stream option).
+
+### A.1 pi-ai endpoint override surface (the critical unknown, resolved)
+
+- `StreamOptions` has **no `baseUrl`**. Every API impl builds its SDK client from
+  `model.baseUrl` (openai-completions: `new OpenAI({baseURL: model.baseUrl, ...})`;
+  anthropic-messages likewise). The harness therefore shapes a **Model object** — not a stream
+  option — with `baseUrl` pointing at the proxy. The turn record's `OrbModelSnapshot` is that
+  shape, minus secrets.
+- URL composition: the openai SDK builds `new URL(baseURL + path)` (slash-aware join). With
+  harness baseUrl = `<origin>/orb-api/inference`, the request hits
+  `/orb-api/inference/chat/completions` (path-based suffix; anthropic appends `/v1/messages`).
+  **The proxy's suffix therefore comes from the URL pathname — the earlier `?path=` query
+  contract could never be produced by pi and was replaced (see A.4).**
+- Auth: `options.headers` merge after `model.headers`, and `getClientApiKey` returns `"unused"`
+  when an `authorization` header is present — so the harness passes
+  `headers: {Authorization: Bearer <grant>}` with no `apiKey` and pi does not complain.
+- Compat: `getCompat(model)` auto-detects from `baseUrl`; the proxy URL is unrecognized, so
+  provider-specific request shaping (thinkingFormat, maxTokensField, session-affinity headers,
+  `prompt_cache_key`) falls back to defaults. The resolved pi `Model` (which carries the
+  catalog-derived `compat`) is serialized into the turn record so the harness shapes requests
+  exactly as the in-DO loop does; `prompt_cache_key` keying off `api.openai.com` simply won't
+  trigger, which is benign.
+- Everything else the loop needs from `Model` (`api`, `provider`, `reasoning`, `input`, `cost`,
+  `contextWindow`, `maxTokens`, `cost` rates) is plain data and rides in `OrbModelSnapshot`.
+
+### A.2 Seam inventory (exact shapes at the cited lines, verified)
+
+- `runAgent(hooks, handle, chatId, author, chatMessages, abortSignal, initiator,
+  callbackInitiated, compaction)` — agent.ts:965 (post-pull-up), signature matches the plan.
+- `AgentHooks` (agent.ts) is the boundary. Partition confirmed:
+  * wire-safe as-is: getChatAgentContext, listArtifactInfo, resolveWorkpieceRoot, createArtifact,
+    describeBinding, addArtifactBinding, prepareChatBindings, spawn/send/wait/list/read child
+    thread methods, activeAgentCallbackCount, rejectAllAgentCallbacks, consumeCapturedActions,
+    addChatMessages, emitChatStreamEvent, getChatModelData, recordAgentObservation,
+    getChatAttachmentData, getInstanceInstructions, listAvailableTemplates,
+    describeStandardFormats, fetchTemplate
+  * local-to-harness (not on the wire): buildYDoc (replaced by getWorkpieceDocState + a local
+    Y.Doc per thread), executeShellInOrb (the point of the move), getWebFetchEnv (remoted as
+    executeWebFetch — Workers-AI conversion + SSRF stay server-side)
+  * callback-carrying: executeCodeMode(onOutputText) — the signature already takes the callback.
+- `ModelHandle` (ai-models.ts): `{model, stream, aiGatewayLogRoute?, lastResponse?}`; the
+  proxy ModelHandle satisfies it by wrapping `openaiCompletionsStream` (the same parser
+  `makeHandle` uses for in-process inference).
+- `emitChatStreamEvent` (overseer.ts:6252): iterates `#chatSubscribers` calling
+  `subscriber.stream(chatId, event)` — a capnweb fan-out. The harness's emit arrives over the
+  wire and lands in this same method: the browser path below it is byte-identical.
+- `executeCodeMode` (overseer.ts:5732): Worker Loader with `globalOutbound: null`, `tails`
+  CodeModeTailLoopback, `#codeModeOutputSubscribers` keyed by executionId —
+  `deliverCodeModeText(executionId, delta)` is the callback sink the harness's capnweb callback
+  stub will drive.
+- `executeShellInOrb` (overseer.ts:5859): `wakeOrb` + `runOrbCommand` (envd.ts, buffered
+  `await response.text()` — the 120s-blob behavior the move kills). envd.ts keeps only harness
+  supervision; `writeFile` (multipart /files) is the harness-bundle upload path.
+- Turn entry: `startAgent` → `#runAgentTurn` → `#runAgentTurnWithContext` (overseer.ts:4209).
+  All replay/compaction/binding prep happens inside `#runAgentTurnWithContext` *before* the
+  `runAgent` call — that whole prefix is what a dispatch path must replicate before enqueuing a
+  turn record.
+- Subscriber protocol (api.ts): `AiChatSubscriber.stream(chatId, event)` +
+  `streamGeneration(n)` — the harness registration mirrors this pattern with
+  `OrbHarnessTarget`; the provisional-state generation counter already tolerates harness
+  restarts.
+
+### A.3 Type pull-up (Phase 1's wire-type surface, landed)
+
+The wire-crossable agent types moved to `packages/workshop-shared/src/agent-types.ts` with one
+canonical definition: `StoredToolCall`, `StoredAssistantMessage`, `AiChatMessageBodyWithModelData`,
+`SeedBindingInfo`, `ChatBindingEntry`, `AiChatAgentContext`, `AgentCatalogSnapshot`,
+`AgentArtifactInfo`, `CompactionCheckpoint`, `CompactionContext`, `AiGatewayLogRoute`.
+Backend modules re-export (ai-gateway.ts, agent-catalog.ts) or import directly (agent.ts,
+overseer.ts, agent-compaction.ts, tests). `workshop-shared` now type-imports pi-ai (0.83.0 —
+new dep, type-only, erased from bundles). 307 backend tests pass; backend tsc clean; frontend
+unaffected (the only frontend tsc error, `route-guards.test.ts` loader typing, pre-exists on
+this tree). Oxlint: my files contribute 0 errors (the remaining repo errors — `vi` unused in
+message-format-refs.test.ts, `no-shadow` in typed-storage/frontend — pre-exist).
+
+### A.4 The wire contract and the proxy correction (landed)
+
+- `packages/workshop-shared/src/orb-harness.ts` now defines the boundary: `OrbHooks` (the
+  full wire subset of AgentHooks + getWorkpieceDocState, executeWebFetch, claimPendingTurn,
+  reportTurnTerminal, refreshOrbSession, mintInferenceGrant), `OrbHarnessTarget`
+  (runTurn/abortTurn/ping), `OrbTurnRecord` (turnId, chatId, model snapshot, aiGatewayLogRoute,
+  grantJwt, chatMessages, author, initiator, callbackInitiated, compaction),
+  `OrbTurnOutcome`. The grant rides inside the record (the plan sketch passed it as a second
+  argument; the record is what claimPendingTurn returns, and the claim path re-mints a fresh
+  grant anyway).
+- Proxy addressing fixed: `handleOrbInference` derives the provider API suffix from the URL
+  **pathname** (`/orb-api/inference/chat/completions` → suffix `/chat/completions`), appends it
+  to the resolved provider base, and forwards the request's query string. `server.ts` matches
+  the `/orb-api/inference` subtree; the router already forwards `/orb-api/*`. Tests updated to
+  the real calling shape, including origin-escape coverage (a suffix like `/https://...` cannot
+  leave the resolved provider's host). No credential ever returns to the caller (17 tests).
+
+### A.5 Remaining phases (unchanged from the plan)
+
+1. Phase 1 extraction: move the loop driver + tools from agent.ts into `packages/agent-core`
+   (now unblocked — its wire types live in shared). Nothing below the boundary changes.
+2. Phase 2 remainder: orb session JWT (15-min, `gen` claim, DO-bumped revocation) +
+   `authenticateOrbHarness(jwt)` on the public capnweb API returning a thread-scoped
+   `OrbHooks` RpcTarget; turn queue records (`claimPendingTurn` dedupe); harness supervision
+   via envd (protected by the buffered-envd → streaming-envd prereq).
+3. Phase 3: `packages/orb-harness` (Bun, Effect v4): BrokerClient (capnweb session + retry),
+   Inference layer (`makeProxyHandle` per A.1), TurnRunner, local executeShell.
+4. Phase 4: cutover — per-thread `executor: "do" | "orb"`, e2e-verify against orb threads.

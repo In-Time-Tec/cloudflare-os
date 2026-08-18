@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ESNext", "ESNext.Disposable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node", "@cloudflare/workers-types/experimental"],
+    "skipLibCheck": true,
+    "noEmit": true,
+    "paths": {
+      "@gadgets/workshop-shared/*": ["../workshop-shared/src/*"],
+      "@gadgets/agent-core": ["../agent-core/src/index.ts"],
+      "@gadgets/backend-utils/*": ["../backend-utils/src/*"]
+    }
+  },
+  "include": ["src", "__tests__"],
+  "exclude": ["dist", "node_modules"]
+}

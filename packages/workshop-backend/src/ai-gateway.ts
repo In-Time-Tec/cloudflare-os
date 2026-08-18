@@ -5,6 +5,8 @@ import {
   SUGGESTED_MODELS,
 } from "@gadgets/workshop-shared/api";
 import type { UserAiModelRecord } from "./user.js";
+import type { AiGatewayLogRoute } from "@gadgets/workshop-shared/agent-types";
+export type { AiGatewayLogRoute };
 
 // The model used for quick tasks like title generation when AI Gateway mode is active.
 //
@@ -166,9 +168,6 @@ export function getManagedAiConfig(env: Cloudflare.Env): ManagedAiConfig | null 
 }
 
 /** Identifies the Gateway and credentials needed to retrieve an inference log. */
-export type AiGatewayLogRoute =
-  | { gateway: string }
-  | { gateway: string; accountId: string; apiToken: string };
 
 /** Indicates a transient AI Gateway log lookup failure that should be retried. */
 export class AiGatewayLogRetryableError extends Error {}

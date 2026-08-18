@@ -6,12 +6,12 @@
   "scripts": {
     "dev": "echo \"run 'pnpm dev-server' in the root directory instead\" >&2 && exit 1",
     "deploy": "wrangler deploy",
-    "build:worker": "node build-browser-runtime.mjs && pnpm exec capnweb-validate build --out .wrangler/validate",
-    "build": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && tsc",
+    "build:worker": "node build-browser-runtime.mjs && node scripts/build-orb-harness.mjs && pnpm exec capnweb-validate build --out .wrangler/validate",
+    "build": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && node scripts/build-orb-harness.mjs && tsc",
     "clean": "rm -rf dist",
-    "test": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && vitest run && vitest run --config vitest.integration.config.ts",
-    "test:integration": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && vitest run --config vitest.integration.config.ts",
-    "test:watch": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && vitest",
+    "test": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && node scripts/build-orb-harness.mjs && vitest run && vitest run --config vitest.integration.config.ts",
+    "test:integration": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && node scripts/build-orb-harness.mjs && vitest run --config vitest.integration.config.ts",
+    "test:watch": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && node scripts/build-orb-harness.mjs && vitest",
     "build:format-templates": "node scripts/build-format-templates.mjs",
     "import:format-template": "node --experimental-strip-types --no-warnings scripts/import-format-template.mjs"
   },
@@ -23,12 +23,14 @@
     "@gadgets/error-reporting": "workspace:*",
     "@gadgets/typed-storage": "workspace:*",
     "@gadgets/workshop-shared": "workspace:*",
+    "@gadgets/orb-harness": "workspace:*",
     "capnweb": "catalog:",
     "capnweb-validate": "catalog:",
     "diff": "^8.0.4",
     "effect": "catalog:",
     "jose": "^6.2.5",
-    "yjs": "^13.6.31"
+    "yjs": "^13.6.31",
+    "@gadgets/agent-core": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",

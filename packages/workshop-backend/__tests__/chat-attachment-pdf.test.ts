@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bridgePdfAttachments } from "../src/chat-attachment-pdf.js";
+import { bridgePdfAttachments } from "@gadgets/agent-core";
 
 // Request-level coverage (real pi adapters emitting real payloads, then bridged) lives in
 // ai-models.test.ts; these tests pin the rewrite rules themselves.

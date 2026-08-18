@@ -2,8 +2,8 @@ import {SUGGESTED_MODELS, WORKERS_AI_OUTPUT_LIMIT, type AiChatMessage, type AiMo
   from "@gadgets/workshop-shared/api";
 import type {Api, Message, Model} from "@earendil-works/pi-ai";
 import * as Y from "yjs";
-import type {ChatBindingEntry, CompactionCheckpoint} from "./agent";
-import {zeroUsage} from "./ai-invoke";
+import type {ChatBindingEntry, CompactionCheckpoint} from "@gadgets/workshop-shared/agent-types";
+import {zeroUsage} from "./invoke.js";
 
 // Context compaction keeps long chats within the model's limit. It summarizes the messages before a
 // boundary and stores their replay state in a checkpoint. Canonical history keeps every message, so

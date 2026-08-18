@@ -2,7 +2,7 @@
 // (the daemon on port 49983 of every E2B sandbox). ConnectRPC-over-HTTP with JSON codec —
 // plain fetch, works in workerd. See plans/research-e2b-orbs.md §1.6.
 
-import { Data, Effect, Schema } from "effect";
+import { Data, Effect, Result, Schema } from "effect";
 
 /** envd request failed at the network layer. */
 export class EnvdNetworkError extends Data.TaggedError("EnvdNetworkError")<{
@@ -29,6 +29,28 @@ export const CommandOutput = Schema.Struct({
 });
 export type CommandOutput = typeof CommandOutput.Type;
 
+const EnvdEvent = Schema.Struct({
+  data: Schema.optional(Schema.Struct({
+    stdout: Schema.optional(Schema.String),
+    stderr: Schema.optional(Schema.String),
+  })),
+  end: Schema.optional(Schema.Struct({
+    exitCode: Schema.optional(Schema.Number),
+  })),
+});
+
+const EnvdFrame = Schema.Struct({
+  event: Schema.optional(EnvdEvent),
+  result: Schema.optional(Schema.Struct({
+    event: Schema.optional(EnvdEvent),
+  })),
+});
+
+function decodeEnvdFrame(value: unknown): typeof EnvdEvent.Type | undefined {
+  const decoded = Schema.decodeUnknownResult(EnvdFrame)(value);
+  if (!Result.isSuccess(decoded)) return undefined;
+  return decoded.success.event ?? decoded.success.result?.event;
+}
 /**
  * Run one command to completion inside the sandbox and collect its output. envd's
  * process.Start is a server-streamed ConnectRPC call; with the JSON codec the response body
@@ -81,33 +103,36 @@ export const runCommand = (
           }))),
   );
 
+export const runCommandPromise = (
+  sandboxId: string,
+  envdAccessToken: string | undefined,
+  command: string,
+  timeoutMs: number,
+): Promise<CommandOutput> =>
+  Effect.runPromise(runCommand(sandboxId, envdAccessToken, command, timeoutMs));
+
 /**
  * Fold a connect+json server-stream body into collected output. Each frame is a 5-byte
  * envelope (flags + length) followed by JSON; we parse defensively since this is an
  * external system's wire format.
  */
-function parseConnectStream(body: string): CommandOutput {
+export function parseConnectStream(body: string): CommandOutput {
   let stdout = "";
   let stderr = "";
   let exitCode = 0;
-  // Frames are length-prefixed envelopes, but proxies may re-chunk; scan for balanced
-  // top-level JSON objects instead of trusting the framing bytes.
   for (const candidate of extractJsonObjects(body)) {
+    let json: unknown;
     try {
-      const frame = JSON.parse(candidate) as {
-        event?: {
-          data?: { stdout?: string; stderr?: string };
-          end?: { exitCode?: number };
-        };
-      };
-      const data = frame.event?.data;
-      if (data?.stdout) stdout += decodeMaybeBase64(data.stdout);
-      if (data?.stderr) stderr += decodeMaybeBase64(data.stderr);
-      const end = frame.event?.end;
-      if (end?.exitCode !== undefined) exitCode = end.exitCode;
+      json = JSON.parse(candidate);
     } catch {
-      // Not a frame boundary we understood; skip.
+      continue;
     }
+    const event = decodeEnvdFrame(json);
+    if (!event) continue;
+    const data = event.data;
+    if (data?.stdout) stdout += decodeMaybeBase64(data.stdout);
+    if (data?.stderr) stderr += decodeMaybeBase64(data.stderr);
+    if (event.end?.exitCode !== undefined) exitCode = event.end.exitCode;
   }
   return { stdout, stderr, exitCode };
 }
@@ -188,4 +213,46 @@ export const writeFile = (
             status: (outcome as { error: { status: number; body: string } }).error.status,
             body: (outcome as { error: { status: number; body: string } }).error.body,
           }))),
+  );
+
+export const startDetached = (
+  sandboxId: string,
+  envdAccessToken: string | undefined,
+  command: string,
+): Effect.Effect<number, EnvdError> =>
+  runCommand(
+      sandboxId,
+      envdAccessToken,
+      `nohup ${command} >/tmp/orb-harness.log 2>&1 & echo $!`,
+      15_000).pipe(
+    Effect.flatMap((output) => {
+      const pid = Number.parseInt(output.stdout.trim().split(/\s+/).pop() ?? "", 10);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        return Effect.fail(new EnvdApiError({
+          operation: "startDetached",
+          status: 500,
+          body: output.stderr || output.stdout.slice(0, 256) || "could not parse pid",
+        }));
+      }
+      return Effect.succeed(pid);
+    }),
+  );
+
+export const isProcessAlive = (
+  sandboxId: string,
+  envdAccessToken: string | undefined,
+  pid: number,
+): Effect.Effect<boolean, EnvdError> =>
+  runCommand(sandboxId, envdAccessToken, `kill -0 ${pid} && echo alive || echo dead`, 10_000).pipe(
+    Effect.map((output) => output.stdout.includes("alive")),
+  );
+
+export const signalProcess = (
+  sandboxId: string,
+  envdAccessToken: string | undefined,
+  pid: number,
+  signal: "TERM" | "KILL",
+): Effect.Effect<void, EnvdError> =>
+  runCommand(sandboxId, envdAccessToken, `kill -${signal} ${pid} || true`, 10_000).pipe(
+    Effect.asVoid,
   );

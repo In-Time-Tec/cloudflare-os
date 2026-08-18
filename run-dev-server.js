@@ -258,6 +258,12 @@ try {
       [join(WORKSHOP_BACKEND_DIR, "scripts", "build-format-templates.mjs")],
       WORKSHOP_BACKEND_DIR,
     ),
+    runBuild(
+      "orb harness",
+      process.execPath,
+      [join(WORKSHOP_BACKEND_DIR, "scripts", "build-orb-harness.mjs")],
+      WORKSHOP_BACKEND_DIR,
+    ),
     runBuild("configurator UIs", "pnpm",
         ["exec", "vp", "run", "-r", "--cache", "build:configurator", "--dev"], ROOT),
     runBuild("gatekeeper app UIs", "pnpm",

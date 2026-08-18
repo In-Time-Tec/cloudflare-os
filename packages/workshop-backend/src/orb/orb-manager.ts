@@ -30,8 +30,11 @@ export type OrbStatus = "none" | "running" | "paused";
 export type OrbState = {
   sandboxId?: string;
   status: OrbStatus;
-  /** ms since epoch of the last activity that touched the orb. */
   lastActivity: number;
+  envdAccessToken?: string;
+  sessionGen?: number;
+  harnessPid?: number;
+  harnessHash?: string;
 };
 
 /** Deployment-wide orb settings (admin-configured; no per-thread sizing). */
@@ -85,14 +88,27 @@ export async function wakeOrb(
       autoPause: true,
       metadata: { threadId },
     }));
-    store.put({ sandboxId: info.sandboxID, status: "running", lastActivity: Date.now() });
+    store.put({
+      sandboxId: info.sandboxID,
+      status: "running",
+      lastActivity: Date.now(),
+      envdAccessToken: info.envdAccessToken,
+    });
     logger.info("orb created", { event: "orb.created", threadId, sandboxId: info.sandboxID });
     return { sandboxId: info.sandboxID, resumed: false };
   }
 
   const info = await run(threadId,
       connectSandbox(apiKey, state.sandboxId, SANDBOX_TTL_SECONDS));
-  store.put({ sandboxId: info.sandboxID, status: "running", lastActivity: Date.now() });
+  store.put({
+    sandboxId: info.sandboxID,
+    status: "running",
+    lastActivity: Date.now(),
+    envdAccessToken: info.envdAccessToken ?? state.envdAccessToken,
+    sessionGen: state.sessionGen,
+    harnessPid: info.resumed ? state.harnessPid : undefined,
+    harnessHash: info.resumed ? state.harnessHash : undefined,
+  });
   if (info.resumed) {
     logger.info("orb resumed", { event: "orb.resumed", threadId, sandboxId: info.sandboxID });
   }

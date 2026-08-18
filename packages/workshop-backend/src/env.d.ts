@@ -39,6 +39,11 @@ declare global {
       // never forwarded to sandboxes, agents, or the frontend. Absent = orbs disabled.
       E2B_API_KEY?: string;
 
+      // Signing key for orb-facing tokens (turn inference grants). Backend-only Worker secret.
+      // A sandbox holds only tokens signed by this key -- never a provider credential. Absent =
+      // the orb inference proxy refuses every request.
+      ORB_TOKEN_SIGNING_KEY?: string;
+
       // Template storage bindings.
       TEMPLATES: KVNamespace;             // Workers KV for template metadata lookup
       TEMPLATE_CONTENT: R2Bucket;         // R2 bucket for template code snapshots
