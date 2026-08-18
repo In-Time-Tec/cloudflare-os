@@ -1023,6 +1023,7 @@ export class SpotifyGatekeeperImpl extends DurableObject<Env, SpotifyGatekeeperI
    * Authorize an action, perform it against Spotify, and record its outcome. A failure after the
    * request was sent leaves the outcome unknown, so it is reported as possibly having taken effect.
    */
+  @skipRpcValidation()
   async performAction<T>(
     recorder: RpcStub<ActionRecorder>,
     description: ActionDescription,

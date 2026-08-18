@@ -1,5 +1,5 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
-import type { AiChatAuthorInfo, GatekeeperVendorFilter } from '@gadgets/workshop-shared/api'
+import type { AiChatAuthorInfo, GatekeeperVendorFilter, OutputSummary } from '@gadgets/workshop-shared/api'
 import { workshopSession, type WorkshopSession } from '../session'
 import { persistedQueryMeta } from './client'
 
@@ -113,11 +113,13 @@ export function outputsOptions(session: WorkshopSession) {
   return queryOptions({
     queryKey: accountKey(session.cacheScope, 'outputs'),
     queryFn: async () => {
+      let latest: OutputSummary[] = []
       for (let attempt = 0; attempt < OUTPUT_CATCH_UP_LIMIT; attempt += 1) {
         const { outputs, catchingUp } = await api(session).listOutputs()
-        if (!catchingUp) return [...outputs]
+        latest = [...outputs]
+        if (!catchingUp) return latest
       }
-      throw new Error(`Output index did not catch up within ${OUTPUT_CATCH_UP_LIMIT} attempts`)
+      return latest
     },
     meta: persistedQueryMeta,
   })

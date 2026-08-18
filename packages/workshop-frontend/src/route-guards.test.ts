@@ -4,6 +4,7 @@ import { isRedirect } from '@tanstack/react-router'
 import { QueryClient } from '@tanstack/react-query'
 import { Route as AuthenticatedRoute } from './routes/_authenticated'
 import { Route as AdminRoute } from './routes/_authenticated/admin'
+import { Route as OutputsRoute } from './routes/_authenticated/outputs'
 import { Route as LoginRoute } from './routes/login'
 import { conversationsCapabilityOptions, emailDetailOptions, emailsOptions } from './query/conversations'
 import type { WorkshopSession } from './session'
@@ -72,6 +73,22 @@ describe('route guards', () => {
       LoginRoute.options.beforeLoad!(context({ isAuthenticated: true }) as never),
     )
     expect(isRedirect(err)).toBe(true)
+  })
+
+  it('keeps the outputs page mounted when the index fails to load', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const session = {
+      cacheScope: 'acct',
+      isAuthenticated: true,
+      requireAuthenticatedApi: () => ({
+        listOutputs: async () => {
+          throw new Error('outputs unavailable')
+        },
+      }),
+    } as unknown as WorkshopSession
+    await expect(
+      OutputsRoute.options.loader!(context(session, queryClient) as never),
+    ).resolves.toBeUndefined()
   })
 })
 

@@ -1100,6 +1100,7 @@ export class LinearGatekeeperImpl extends DurableObject<Env, LinearGatekeeperImp
    * Authorize an action, run it against Linear, and record its outcome. A failure after the request
    * was sent leaves the outcome unknown, so it is reported as possibly having taken effect.
    */
+  @skipRpcValidation()
   async performAction<T>(
     recorder: RpcStub<ActionRecorder>,
     description: ActionDescription,

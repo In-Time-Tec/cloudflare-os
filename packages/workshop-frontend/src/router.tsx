@@ -2,6 +2,7 @@ import { createRouter as createTanStackRouter } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
 import { routeTree } from './routeTree.gen'
 import type { WorkshopSession } from './session'
+import RouteError from './components/AppShell/RouteError'
 
 export type WorkshopRouterContext = {
   session: WorkshopSession
@@ -18,6 +19,7 @@ export function createRouter() {
     scrollRestoration: true,
     defaultPreload: 'intent',
     defaultPreloadStaleTime: 0,
+    defaultErrorComponent: RouteError,
   })
 }
 

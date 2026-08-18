@@ -253,9 +253,9 @@ function runBuild(label, command, args, cwd) {
 try {
   await Promise.all([
     runBuild(
-      "format blueprints",
+      "format templates",
       process.execPath,
-      [join(WORKSHOP_BACKEND_DIR, "scripts", "build-format-blueprints.mjs")],
+      [join(WORKSHOP_BACKEND_DIR, "scripts", "build-format-templates.mjs")],
       WORKSHOP_BACKEND_DIR,
     ),
     runBuild("configurator UIs", "pnpm",

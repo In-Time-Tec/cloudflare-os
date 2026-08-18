@@ -20,6 +20,7 @@ import { OutputSummary } from '@gadgets/workshop-shared/api'
 import { useAuthenticatedApi } from '../../AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOutputs, outputsKey, outputsOptions } from '../../query/hooks'
+import { formatRelativeTime } from '../../query/time'
 import { useDocumentTitle } from '../../useDocumentTitle'
 import PageChrome from '../../components/AppShell/PageChrome'
 import ViewToggle from '../../components/ViewToggle'
@@ -37,23 +38,16 @@ import { WorkshopButton, WorkshopIconButton } from '../../components/WorkshopCon
 
 export const Route = createFileRoute('/_authenticated/outputs')({
   component: OutputsPage,
-  loader: ({ context }) =>
-    context.queryClient.ensureQueryData({
-      ...outputsOptions(context.session),
-      revalidateIfStale: true,
-    }),
+  loader: async ({ context }) => {
+    try {
+      await context.queryClient.ensureQueryData({
+        ...outputsOptions(context.session),
+        revalidateIfStale: true,
+      })
+    } catch {
+    }
+  },
 })
-
-function formatRelativeTime(date: Date): string {
-  const diff = Date.now() - date.getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
 
 function outputKey(output: OutputSummary): string {
   return `${output.threadId}:${output.workpieceId}`
@@ -518,7 +512,8 @@ function OutputsPage() {
     let generic = formatOf()
     let byId = new Map<string, string>([[generic.id, generic.plural]])
     for (let offer of formats) {
-      if (!byId.has(offer.output.id)) byId.set(offer.output.id, offer.output.plural)
+      let format = formatOf(offer.output)
+      if (!byId.has(format.id)) byId.set(format.id, format.plural)
     }
     for (let output of outputs) {
       let format = formatOf(output.output)
