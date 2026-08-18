@@ -167,7 +167,7 @@ export type CompactionContext = {
 };
 
 /**
- * Summary of one of the workspace's gadgets, as needed by the agent: identity, the name of the
+ * Summary of one of the thread's gadgets, as needed by the agent: identity, the name of the
  * Y.Doc root map holding its files, and its named bindings. See AgentHooks.listGadgetInfo().
  */
 export type AgentGadgetInfo = {
@@ -175,8 +175,8 @@ export type AgentGadgetInfo = {
   title: string;
   rootName: string;
   /**
-   * Whether this is the workspace's default gadget: the gadget that tools operate on when their
-   * gadget-name parameter is omitted. Only workspaces migrated from single-gadget days
+   * Whether this is the thread's default gadget: the gadget that tools operate on when their
+   * gadget-name parameter is omitted. Only threads migrated from single-gadget days
    * (or created from a template) have one.
    */
   isDefault: boolean;
@@ -270,14 +270,14 @@ export interface AgentHooks {
   buildYDoc(version: number | "current"): {ydoc: Y.Doc, version: number};
 
   /**
-   * Summarize the workspace's gadgets for the system prompt (see AgentGadgetInfo). Gadgets still
+   * Summarize the thread's gadgets for the system prompt (see AgentGadgetInfo). Gadgets still
    * provisional to a chat other than `forChatId` are omitted.
    */
   listGadgetInfo(forChatId: number): AgentGadgetInfo[];
 
   /**
    * Resolve an agent tool's optional workpiece reference to the workpiece's files root. Absent
-   * means the workspace's default gadget; throws an agent-readable error if there is none. When
+   * means the thread's default gadget; throws an agent-readable error if there is none. When
    * `mustExist` is set, additionally throws if the gadget isn't currently registered -- or is
    * provisional to a chat other than `forChatId` -- (used by live file tools; history replay
    * omits it so old edits to since-deleted gadgets still resolve).
@@ -419,7 +419,7 @@ export interface AgentHooks {
    *
    * List the templates available to the turn's initiator (their own published templates, their
    * library, and the deployment's featured set) as formatted text. The initiator -- not the
-   * workspace owner -- because template libraries are per-user: a collaborator driving the agent
+   * thread owner -- because template libraries are per-user: a collaborator driving the agent
    * should see their own. There is no search index; the corpora are small enough for the model to
    * scan directly.
    */
@@ -449,17 +449,17 @@ export interface AgentHooks {
 let SYSTEM_PROMPT = `
 You are a helpful coding assistant tasked with helping users write small personal applications known as "Gadgets". A Gadget is an application that typically serves a single user, or a small group, rather than being public-facing. They may help a user automate part of their job, or just be gadgets the user makes for fun.
 
-# Workspaces
+# Threads
 
-You are working within a "workspace". A workspace contains any number of Gadgets, plus connections to external resources. Each of these is available to you as a named binding in your \`env\` (used with the \`executeCode\` tool, described later). The workspace's current Gadgets, along with each one's files and bindings, are listed later in this prompt with the \`env\` name each one goes by.
+You are working within a "thread". A thread contains any number of Gadgets, plus connections to external resources. Each of these is available to you as a named binding in your \`env\` (used with the \`executeCode\` tool, described later). The thread's current Gadgets, along with each one's files and bindings, are listed later in this prompt with the \`env\` name each one goes by.
 
-A new workspace contains no Gadgets: use the \`createGadget\` tool to create one before writing any code. Most workspaces contain a single Gadget, but the user may ask you to build several Gadgets that work together.
+A new thread contains no Gadgets: use the \`createGadget\` tool to create one before writing any code. Most threads contain a single Gadget, but the user may ask you to build several Gadgets that work together.
 
 When the user asks for a new Gadget, ALWAYS consider starting from a template. A template is code for a specific type of Gadget that has already been written. The \`listTemplates\` tool returns a list of available templates. If any of them match the user's request, and the user did not explicitly request otherwise, you should create a new gadget starting from a template.
 
-Note that users rarely ask for "a Gadget" in those words. They ask for a thing: a doc, a deck, a tracker, a tool that does X. Any of those is a request for a new Gadget, and so a request to consider a template — including when the workspace already contains a Gadget, which does not make the request an edit to that one.
+Note that users rarely ask for "a Gadget" in those words. They ask for a thing: a doc, a deck, a tracker, a tool that does X. Any of those is a request for a new Gadget, and so a request to consider a template — including when the thread already contains a Gadget, which does not make the request an edit to that one.
 
-Tools refer to Gadgets by their binding name in your env: the file tools (\`readFile\`, \`writeFile\`, \`editFile\`) take a \`gadget\` parameter naming the Gadget that owns the file, and \`setGadgetBinding\` takes a \`gadget\` parameter naming the Gadget whose bindings to modify. Some older workspaces have a "default" Gadget (noted in the gadget list) which the file tools fall back to when \`gadget\` is omitted; even so, prefer passing the name explicitly.
+Tools refer to Gadgets by their binding name in your env: the file tools (\`readFile\`, \`writeFile\`, \`editFile\`) take a \`gadget\` parameter naming the Gadget that owns the file, and \`setGadgetBinding\` takes a \`gadget\` parameter naming the Gadget whose bindings to modify. Some older threads have a "default" Gadget (noted in the gadget list) which the file tools fall back to when \`gadget\` is omitted; even so, prefer passing the name explicitly.
 
 # Writing Gadgets
 
@@ -617,13 +617,13 @@ Typically (but not always), you will need to use the \`executeCode\` tool to com
 `.trim();
 
 let READ_FILE_TOOL_DESCRIPTION = `
-Read the content of a file owned by one of the workspace's gadgets. Note that you will be informed any time a file changes, so it is not necessary to read a file again after you have already read it once. This cannot read chat attachments; attachments are provided directly in the conversation.
+Read the content of a file owned by one of the thread's gadgets. Note that you will be informed any time a file changes, so it is not necessary to read a file again after you have already read it once. This cannot read chat attachments; attachments are provided directly in the conversation.
 `.trim();
 
 let CREATE_GADGET_TOOL_DESCRIPTION = `
-Create a new Gadget in this workspace. The new gadget immediately becomes available in your \`env\` under the \`bindingName\` you choose, which is also how you refer to it in other tools (the \`workpiece\` parameter of the file tools, etc.).
+Create a new Gadget in this thread. The new gadget immediately becomes available in your \`env\` under the \`bindingName\` you choose, which is also how you refer to it in other tools (the \`workpiece\` parameter of the file tools, etc.).
 
-Use this when the workspace has no gadgets yet, or when the user asks for an additional gadget. Always choose a short, descriptive title — the user will see it.
+Use this when the thread has no gadgets yet, or when the user asks for an additional gadget. Always choose a short, descriptive title — the user will see it.
 
 By default the new gadget is empty. Pass \`templateId\` (discovered with the \`listTemplates\` tool, or given by the user) to instead start the gadget from a template's code; the result then also describes the bindings the template expects you to wire up.
 `.trim();
@@ -689,7 +689,7 @@ let EXECUTE_CODE_TOOL_DESCRIPTION = `
 Executes one-off JavaScript code, returning the output it logs to the console. The code runs in a sandbox where it cannot talk to the internet, except through the bindings in its 'env' object; fetch() will not work. Otherwise, the code can call any built-in APIs available in Cloudflare Workers.
 
 The 'env' object contains this chat's named bindings:
-* An entry for each Gadget in the workspace, under the name given in the system prompt's gadget list (or the name you passed to \`createGadget\`): an RPC stub pointing at the Gadget's server-side Durable Object. If the user asks you to interact with a Gadget directly, or asks if you can "see" it, use this stub (read the Gadget's server code to learn what RPC methods it exposes).
+* An entry for each Gadget in the thread, under the name given in the system prompt's gadget list (or the name you passed to \`createGadget\`): an RPC stub pointing at the Gadget's server-side Durable Object. If the user asks you to interact with a Gadget directly, or asks if you can "see" it, use this stub (read the Gadget's server code to learn what RPC methods it exposes).
 * An entry for each external resource available to this chat: those listed in the system prompt, those the user grants in messages (shown as \`[Resource Title](env.SOME_NAME)\`), and those you obtain with \`requestConnection\`.
 
 Note that this differs from the \`env\` a Gadget's own code sees: a Gadget's server.js sees only that Gadget's own bindings (listed in the system prompt's gadget list), which are wired up separately with \`setGadgetBinding\`. Your bindings and a Gadget's bindings may point at the same resource under the same or different names.
@@ -719,7 +719,7 @@ type CodePreviewEntry = {
   toolName: "writeFile" | "editFile";
   parser: StreamingToolInputParser;
   // The edit's target workpiece, resolved from the streaming input's prefix fields once they are
-  // complete. `null` means resolution failed (e.g. the agent omitted `workpiece` in a workspace
+  // complete. `null` means resolution failed (e.g. the agent omitted `workpiece` in a thread
   // with no default gadget) — the tool call itself will fail, so no preview is shown.
   target?: {workpieceId: WorkpieceId, rootName: string} | null;
   // Whether we've already emitted the toolCallTarget event. To avoid emitting multiple times.
@@ -1162,7 +1162,7 @@ export async function runAgent(
     compaction: CompactionContext): Promise<CompactionCheckpoint | undefined> {
   let checkpoint = compaction.checkpoint;
 
-  // The workspace's gadget registry, snapshotted at the start of the turn (gadgets provisional
+  // The thread's gadget registry, snapshotted at the start of the turn (gadgets provisional
   // to other chats are excluded -- they belong to those chats' proposed changes). This is the
   // enumeration source of truth for which Y.Doc roots hold gadget files (roots of gadgets
   // deleted from the registry are inert). A gadget created mid-turn (via createGadget) isn't
@@ -1365,7 +1365,7 @@ export async function runAgent(
   let fileKey = (workpieceId: WorkpieceId, filename: string) => `${workpieceId}:${filename}`;
 
   // Resolve a file tool's optional `workpiece` parameter -- the chat binding name of the target
-  // workpiece -- to a workpiece id (or undefined, meaning the workspace's default gadget,
+  // workpiece -- to a workpiece id (or undefined, meaning the thread's default gadget,
   // resolved downstream by resolveWorkpieceRoot).
   let resolveToolWorkpieceId = (workpiece?: string): WorkpieceId | undefined => {
     if (workpiece === undefined) return undefined;
@@ -1848,7 +1848,7 @@ export async function runAgent(
               : undefined;
           if (msg.author.type === "user") {
             // Surface everything the user did in this batch as one synthetic observation:
-            // gadgets they created and bindings they added from the workspace UI
+            // gadgets they created and bindings they added from the thread UI
             // (agent-initiated creations/additions need no note -- the model already sees its
             // own tool calls and recorded results), followed by the diff of their file edits. A
             // creation-only batch has a no-op update and thus no diff.
@@ -2153,7 +2153,7 @@ export async function runAgent(
   if (agentContext.spawnerConfig) {
     // This is a spawned agent. Build an appropriate system prompt. Spawned agents see only the
     // bindings the spawner configured (snapshotted into the chat's seed layer at spawn time),
-    // never the whole workspace.
+    // never the whole thread.
     let namedSeeds = seedBindings.filter(seed => seed.catalog === undefined);
     let systemPromptBindings: string;
     if (namedSeeds.length == 0) {
@@ -2197,10 +2197,10 @@ export async function runAgent(
     //   that files are being created or deleted concurrently to a chat within the cache TTL,
     //   so no big deal. We could "fix" this by choosing the version at the start of the thread
     //   rather than first read.
-    let systemPromptWorkspace: string;
+    let systemPromptThread: string;
     if (gadgetInfos.length == 0) {
-      systemPromptWorkspace =
-          "This workspace does not contain any gadgets yet. Before writing any code, create a " +
+      systemPromptThread =
+          "This thread does not contain any gadgets yet. Before writing any code, create a " +
           "gadget with the `createGadget` tool.";
     } else {
       let sections = gadgetInfos.map(info => {
@@ -2211,7 +2211,7 @@ export async function runAgent(
             : `## Gadget ${JSON.stringify(info.title)} (no binding in your env)`];
         if (info.isDefault) {
           lines.push(
-              `This is the workspace's default gadget: file tools operate on it when their ` +
+              `This is the thread's default gadget: file tools operate on it when their ` +
               `\`workpiece\` parameter is omitted.`);
         }
         if (files.length == 0) {
@@ -2250,7 +2250,7 @@ export async function runAgent(
         }
         return lines.join("\n");
       });
-      systemPromptWorkspace = `# This workspace's gadgets\n\n${sections.join("\n\n")}`;
+      systemPromptThread = `# This thread's gadgets\n\n${sections.join("\n\n")}`;
     }
 
     // Named in the prompt because the request that should trigger them ("make me a doc") may
@@ -2283,7 +2283,7 @@ export async function runAgent(
           ? `${SYSTEM_PROMPT}\n\n${instanceInstructions}`
           : SYSTEM_PROMPT,
       (standardFormats ? `${standardFormats}\n\n` : "") +
-          `${systemPromptWorkspace}${systemPromptConnections}` +
+          `${systemPromptThread}${systemPromptConnections}` +
           (alwaysAvailableResourcesPrompt ? `\n\n${alwaysAvailableResourcesPrompt}` : ""),
     ];
   }

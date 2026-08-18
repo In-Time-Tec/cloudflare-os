@@ -23,15 +23,15 @@ import ShareModal from '../../ShareModal'
 import DeleteConfirmationDialog from '../DeleteConfirmationDialog'
 import SidebarGadgetRow from './SidebarGadgetRow'
 
-// Cap on items shown in the Recent list before the user clicks through to /workspaces.
+// Cap on items shown in the Recent list before the user clicks through to /threads.
 const RECENT_INITIAL_LIMIT = 6
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shape of the workspaces state shared between the rail's pinned tools (search) and the scrolling
-// lists (Favorites / Recent workspaces). Centralized here so both sibling components subscribe to
+// Shape of the threads state shared between the rail's pinned tools (search) and the scrolling
+// lists (Favorites / Recent threads). Centralized here so both sibling components subscribe to
 // the same data and the dialog state has a single owner.
 // ─────────────────────────────────────────────────────────────────────────────
-type WorkspacesContextValue = {
+type ThreadsContextValue = {
   search: string
   setSearch: (v: string) => void
 
@@ -45,22 +45,22 @@ type WorkspacesContextValue = {
   onDelete: (g: GadgetMetadataWithTimestamps) => void
 }
 
-const WorkspacesContext = createContext<WorkspacesContextValue | null>(null)
+const ThreadsContext = createContext<ThreadsContextValue | null>(null)
 
-function useWorkspacesContext(): WorkspacesContextValue {
-  const ctx = useContext(WorkspacesContext)
-  if (!ctx) throw new Error('Sidebar workspaces components must be rendered inside SidebarWorkspacesProvider')
+function useThreadsContext(): ThreadsContextValue {
+  const ctx = useContext(ThreadsContext)
+  if (!ctx) throw new Error('Sidebar threads components must be rendered inside SidebarThreadsProvider')
   return ctx
 }
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
  * Provider: owns all the data + mutation handlers, plus the share / delete dialogs. Renders its
- * children inside its context so SidebarWorkspacesLists can be placed
+ * children inside its context so SidebarThreadsLists can be placed
  * independently in the parent layout (pinned vs. scrolling areas).
  * ─────────────────────────────────────────────────────────────────────────────
  */
-export function SidebarWorkspacesProvider({ children }: { children: ReactNode }) {
+export function SidebarThreadsProvider({ children }: { children: ReactNode }) {
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
   const { data: gadgets = [] } = useGadgets()
@@ -69,7 +69,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
 
   const [search, setSearch] = useState('')
 
-  // Delete / share dialog state (workspaces).
+  // Delete / share dialog state (threads).
   const [deleteTarget, setDeleteTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
   const [shareTarget, setShareTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
   const [shareOverseer, setShareOverseer] = useState<{ stub: RpcStub<Overseer> } | null>(null)
@@ -106,7 +106,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
     return { favorites: favs, recent: rest }
   }, [gadgets, matchText])
 
-  // --- Workspace actions ---------------------------------------------------
+  // --- Thread actions ---------------------------------------------------
 
   const onTogglePin = useCallback((g: GadgetMetadataWithTimestamps) => {
     togglePin(g)
@@ -126,7 +126,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
       overseer = null
     } catch (err) {
       overseer?.[Symbol.dispose]()
-      console.error('Failed to open workspace for sharing:', err)
+      console.error('Failed to open thread for sharing:', err)
       toasts.add({ title: 'Failed to open share settings', variant: 'error' })
     }
   }, [authenticatedApi, toasts])
@@ -140,7 +140,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
     }
   }, [deleteGadget, deleteTarget])
 
-  const value: WorkspacesContextValue = {
+  const value: ThreadsContextValue = {
     search,
     setSearch,
     gadgets,
@@ -153,7 +153,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
   }
 
   return (
-    <WorkspacesContext.Provider value={value}>
+    <ThreadsContext.Provider value={value}>
       {children}
 
       {/* Delete confirm */}
@@ -161,11 +161,11 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
         open={deleteTarget !== null}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
         isDeleting={remove.isPending}
-        title={deleteTarget?.owner ? 'Remove workspace' : 'Delete workspace'}
+        title={deleteTarget?.owner ? 'Remove thread' : 'Delete thread'}
         description={
           deleteTarget?.owner
-            ? `Remove "${deleteTarget?.title || 'Untitled workspace'}" from your list? You can still access it via its link.`
-            : `Delete "${deleteTarget?.title || 'Untitled workspace'}"? This cannot be undone.`
+            ? `Remove "${deleteTarget?.title || 'Untitled thread'}" from your list? You can still access it via its link.`
+            : `Delete "${deleteTarget?.title || 'Untitled thread'}"? This cannot be undone.`
         }
         confirmLabel={deleteTarget?.owner ? 'Remove' : 'Delete'}
         confirmingLabel={deleteTarget?.owner ? 'Removing...' : 'Deleting...'}
@@ -183,7 +183,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
           authenticatedApi={authenticatedApi}
         />
       )}
-    </WorkspacesContext.Provider>
+    </ThreadsContext.Provider>
   )
 }
 
@@ -192,11 +192,11 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
  * communications sections — both read the same memoized arrays from the provider, so the split
  * costs no extra state and no extra fetch.
  *
- * Collapsed, the rail shows one merged strip of workspaces owned by SidebarRecentWorkspaces; this
+ * Collapsed, the rail shows one merged strip of threads owned by SidebarRecentThreads; this
  * renders nothing so that strip stays exactly as it was.
  */
 export function SidebarFavorites({ collapsed = false }: { collapsed?: boolean }) {
-  const { favorites, onTogglePin, onRename, onShare, onDelete } = useWorkspacesContext()
+  const { favorites, onTogglePin, onRename, onShare, onDelete } = useThreadsContext()
   const [favOpen, setFavOpen] = useState(true)
 
   // With nothing pinned the section is just a header reading "Favorites 0" directly beneath the
@@ -228,8 +228,8 @@ export function SidebarFavorites({ collapsed = false }: { collapsed?: boolean })
   )
 }
 
-/** Recent workspaces, plus the collapsed rail's merged strip of favorites and recents. */
-export function SidebarRecentWorkspaces({ collapsed = false }: { collapsed?: boolean }) {
+/** Recent threads, plus the collapsed rail's merged strip of favorites and recents. */
+export function SidebarRecentThreads({ collapsed = false }: { collapsed?: boolean }) {
   const {
     favorites,
     recent,
@@ -237,7 +237,7 @@ export function SidebarRecentWorkspaces({ collapsed = false }: { collapsed?: boo
     onRename,
     onShare,
     onDelete,
-  } = useWorkspacesContext()
+  } = useThreadsContext()
 
   const [recentOpen, setRecentOpen] = useState(true)
 
@@ -265,7 +265,7 @@ export function SidebarRecentWorkspaces({ collapsed = false }: { collapsed?: boo
   return (
     <div className="flex flex-col pb-3">
       <SidebarSection
-        label="Recent workspaces"
+        label="Threads"
         count={recent.length}
         open={recentOpen}
         onToggle={() => setRecentOpen((o) => !o)}
@@ -285,7 +285,7 @@ export function SidebarRecentWorkspaces({ collapsed = false }: { collapsed?: boo
               ))}
             </div>
             <Link
-              to="/workspaces"
+              to="/threads"
               className="mt-0.5 flex h-7 items-center px-2.5 text-[12px] tracking-[-0.2px] text-kumo-inactive transition-colors hover:text-kumo-default"
             >
               Show all
@@ -297,7 +297,7 @@ export function SidebarRecentWorkspaces({ collapsed = false }: { collapsed?: boo
   )
 }
 
-// A collapsible group header used by the sidebar's workspace sections.
+// A collapsible group header used by the sidebar's thread sections.
 function SidebarSection({
   label,
   count,

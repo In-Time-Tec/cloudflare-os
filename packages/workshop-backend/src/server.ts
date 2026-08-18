@@ -247,7 +247,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     try {
       overseerId = this.overseers.idFromString(id);
     } catch {
-      throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceNotFound);
+      throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.threadNotFound);
     }
     let overseer = this.overseers.get(overseerId);
 
@@ -271,7 +271,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
       if (started && !closed) {
         // this.ctx.abort() would be nicer here, but it is still marked experimental in the
         // workers runtime.
-        this.abortSession(new Error(`lost connection to workspace DO (gadget ${id})`));
+        this.abortSession(new Error(`lost connection to thread DO (gadget ${id})`));
       }
     }
 
@@ -279,10 +279,10 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     try {
       result = await overseer.open(userId, profileId, notifyClosed, shareKey, configureObservers);
     } catch (err) {
-      // A denial proves this user's listing for the workspace is stale: revocation tries to drop it
+      // A denial proves this user's listing for the thread is stale: revocation tries to drop it
       // (refreshAffectedCollaboratorListings), but that push is best-effort. Only catches entries
       // they click; others stay frozen at revocation, as a disconnected collaborator gets no pushes.
-      if (getOpenGadgetErrorCode(err) === OPEN_GADGET_ERROR_CODES.workspaceAccessDenied) {
+      if (getOpenGadgetErrorCode(err) === OPEN_GADGET_ERROR_CODES.threadAccessDenied) {
         await this.#user.forgetSharedGadget(id);
       }
       throw err;
@@ -307,7 +307,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
 
   async newGadget(): Promise<RpcStub<Overseer>> {
     let id = this.overseers.newUniqueId().toString();
-    await this.#user.newGadget(id, "Untitled Workspace");
+    await this.#user.newGadget(id, "Untitled Thread");
     recordAnalytics(this.ctx, this.env, {
       event_name: "gadget_created",
       user_id: this.#userId.toString(),
@@ -316,7 +316,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     });
     let result = await this.openGadget(id);
     if (!result) {
-      throw new Error("Open failed despite newly-created workspace?");
+      throw new Error("Open failed despite newly-created thread?");
     }
     return result;
   }
@@ -478,7 +478,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
         deploymentOutputForTemplate(await readAdminConfig(this.env), templateId,
             sanitizeTemplateOutput(kvRecord.metadata.output)));
 
-    // 5. Create gatekeepers from assignments and bind them into the workspace's (only) gadget.
+    // 5. Create gatekeepers from assignments and bind them into the thread's (only) gadget.
     let metadata = await overseerResult.getMetadata();
     using gadget = await overseerResult.getGadget(metadata.defaultGadgetId!);
 

@@ -204,17 +204,17 @@ describe("observer re-verification", () => {
       const aliceAccount = await provisionAccount(aliceApi);
       const bobAccount = await provisionAccount(bobApi);
 
-      const ownerWorkspace = await aliceApi.newGadget();
-      const { id: gadgetId } = await ownerWorkspace.getMetadata();
-      const collaborator = await ownerWorkspace.addCollaborator(
+      const ownerThread = await aliceApi.newGadget();
+      const { id: gadgetId } = await ownerThread.getMetadata();
+      const collaborator = await ownerThread.addCollaborator(
           (await bobApi.whoami()).id, "build");
       if (!collaborator) throw new Error(`Failed to share the gadget with ${bob}`);
-      ownerWorkspace[Symbol.dispose]();
+      ownerThread[Symbol.dispose]();
 
       // No ObserverConfigCallback is supplied. Opening can only succeed if the Workshop discovers
       // Bob's ambient account itself; the fixture records which account's verifier it receives.
-      using sharedWorkspace = await bobApi.openGadget(gadgetId);
-      await expect(sharedWorkspace.getMetadata()).resolves.toMatchObject({ id: gadgetId });
+      using sharedThread = await bobApi.openGadget(gadgetId);
+      await expect(sharedThread.getMetadata()).resolves.toMatchObject({ id: gadgetId });
       expect(await ambientVerificationCount(accountLabel(bobAccount))).toBe(1);
       expect(await ambientVerificationCount(accountLabel(aliceAccount))).toBe(0);
     });
@@ -316,7 +316,7 @@ describe("observer re-verification", () => {
 
   it.concurrent("denies terminally with no prompt when the client offers no config channel",
       async () => {
-    // The path a collaborator hits by favouriting or sharing a workspace from the sidebar, where
+    // The path a collaborator hits by favouriting or sharing a thread from the sidebar, where
     // openGadget() is called without a callback. This message is the only thing they ever see.
     //
     // Uses a settled denial rather than an expiry, since there is nothing to repair here anyway.

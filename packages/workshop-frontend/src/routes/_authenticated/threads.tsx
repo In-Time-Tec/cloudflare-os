@@ -5,8 +5,8 @@ import PageChrome, { PAGE_ACTION } from '../../components/AppShell/PageChrome'
 import { useDocumentTitle } from '../../useDocumentTitle'
 import { gadgetsOptions } from '../../query/hooks'
 
-export const Route = createFileRoute('/_authenticated/workspaces')({
-  component: WorkspacesPage,
+export const Route = createFileRoute('/_authenticated/threads')({
+  component: ThreadsPage,
   loader: ({ context }) =>
     context.queryClient.ensureQueryData({
       ...gadgetsOptions(context.session),
@@ -14,11 +14,11 @@ export const Route = createFileRoute('/_authenticated/workspaces')({
     }),
 })
 
-function WorkspacesPage() {
-  useDocumentTitle('Workspaces')
+function ThreadsPage() {
+  useDocumentTitle('Threads')
   return (
     <PageChrome
-      title="Workspaces"
+      title="Threads"
       actions={
         <Link to="/" className={PAGE_ACTION}>
           <Plus size={14} />

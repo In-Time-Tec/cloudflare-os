@@ -21,13 +21,13 @@ export type SubmitExternalMessageInput = {
    * The backend trusts the gateway: supplying this email grants access as that account.
    */
   callerEmail: string;
-  /** Selects the workspace to create or reuse. */
+  /** Selects the thread to create or reuse. */
   gadgetKey: string;
   /** Selects the chat to create or reuse. */
   chatKey: string;
   /** Deduplicates the originating message and correlates the response target. */
   messageKey: string;
-  /** Names the workspace if it must be created. */
+  /** Names the thread if it must be created. */
   gadgetTitle: string;
   /** User text sent to Gadgets. */
   prompt: string;

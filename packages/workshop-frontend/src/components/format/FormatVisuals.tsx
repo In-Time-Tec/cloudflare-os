@@ -1,6 +1,6 @@
 // The ways an output format is drawn:
 //
-//   <FormatGlyph>     bare icon             workspace tab, menus, pickers, command palette
+//   <FormatGlyph>     bare icon             thread tab, menus, pickers, command palette
 //   <FormatMiniature> icon on a small tile  chat cards
 //   <FormatTile>      icon on a tile        Outputs list rows
 //   <FormatThumbnail> wireframe drawing     Outputs grid cards

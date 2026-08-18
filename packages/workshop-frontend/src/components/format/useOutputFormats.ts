@@ -31,7 +31,7 @@ export async function createFromFormat(
   try {
     overseer = await api.newGadgetFromTemplate(format.templateId, {})
     const { id } = await overseer.getMetadata()
-    navigate({ to: '/workspace/$id', params: { id } })
+    navigate({ to: '/thread/$id', params: { id } })
   } catch (err) {
     console.error('Failed to create from format:', err)
     toasts.add({ title: `Couldn't create a new ${format.output.noun}`, variant: 'error' })

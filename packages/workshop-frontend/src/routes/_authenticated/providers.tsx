@@ -295,7 +295,7 @@ function ProvidersPage() {
             <div>
               <p className="text-sm font-medium text-kumo-default">No AI providers yet</p>
               <p className="mt-1 text-[13px] leading-[18px] text-kumo-subtle">
-                Add a provider to start building workspaces with AI.
+                Add a provider to start building threads with AI.
               </p>
             </div>
             {canAddModels && (

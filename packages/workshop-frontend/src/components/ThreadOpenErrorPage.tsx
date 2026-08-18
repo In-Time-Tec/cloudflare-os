@@ -6,34 +6,34 @@ import {
 } from '@gadgets/workshop-shared/api'
 import { WorkshopButton } from './WorkshopControls'
 
-export type WorkspaceOpenFailureKind = 'access-denied' | 'not-found' | 'unexpected'
+export type ThreadOpenFailureKind = 'access-denied' | 'not-found' | 'unexpected'
 
 const CONTENT = {
   'access-denied': {
-    title: "You don't have access to this workspace",
-    message: 'Ask the workspace owner to grant you access, then try again.',
+    title: "You don't have access to this thread",
+    message: 'Ask the thread owner to grant you access, then try again.',
     Icon: Lock,
     retryable: true,
   },
   'not-found': {
-    title: 'Workspace not found',
-    message: 'The link may be incorrect, or the workspace may have been deleted.',
+    title: 'Thread not found',
+    message: 'The link may be incorrect, or the thread may have been deleted.',
     Icon: MagnifyingGlass,
     retryable: false,
   },
   unexpected: {
-    title: "We couldn't load this workspace",
-    message: 'Try again. If the problem continues, return to your workspaces.',
+    title: "We couldn't load this thread",
+    message: 'Try again. If the problem continues, return to your threads.',
     Icon: WarningCircle,
     retryable: true,
   },
 } as const
 
-export function classifyWorkspaceOpenFailure(error: unknown): WorkspaceOpenFailureKind {
+export function classifyThreadOpenFailure(error: unknown): ThreadOpenFailureKind {
   switch (getOpenGadgetErrorCode(error)) {
-    case OPEN_GADGET_ERROR_CODES.workspaceAccessDenied:
+    case OPEN_GADGET_ERROR_CODES.threadAccessDenied:
       return 'access-denied'
-    case OPEN_GADGET_ERROR_CODES.workspaceNotFound:
+    case OPEN_GADGET_ERROR_CODES.threadNotFound:
       return 'not-found'
     default:
       return 'unexpected'
@@ -41,12 +41,12 @@ export function classifyWorkspaceOpenFailure(error: unknown): WorkspaceOpenFailu
 }
 
 type Props = {
-  kind: WorkspaceOpenFailureKind
+  kind: ThreadOpenFailureKind
   onRetry: () => void
-  onGoToWorkspaces: () => void
+  onGoToThreads: () => void
 }
 
-export default function WorkspaceOpenErrorPage({ kind, onRetry, onGoToWorkspaces }: Props) {
+export default function ThreadOpenErrorPage({ kind, onRetry, onGoToThreads }: Props) {
   const { title, message, Icon, retryable } = CONTENT[kind]
   const titleId = useId()
   const descriptionId = useId()
@@ -86,9 +86,9 @@ export default function WorkspaceOpenErrorPage({ kind, onRetry, onGoToWorkspaces
           <WorkshopButton
             tone={retryable ? 'secondary' : 'primary'}
             className="!h-9"
-            onClick={onGoToWorkspaces}
+            onClick={onGoToThreads}
           >
-            Go to workspaces
+            Go to threads
           </WorkshopButton>
           {retryable && (
             <WorkshopButton tone="primary" onClick={onRetry}>

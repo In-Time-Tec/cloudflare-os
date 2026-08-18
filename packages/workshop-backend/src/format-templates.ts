@@ -53,7 +53,7 @@ async function installOne(env: InstallEnv, entry: BundledFormatTemplate)
   }
 
   // The archive supplies what the template does -- code, bindings, and the dates from the
-  // workspace it was exported from. How it is presented comes from its sidecar, overwriting
+  // thread it was exported from. How it is presented comes from its sidecar, overwriting
   // whatever the archive carries.
   let installed: TemplateMetadata = {
     ...metadata,

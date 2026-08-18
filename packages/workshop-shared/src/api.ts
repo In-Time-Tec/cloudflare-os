@@ -158,9 +158,9 @@ export type ConnectedAccountsFilter = GatekeeperVendorFilter & {
 };
 
 /**
- * Identifies a workpiece within a workspace. A workpiece is a numbered thing the user (or agent)
- * is working on inside the workspace -- currently a gadget or a gatekeeper (connection), with
- * more types expected later. All workpiece types share one sequential per-workspace ID namespace,
+ * Identifies a workpiece within a thread. A workpiece is a numbered thing the user (or agent)
+ * is working on inside the thread -- currently a gadget or a gatekeeper (connection), with
+ * more types expected later. All workpiece types share one sequential per-thread ID namespace,
  * so a bare number unambiguously identifies a workpiece of any type, and derived names (Yjs file
  * roots, facet names) can never collide across types.
  */
@@ -188,7 +188,7 @@ const RESERVED_WORDS = new Set([
 /**
  * Validates a binding name, throwing a descriptive Error if it is unacceptable. This is the one
  * shared validator applied at every chokepoint that writes a binding name (gadget binding edges,
- * the workspace default binding list, chat binding maps, spawner env configs, and the agent
+ * the thread default binding list, chat binding maps, spawner env configs, and the agent
  * tools), wherever the map is keyed.
  *
  * A valid name is a JavaScript identifier (see IDENTIFIER_REGEX; reserved words excluded) that is
@@ -309,8 +309,8 @@ function codedErrorFamily<Code extends string>(messages: Record<Code, string>) {
 
 /** Stable error codes attached to expected failures from `AuthenticatedApi.openGadget()`. */
 export const OPEN_GADGET_ERROR_CODES = {
-  workspaceNotFound: "WORKSPACE_NOT_FOUND",
-  workspaceAccessDenied: "WORKSPACE_ACCESS_DENIED",
+  threadNotFound: "THREAD_NOT_FOUND",
+  threadAccessDenied: "THREAD_ACCESS_DENIED",
 } as const;
 
 /** An expected failure code from `AuthenticatedApi.openGadget()`. */
@@ -318,8 +318,8 @@ export type OpenGadgetErrorCode =
     typeof OPEN_GADGET_ERROR_CODES[keyof typeof OPEN_GADGET_ERROR_CODES];
 
 const openGadgetErrors = codedErrorFamily<OpenGadgetErrorCode>({
-  [OPEN_GADGET_ERROR_CODES.workspaceNotFound]: "Workspace not found.",
-  [OPEN_GADGET_ERROR_CODES.workspaceAccessDenied]: "You don't have access to this workspace.",
+  [OPEN_GADGET_ERROR_CODES.threadNotFound]: "Thread not found.",
+  [OPEN_GADGET_ERROR_CODES.threadAccessDenied]: "You don't have access to this thread.",
 });
 
 /** Creates an expected `openGadget()` error with a machine-readable code. */
@@ -490,13 +490,13 @@ export interface AuthenticatedApi extends RpcTarget {
    * ObserverConfigCallback). It is never called for the owner or an already-configured observer,
    * so the common-case open is still a single pipelined round trip.
    *
-   * TODO(multi-gadget): This should be renamed to openWorkspace().
+   * TODO(multi-gadget): This should be renamed to openThread().
    */
   openGadget(id: string, shareKey?: string,
              configureObservers?: RpcStub<ObserverConfigCallback>): Promise<RpcStub<Overseer>>;
 
   /**
-   * Create a new workspace. It will start out titled "Untitled Workspace".
+   * Create a new thread. It will start out titled "Untitled Thread".
    *
    * Note: A gadget is considered "provisional" until it has some sort of activity, such as a
    *   chat message or code edit. Provisional gadgets do not appear on the home page and will be
@@ -505,7 +505,7 @@ export interface AuthenticatedApi extends RpcTarget {
    *   into a gadget), so provisional gadgets are useful to allow the user to write an initial
    *   chat message without explicitly creating a new gadget.
    *
-   * TODO(multi-gadget): This should be renamed to newWorkspace().
+   * TODO(multi-gadget): This should be renamed to newThread().
    */
   newGadget(): Promise<RpcStub<Overseer>>;
 
@@ -519,10 +519,10 @@ export interface AuthenticatedApi extends RpcTarget {
   listGadgets(): Promise<GadgetMetadataWithTimestamps[]>;
 
   /**
-   * List the outputs of all the user's workspaces. Used to display the Outputs page, which lets
-   * the user find things they made without remembering which workspace they made them in.
+   * List the outputs of all the user's threads. Used to display the Outputs page, which lets
+   * the user find things they made without remembering which thread they made them in.
    *
-   * Served from an index in the user's own account which each workspace pushes to; a workspace
+   * Served from an index in the user's own account which each thread pushes to; a thread
    * shared with the user contributes its outputs from the first time the user opens it (matching
    * when it appears in listGadgets()), and stops updating them if their access is revoked.
    * Provisional gadgets (still awaiting acceptance of a chat's changes) are never included.
@@ -1270,20 +1270,20 @@ export const SUGGESTED_MODELS: Record<
 };
 
 /**
- * Metadata about a workspace (one Overseer DO and everything in it). Includes everything needed
- * to render the workspace list on the front page.
+ * Metadata about a thread (one Overseer DO and everything in it). Includes everything needed
+ * to render the thread list on the front page.
  *
- * TODO(multi-gadget): Rename `WorkspaceMetadata`.
+ * TODO(multi-gadget): Rename `ThreadMetadata`.
  */
 export type GadgetMetadata = {
   /**
-   * Unique ID for this workspace, used with `openGadget()`. This is a url-safe base64 value
-   * chosen randomly when the workspace is created.
+   * Unique ID for this thread, used with `openGadget()`. This is a url-safe base64 value
+   * chosen randomly when the thread is created.
    */
   id: string;
 
   /**
-   * Human-readable workspace title. Can be modified. (Per-gadget titles live on the gadget
+   * Human-readable thread title. Can be modified. (Per-gadget titles live on the gadget
    * workpieces themselves; see WorkpieceSummary.)
    */
   title: string;
@@ -1316,7 +1316,7 @@ export type GadgetMetadata = {
   /**
    * Various objects in the API specify a gadgetId, but make the property optional. When omitted,
    * the default gadget ID should be assumed. This is largely for backwards compatibility with
-   * records that were stored before workspaces could have multiple gadgets.
+   * records that were stored before threads could have multiple gadgets.
    *
    * TODO(multi-gadget): Do a migration to backfill all gadget IDs, then eliminate the concept of
    * a default gadget from the API.
@@ -1403,28 +1403,28 @@ export type ListOutputsResult = {
   outputs: OutputSummary[];
 
   /**
-   * Set while workspaces predating the index are still being swept into it, which happens once per
+   * Set while threads predating the index are still being swept into it, which happens once per
    * user after a deployment upgrades. Each call sweeps a bounded number of them, so a caller that
    * wants the rest calls again until this is false.
    *
-   * False means stop asking, not that the index is complete. A workspace that couldn't be reached
+   * False means stop asking, not that the index is complete. A thread that couldn't be reached
    * is passed over rather than retried forever, and a sweep that reached none of them gives up for
-   * now instead of spinning. Either way the gap closes when the workspace is next opened, and the
+   * now instead of spinning. Either way the gap closes when the thread is next opened, and the
    * next call to this method resumes any sweep that was left unfinished.
    */
   catchingUp: boolean;
 };
 
 /**
- * One entry in the user's output index: something a workspace produced that the user can open
+ * One entry in the user's output index: something a thread produced that the user can open
  * directly.
  */
 export type OutputSummary = {
-  /** The workspace that contains this output (an `openGadget()` id). */
-  workspaceId: string;
+  /** The thread that contains this output (an `openGadget()` id). */
+  threadId: string;
 
   /**
-   * The workpiece within that workspace. `(workspaceId, workpieceId)` uniquely identifies an
+   * The workpiece within that thread. `(threadId, workpieceId)` uniquely identifies an
    * output.
    */
   workpieceId: WorkpieceId;
@@ -1436,25 +1436,25 @@ export type OutputSummary = {
   output?: TemplateOutput;
 
   title: string;
-  workspaceTitle: string;
+  threadTitle: string;
   created: Date;
 
   /**
-   * When the containing workspace was last active. Outputs have no activity timestamp of their
-   * own yet, so all outputs of a workspace share this value.
+   * When the containing thread was last active. Outputs have no activity timestamp of their
+   * own yet, so all outputs of a thread share this value.
    */
   lastActive: Date;
 
   /**
-   * Set when the containing workspace is owned by someone else (i.e. it was shared with the
+   * Set when the containing thread is owned by someone else (i.e. it was shared with the
    * caller).
    */
   owner?: AiChatAuthorInfo;
 
   /**
    * The caller's role, cached on their last open and refreshed when a revocation downgrades them,
-   * so a listing can offer only the actions it permits; the workspace still authorizes each one
-   * when attempted. Absent for the caller's own workspaces, and for a shared one whose last open
+   * so a listing can offer only the actions it permits; the thread still authorizes each one
+   * when attempted. Absent for the caller's own threads, and for a shared one whose last open
    * predates this field.
    */
   role?: CollaboratorRole;
@@ -1533,7 +1533,7 @@ export interface CodeSubscriber {
 export type ActionState = "pending" | "approved" | "rejected";
 
 export type ActionLogEntry = {
-  /** Sequential ID number for the action. Counts up from when the workspace was created. */
+  /** Sequential ID number for the action. Counts up from when the thread was created. */
   id: number;
 
   /**
@@ -1627,7 +1627,7 @@ export type AgentSpawnerConfig = {
    * `env.NAME` in the spawned agent's executeCode environment) -> target workpiece. When an agent
    * is spawned, this map is snapshotted into the spawned chat's seed binding layer (entries whose
    * targets no longer exist are dropped); the spawned agent sees only these bindings, never the
-   * workspace's default binding list.
+   * thread's default binding list.
    *
    * The entries are deliberately not limited to bindings held by the gadget that owns the
    * spawner: a spawner may define bindings of its own, with its own names and targets.
@@ -1636,17 +1636,17 @@ export type AgentSpawnerConfig = {
 };
 
 /**
- * Interface to a workspace's Overseer, used to display the Gadget Workshop shell UI around that
- * workspace. Workspace-level concerns live here: the gadget registry, code sync (one Yjs doc for
- * the whole workspace), chats, actions/hooks, sharing, and template listing. Per-gadget
+ * Interface to a thread's Overseer, used to display the Gadget Workshop shell UI around that
+ * thread. Thread-level concerns live here: the gadget registry, code sync (one Yjs doc for
+ * the whole thread), chats, actions/hooks, sharing, and template listing. Per-gadget
  * operations live on the GadgetClient sub-capability (see createGadget()/getGadget()).
  */
 export interface Overseer extends RpcTarget {
-  /** Get metadata describing this workspace. */
+  /** Get metadata describing this thread. */
   getMetadata(): Promise<GadgetMetadata>;
 
   /**
-   * Get metadata describing this workspace and subscribe to changes.
+   * Get metadata describing this thread and subscribe to changes.
    *
    * `callback` will be called once immediately with the current metadata, then again any time it
    * changes.
@@ -1663,14 +1663,14 @@ export interface Overseer extends RpcTarget {
    */
   subscribeToPresence(subscriber: RpcStub<PresenceSubscriber>): Promise<RpcStub<{}>>;
 
-  /** Change the workspace title. */
+  /** Change the thread title. */
   setTitle(title: string): Promise<void>;
 
-  /** Pin or unpin this workspace in the user's list. */
+  /** Pin or unpin this thread in the user's list. */
   setPinned(pinned: boolean): Promise<void>;
 
   /**
-   * Instruct the workspace to delete itself, removing it from the User's workspace list and
+   * Instruct the thread to delete itself, removing it from the User's thread list and
    * deleting all data. Further method calls will fail.
    *
    * TODO: Implement undelete, maybe using PITR...
@@ -1678,7 +1678,7 @@ export interface Overseer extends RpcTarget {
   deleteSelf(): Promise<void>;
 
   /**
-   * Subscribe to the workspace's workpiece list.
+   * Subscribe to the thread's workpiece list.
    *
    * The subscriber receives one entry() per existing workpiece, followed by ready(), then
    * incremental entry()/removed() calls as workpieces are created, renamed, or deleted. In v1
@@ -1689,7 +1689,7 @@ export interface Overseer extends RpcTarget {
   subscribeToWorkpieces(subscriber: RpcStub<WorkpiecesSubscriber>): Promise<RpcStub<{}>>;
 
   /**
-   * Create a new gadget workpiece in this workspace. `title` is required -- gadgets have no
+   * Create a new gadget workpiece in this thread. `title` is required -- gadgets have no
    * default title. The new gadget starts with no files and no bindings.
    *
    * If `chatId` is provided, the creation is provisional to that chat, exactly like code edits
@@ -1698,10 +1698,10 @@ export interface Overseer extends RpcTarget {
    * the user accepts the chat's changes through that message (merging deletes the pending marker;
    * reverting deletes the gadget). Without `chatId` the gadget is created permanently.
    *
-   * `bindingName` is the name under which the gadget appears in chat envs and the workspace
+   * `bindingName` is the name under which the gadget appears in chat envs and the thread
    * default binding list (see validateBindingName()). When absent, the server chooses one from
    * the title (via the quick model when configured, else a generic fallback). Gadget binding
-   * names are unique within the workspace: throws if the name is already taken by another
+   * names are unique within the thread: throws if the name is already taken by another
    * gadget -- including one still pending in another chat (retry after that chat's changes are
    * accepted or reverted).
    */
@@ -1717,7 +1717,7 @@ export interface Overseer extends RpcTarget {
   /**
    * Subscribe to code updates.
    *
-   * Code is represented as a single Yjs doc shared by the whole workspace. Each workpiece that
+   * Code is represented as a single Yjs doc shared by the whole thread. Each workpiece that
    * owns files has its own root Y.Map (mapping file names to Y.Text instances) within the doc,
    * named per WorkpieceSummary.filesRoot. Updates are whole-doc and may span workpieces.
    *
@@ -1747,7 +1747,7 @@ export interface Overseer extends RpcTarget {
    * appropriate account, use `subscribeConnectedAccounts()` with a `filter` for this URL, then
    * let the user choose one.
    *
-   * The new gatekeeper is a workspace-level workpiece; it is not bound into any gadget's `env` by
+   * The new gatekeeper is a thread-level workpiece; it is not bound into any gadget's `env` by
    * default. Use GadgetClient.bind() / bindWithSuggestedName() to expose it to a gadget.
    */
   newGatekeeper(accountId: number, resourceUrl: string): Promise<GatekeeperClient<any> | null>;
@@ -1785,7 +1785,7 @@ export interface Overseer extends RpcTarget {
   /**
    * List information about bound hooks (which could wake up a gadget asynchronously).
    *
-   * The list spans the whole workspace; each entry names the gadget it wakes (see
+   * The list spans the whole thread; each entry names the gadget it wakes (see
    * BoundHookInfo.templateId), so a per-gadget view must filter on that.
    */
   listHooks(): Promise<BoundHookInfo[]>;
@@ -1805,7 +1805,7 @@ export interface Overseer extends RpcTarget {
    * with that kind's tag whose author marked them `autoApprovable` are then applied automatically
    * without manual approval, and any matching action(s) already pending are applied immediately.
    *
-   * Auto-approval rules are workspace-wide per gatekeeper: approving an action kind approves it
+   * Auto-approval rules are thread-wide per gatekeeper: approving an action kind approves it
    * no matter which gadget invokes it.
    */
   setAutoApprovedActionKind(gatekeeperId: WorkpieceId, actionKind: ActionKind): Promise<void>;
@@ -1820,7 +1820,7 @@ export interface Overseer extends RpcTarget {
   listAutoApprovedActionKinds(): Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind }>>;
 
   /**
-   * List the auto-approvable action kinds offered by gatekeepers bound in this workspace. Each
+   * List the auto-approvable action kinds offered by gatekeepers bound in this thread. Each
    * entry identifies its connection and reports whether a matching auto-approval rule is enabled.
    */
   listPreApprovableActions(): Promise<PreApprovableAction[]>;
@@ -2009,10 +2009,10 @@ export interface Overseer extends RpcTarget {
 
   // --- Template management ---
   //
-  // Template listing and maintenance are workspace-level (each template record remembers which
+  // Template listing and maintenance are thread-level (each template record remembers which
   // gadget it exports). Creating a template is per-gadget: see GadgetClient.createTemplate().
 
-  /** List templates created from this workspace's gadgets. */
+  /** List templates created from this thread's gadgets. */
   listTemplates(): Promise<TemplateGadgetSummary[]>;
 
   /**
@@ -2047,7 +2047,7 @@ export interface Overseer extends RpcTarget {
   // --- Collaborator management ---
 
   /**
-   * List the connections a recipient with `role` must verify before opening this workspace, in
+   * List the connections a recipient with `role` must verify before opening this thread, in
    * the order the connections were created. Reports what sharing will cost the recipient; it
    * grants nothing and mints no capability.
    */
@@ -2289,14 +2289,14 @@ export type AiChatMessageBody = {
   type: "changes";
 
   /**
-   * The code changes themselves, as a Yjs-encoded (V2) update against the workspace code Y.Doc.
+   * The code changes themselves, as a Yjs-encoded (V2) update against the thread code Y.Doc.
    * Absent when the batch records only gadget creations and/or binding additions with no
    * accompanying code edits.
    */
   update?: Uint8Array;
 
   /**
-   * The workspace code version that `update` was built against. Once an agent session observes
+   * The thread code version that `update` was built against. Once an agent session observes
    * the code at some version, the chat stays locked to that version (see
    * AiToolCall.observedCodeVersion), so history replay must learn each update's base version
    * *before* it reconstructs the session's code state. Present whenever `update` is, except in
@@ -2315,7 +2315,7 @@ export type AiChatMessageBody = {
    * through this message makes them permanent, and a revert covering it deletes them. Titles are
    * denormalized for display, since a reverted creation's registry record is gone. `bindingName`
    * is the name under which the gadget appears in the creating chat's env (and, once merged, the
-   * workspace default binding list); recording it here lets the creating chat pick the name back
+   * thread default binding list); recording it here lets the creating chat pick the name back
    * up on replay.
    */
   createdGadgets?: {gadgetId: WorkpieceId, title: string, bindingName: string}[];
@@ -2519,8 +2519,8 @@ export function isTextLikeAttachmentMimeType(mimeType: string): boolean {
  * Describes a tool call performed by an AI agent as part of a message.
  *
  * The agent addresses workpieces by their chat binding name (the `gadget`/`workpiece` parameters
- * on several variants), never by workpiece ID. Logs persisted before multi-gadget workspaces lack
- * these names; when a name is absent, the workspace's `defaultGadgetId` (from `GadgetMetadata`)
+ * on several variants), never by workpiece ID. Logs persisted before multi-gadget threads lack
+ * these names; when a name is absent, the thread's `defaultGadgetId` (from `GadgetMetadata`)
  * is assumed, and it is an error for it to be omitted when there is no default.
  */
 export type AiToolCall = {
@@ -2610,14 +2610,14 @@ export type AiToolCall = {
     bindingName: string;
   };
 } | {
-  /** Create a new gadget workpiece in the workspace, either empty or instantiated from a template. */
+  /** Create a new gadget workpiece in the thread, either empty or instantiated from a template. */
   toolName: "createGadget";
   input: {
     /** Human-readable title for the new gadget. Required: the agent always names its creations. */
     title: string;
 
     /**
-     * Name under which the gadget appears in the chat's env and, once merged, the workspace
+     * Name under which the gadget appears in the chat's env and, once merged, the thread
      * default binding list (see validateBindingName()).
      */
     bindingName: string;
@@ -2676,7 +2676,7 @@ export type AiToolCall = {
   input: {};
 } | {
   /**
-   * List the templates the workspace owner could instantiate (their own templates, their
+   * List the templates the thread owner could instantiate (their own templates, their
    * library, and the deployment's featured templates), so the agent can pass a templateId to
    * createGadget. The formatted text output is recorded so replay doesn't re-list.
    */
@@ -3144,7 +3144,7 @@ export type TemplateBindingAnnotation = {
 
 /**
  * Symbolic target of one agent-spawner env entry in a template. Workpiece IDs are
- * workspace-local, so a spawner's `env` (see AgentSpawnerConfig.env) can't transfer into a
+ * thread-local, so a spawner's `env` (see AgentSpawnerConfig.env) can't transfer into a
  * template as-is; instead each entry references either one of the template's own bindings by
  * name -- the user fills it at instantiation time like any other binding, and the spawner env
  * entry resolves to the gatekeeper created for it -- or the template's gadget itself, resolving
@@ -3291,16 +3291,16 @@ export type TemplateGadgetSummary = {
 
 /**
  * Where a template the user owns came from. This distinguishes the case the UI cares about — the
- * source workspace still exists, so it can be opened and it owns deletion of the template — from
- * the two cases where it does not, so no caller has to infer that from display text. `workspaceId`
+ * source thread still exists, so it can be opened and it owns deletion of the template — from
+ * the two cases where it does not, so no caller has to infer that from display text. `threadId`
  * is reachable only in the case where opening it is meaningful.
  */
 export type TemplateSource =
-    // Published from a workspace that still exists. `workspaceTitle` is its current title.
-    { type: "workspace"; workspaceId: string; workspaceTitle: string }
-    // Published from a workspace that has since been deleted.
-  | { type: "deletedWorkspace" }
-    // Added to the user's library rather than published from one of their workspaces.
+    // Published from a thread that still exists. `threadTitle` is its current title.
+    { type: "thread"; threadId: string; threadTitle: string }
+    // Published from a thread that has since been deleted.
+  | { type: "deletedThread" }
+    // Added to the user's library rather than published from one of their threads.
   | { type: "imported" };
 
 /** User-side summary (returned by AuthenticatedApi.listOwnTemplates and getOwnTemplate). */
@@ -3347,7 +3347,7 @@ export type TemplateBindingAssignment = {
  * the shared identity/lifecycle surface.
  */
 export interface WorkpieceClient extends RpcTarget {
-  /** Get the workpiece's ID, unique among all workpieces in the workspace (of any type). */
+  /** Get the workpiece's ID, unique among all workpieces in the thread (of any type). */
   getId(): Promise<WorkpieceId>;
 
   /**
@@ -3361,12 +3361,12 @@ export interface WorkpieceClient extends RpcTarget {
    *
    * (Note gatekeeper titles are initially based on the title of the underlying resource, but this
    * method does not change the remote resource, only the display name used locally within this
-   * workspace.)
+   * thread.)
    */
   setTitle(title: string): Promise<void>;
 
   /**
-   * Permanently remove this workpiece from the workspace.
+   * Permanently remove this workpiece from the thread.
    *
    * For a gadget, this deletes its registry entry (including its binding map) and hooks and
    * clears its files; gatekeepers it bound survive, possibly no longer bound by any gadget. For
@@ -3377,8 +3377,8 @@ export interface WorkpieceClient extends RpcTarget {
 }
 
 /**
- * Capability representing one gadget workpiece within a workspace. Obtained from
- * Overseer.createGadget() or Overseer.getGadget(). Workspace-level concerns (code sync, chats,
+ * Capability representing one gadget workpiece within a thread. Obtained from
+ * Overseer.createGadget() or Overseer.getGadget(). Thread-level concerns (code sync, chats,
  * sharing, actions, template listing) stay on Overseer; this covers the per-gadget surface.
  */
 export interface GadgetClient extends WorkpieceClient {
@@ -3467,7 +3467,7 @@ export interface GadgetClient extends WorkpieceClient {
    * Create a new template from this gadget's current committed code.
    * `title` defaults to the gadget's title if omitted.
    *
-   * The template is always owned by the workspace owner, regardless of who calls this method.
+   * The template is always owned by the thread owner, regardless of who calls this method.
    *
    * Steps: generate ID, snapshot code, collect binding metadata, store locally, propagate
    * to User DO + KV + R2. Maintenance of existing templates stays on Overseer (see

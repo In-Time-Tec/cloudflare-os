@@ -99,7 +99,7 @@ export default function GadgetUseView({
           />
         ) : (
           <div className="flex h-full items-center justify-center px-6 text-center">
-            <p className="text-sm text-kumo-subtle">This workspace has no gadgets yet.</p>
+            <p className="text-sm text-kumo-subtle">This thread has no gadgets yet.</p>
           </div>
         )}
       </div>

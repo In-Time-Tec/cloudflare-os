@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ConversationSummary, EmailSummary } from '@gadgets/workshop-shared/gatekeeper'
 import type { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
-import { conversationPreview, emailPreview, workspacePreview } from './hoverPreviews'
+import { conversationPreview, emailPreview, threadPreview } from './hoverPreviews'
 
 describe('hoverPreviews', () => {
   it('builds a conversation preview from the last message and team', () => {
@@ -39,7 +39,7 @@ describe('hoverPreviews', () => {
     })
   })
 
-  it('builds a workspace preview from created, last active, and owner', () => {
+  it('builds a thread preview from created, last active, and owner', () => {
     const gadget = {
       id: 'g1',
       title: 'Fixed-Bid SOW Pricing',
@@ -47,7 +47,7 @@ describe('hoverPreviews', () => {
       lastActive: new Date(),
       owner: { id: 'u1', name: 'Riley' },
     } as GadgetMetadataWithTimestamps
-    expect(workspacePreview(gadget)).toEqual({
+    expect(threadPreview(gadget)).toEqual({
       title: 'Fixed-Bid SOW Pricing',
       meta: 'Created 3d ago, updated just now',
       footer: 'Shared by Riley',

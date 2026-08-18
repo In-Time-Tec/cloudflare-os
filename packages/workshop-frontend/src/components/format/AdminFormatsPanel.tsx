@@ -174,7 +174,7 @@ function PreviewStrip({ formats }: { formats: AdminFormat[] }) {
       </p>
       {formats.length === 0 ? (
         <p className="text-[13px] italic text-kumo-inactive">
-          Nothing yet. People will only see “New workspace”.
+          Nothing yet. People will only see “New thread”.
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">

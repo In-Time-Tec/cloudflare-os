@@ -31,10 +31,10 @@ vi.mock("./errorReporting", () => ({
   forwardTrustedFrameError: () => false,
 }));
 
-const WORKSPACE_ID = "a".repeat(64);
+const THREAD_ID = "a".repeat(64);
 
 const listGadgets = vi.fn<() => Promise<{ id: string; title: string }[]>>(async () => [
-  { id: WORKSPACE_ID, title: "Daily Brief" },
+  { id: THREAD_ID, title: "Daily Brief" },
 ]);
 const authenticatedApi = { listGadgets };
 
@@ -46,8 +46,8 @@ vi.mock("./AuthContext", () => ({
 
 interface TestHost extends RpcTarget {
   subscribeTheme(receiver: GatekeeperAppThemeReceiver): Promise<GatekeeperAppTheme>;
-  openWorkspace(workspaceId: string, gadgetId?: number): Promise<void>;
-  resolveWorkspaceTitles(ids: string[]): Promise<(string | null)[]>;
+  openThread(threadId: string, gadgetId?: number): Promise<void>;
+  resolveThreadTitles(ids: string[]): Promise<(string | null)[]>;
   openPrompt(prompt: string): Promise<void>;
 }
 
@@ -84,7 +84,7 @@ describe("SandboxedGatekeeperApp navigation", () => {
     const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/" });
     const gadgetRoute = createRoute({
       getParentRoute: () => rootRoute,
-      path: "/workspace/$id",
+      path: "/thread/$id",
     });
     const history = createMemoryHistory({ initialEntries: ["/"] });
     const router = createRouter({
@@ -117,9 +117,9 @@ describe("SandboxedGatekeeperApp navigation", () => {
     });
 
     await act(async () => {
-      await host!.openWorkspace(WORKSPACE_ID, 2);
+      await host!.openThread(THREAD_ID, 2);
       await vi.waitFor(() =>
-        expect(router.state.location.pathname).toBe(`/workspace/${WORKSPACE_ID}`),
+        expect(router.state.location.pathname).toBe(`/thread/${THREAD_ID}`),
       );
     });
     expect(router.state.location.search).toEqual({ w: 2 });
@@ -128,25 +128,25 @@ describe("SandboxedGatekeeperApp navigation", () => {
     // and repeated frame requests share a bounded-lifetime host-side index.
     const now = vi.spyOn(Date, "now").mockReturnValue(0);
     listGadgets
-      .mockResolvedValueOnce([{ id: WORKSPACE_ID, title: "Daily Brief" }])
-      .mockResolvedValueOnce([{ id: WORKSPACE_ID, title: "Renamed Brief" }]);
+      .mockResolvedValueOnce([{ id: THREAD_ID, title: "Daily Brief" }])
+      .mockResolvedValueOnce([{ id: THREAD_ID, title: "Renamed Brief" }]);
     await expect(
       Promise.all([
-        host.resolveWorkspaceTitles([WORKSPACE_ID, "b".repeat(64)]),
-        host.resolveWorkspaceTitles([WORKSPACE_ID]),
+        host.resolveThreadTitles([THREAD_ID, "b".repeat(64)]),
+        host.resolveThreadTitles([THREAD_ID]),
       ]),
     ).resolves.toEqual([["Daily Brief", null], ["Daily Brief"]]);
-    await expect(host.resolveWorkspaceTitles([WORKSPACE_ID])).resolves.toEqual(["Daily Brief"]);
+    await expect(host.resolveThreadTitles([THREAD_ID])).resolves.toEqual(["Daily Brief"]);
     expect(listGadgets).toHaveBeenCalledTimes(1);
 
     now.mockReturnValue(30_000);
-    await expect(host.resolveWorkspaceTitles([WORKSPACE_ID])).resolves.toEqual(["Renamed Brief"]);
+    await expect(host.resolveThreadTitles([THREAD_ID])).resolves.toEqual(["Renamed Brief"]);
     expect(listGadgets).toHaveBeenCalledTimes(2);
 
-    await expect(host.openWorkspace("../evil")).rejects.toThrow(
-      "Invalid gatekeeper app workspace target",
+    await expect(host.openThread("../evil")).rejects.toThrow(
+      "Invalid gatekeeper app thread target",
     );
-    expect(router.state.location.pathname).toBe(`/workspace/${WORKSPACE_ID}`);
+    expect(router.state.location.pathname).toBe(`/thread/${THREAD_ID}`);
 
     await act(async () => {
       await host!.openPrompt("  Create a daily brief.  ");

@@ -323,7 +323,7 @@ interface InputCapsule {
 // what it labels.
 const CAPSULE_LOGO_SLOT = "\u2003\u2060\u00a0";
 
-// The format a new workspace will be made from, as a token in the composer's text.
+// The format a new thread will be made from, as a token in the composer's text.
 type FormatToken = ComposerRange & {
   noun: string;
   icon: OutputIcon;
@@ -1848,7 +1848,7 @@ export const ChatInput = ({
   newChat?: boolean;
   /**
    * Whether the composer offers the deployment's standard formats. A chosen format rides along as
-   * an instruction on the message; it does not change which workspace is created. Only meaningful
+   * an instruction on the message; it does not change which thread is created. Only meaningful
    * with `newChat`, since a format names something to build rather than something to say.
    */
   offerFormats?: boolean;
@@ -4303,7 +4303,7 @@ function seedChatCache(
 }
 
 interface ChatInterfaceProps {
-  workspaceId: string | undefined;
+  threadId: string | undefined;
   overseer: RpcStub<Overseer>;
   selectedChatId: number | null;
   onNavigateToChat: (
@@ -4500,7 +4500,7 @@ function getOrCreateProvisionalToolCall(
 }
 
 function ChatInterface({
-  workspaceId,
+  threadId,
   overseer,
   selectedChatId,
   onNavigateToChat,
@@ -6907,7 +6907,7 @@ function ChatInterface({
         <div className="shrink-0">
           <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
           <ChatInput
-            key={workspaceId}
+            key={threadId}
             createCapsuleGatekeeper={(accountId, url) =>
               overseer.newGatekeeper(accountId, url)
             }
@@ -6922,8 +6922,8 @@ function ChatInterface({
             minRows={2}
             newChat
             docked
-            draftStorageKey={currentUser && workspaceId
-              ? composerDraftStorageKey(currentUser.id, `workspace:${workspaceId}:new`)
+            draftStorageKey={currentUser && threadId
+              ? composerDraftStorageKey(currentUser.id, `thread:${threadId}:new`)
               : undefined}
           />
           </div>
@@ -7865,7 +7865,7 @@ function ChatInterface({
                 <div className="shrink-0">
                   <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
                   <ChatInput
-                    key={`${workspaceId}:${selectedChatId}`}
+                    key={`${threadId}:${selectedChatId}`}
                     chatKey={selectedChatId}
                     createCapsuleGatekeeper={(accountId, url) =>
                       overseer.newGatekeeper(accountId, url)
@@ -7889,10 +7889,10 @@ function ChatInterface({
                     onStop={handleStop}
                     showThinkingTraces={showThinkingTraces}
                     onToggleThinkingTraces={toggleShowThinkingTraces}
-                    draftStorageKey={currentUser && workspaceId && selectedChatId !== null
+                    draftStorageKey={currentUser && threadId && selectedChatId !== null
                       ? composerDraftStorageKey(
                           currentUser.id,
-                          `workspace:${workspaceId}:chat:${selectedChatId}`,
+                          `thread:${threadId}:chat:${selectedChatId}`,
                         )
                       : undefined}
                     blockedReason={

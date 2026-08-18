@@ -51,7 +51,7 @@ class CodeSubscriberImpl extends RpcTarget implements CodeSubscriber {
 interface GadgetCodeInterfaceProps {
   overseer: RpcStub<Overseer>
   // Name of the Y.Doc root map holding the selected workpiece's files (see
-  // WorkpieceSummary.filesRoot). The Yjs doc is shared by the whole workspace; this selects which
+  // WorkpieceSummary.filesRoot). The Yjs doc is shared by the whole thread; this selects which
   // workpiece's files the editor shows.
   filesRoot: string
   height?: string | number
@@ -138,7 +138,7 @@ export default function GadgetCodeInterface({ overseer, filesRoot, height = '100
   const branchMode = selectedChatId !== null
 
   // Yjs document and files map - persistent across reconnections. The doc holds the whole
-  // workspace (sync is whole-doc; updates may span workpieces); `filesRoot` selects the current
+  // thread (sync is whole-doc; updates may span workpieces); `filesRoot` selects the current
   // workpiece's file map within it. Y.Doc.getMap() returns the same instance for the same name,
   // so re-pointing the ref on every render is cheap and idempotent.
   const ydocRef = useRef<Y.Doc>(new Y.Doc())

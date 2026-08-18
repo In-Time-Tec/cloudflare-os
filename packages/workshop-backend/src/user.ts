@@ -16,7 +16,7 @@ import { SessionPrincipal } from "./auth/identity-directory.js";
 
 const logger = createWorkshopLogger("workshop.user");
 
-// How many workspaces one Outputs catch-up pass examines, bounding the Durable Objects a single
+// How many threads one Outputs catch-up pass examines, bounding the Durable Objects a single
 // listOutputs() call wakes and how long it waits. The client calls again until catch-up is done.
 const OUTPUTS_BACKFILL_PAGE = 16;
 
@@ -121,12 +121,12 @@ function isFullyCreated(g: GadgetRecord): g is GadgetMetadataWithTimestamps {
 }
 
 /**
- * One output of a workspace, as pushed into a user's output index by the Overseer that owns it
- * (see `syncWorkspaceOutputs()`). Carries only what the workspace itself knows: its title,
+ * One output of a thread, as pushed into a user's output index by the Overseer that owns it
+ * (see `syncThreadOutputs()`). Carries only what the thread itself knows: its title,
  * activity time and ownership are joined in from the `gadgets` collection on read, so they can't
  * go stale here.
  */
-export type WorkspaceOutputEntry = {
+export type ThreadOutputEntry = {
   workpieceId: WorkpieceId;
   title: string;
   created: Date;
@@ -135,9 +135,9 @@ export type WorkspaceOutputEntry = {
   output?: TemplateOutput;
 };
 
-type OutputRecord = WorkspaceOutputEntry & {
-  // The workspace containing this output (an Overseer DO id).
-  workspaceId: string;
+type OutputRecord = ThreadOutputEntry & {
+  // The thread containing this output (an Overseer DO id).
+  threadId: string;
 };
 
 // AI Gateway billing state for the optional top-up flow: which Cloudflare account to bill and a
@@ -186,14 +186,14 @@ function makeUserStorage(storage: DurableObjectStorage) {
       libraryTemplates: collection<LibraryTemplateRecord>()({
         primaryKey: "id",
       }),
-      // Outputs of every workspace in `gadgets`, mirrored here by each workspace's Overseer so the
+      // Outputs of every thread in `gadgets`, mirrored here by each thread's Overseer so the
       // Outputs page is one cheap read of the user's own DO. Entries are meaningful only while the
-      // corresponding `gadgets` record exists; `syncWorkspaceOutputs()` and the `gadgets` deletion
+      // corresponding `gadgets` record exists; `syncThreadOutputs()` and the `gadgets` deletion
       // paths keep the two in step.
       outputs: collection<OutputRecord>()({
-        primaryKey: record => `${record.workspaceId}:${record.workpieceId}`,
+        primaryKey: record => `${record.threadId}:${record.workpieceId}`,
         nonUniqueIndexes: {
-          byWorkspace(record: OutputRecord) { return record.workspaceId; },
+          byThread(record: OutputRecord) { return record.threadId; },
         },
       }),
     },
@@ -215,11 +215,11 @@ function makeUserStorage(storage: DurableObjectStorage) {
       preferredModel: <string | null>null,
       onboardingCompleted: false,
 
-      // Set once the user's pre-existing workspaces have been asked to populate the outputs index
-      // (see #backfillOutputs()). Workspaces created since push on their own.
+      // Set once the user's pre-existing threads have been asked to populate the outputs index
+      // (see #backfillOutputs()). Threads created since push on their own.
       outputsBackfilled: false,
 
-      // How far that catch-up has got: the last workspace id examined. The sweep runs a page at a
+      // How far that catch-up has got: the last thread id examined. The sweep runs a page at a
       // time and resumes here on the next visit.
       outputsBackfillCursor: "",
 
@@ -506,7 +506,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
    * Creates the record on first open; updates lastActive on subsequent opens.
    *
    * `role` is cached so listings built from this DO can offer the actions it permits without
-   * reopening the workspace to ask. Presentation only: every operation is still authorized by the
+   * reopening the thread to ask. Presentation only: every operation is still authorized by the
    * Overseer when attempted.
    */
   async recordSharedGadgetOpen(
@@ -514,7 +514,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   ): Promise<void> {
     let record = this.storage.gadgets.get(gadgetId);
     if (record && !record.owner) {
-      throw new Error("User owns this workspace; it's not shared with them.");
+      throw new Error("User owns this thread; it's not shared with them.");
     }
     let now = new Date();
     if (record) {
@@ -538,7 +538,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Updates the presentation-only role cached for a shared workspace listing. Authorization still
+   * Updates the presentation-only role cached for a shared thread listing. Authorization still
    * comes from the Overseer's live sharing graph; this only keeps the listing's available actions
    * accurate after a collaborator is downgraded.
    */
@@ -550,7 +550,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Forgets a gadget shared with this user: drops it from their workspace listing and its outputs
+   * Forgets a gadget shared with this user: drops it from their thread listing and its outputs
    * from their Outputs index. Called both when the user dismisses it and when their access is
    * revoked (Overseer.refreshAffectedCollaboratorListings()); it grants and revokes nothing.
    */
@@ -558,7 +558,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let record = this.storage.gadgets.get(gadgetId);
     if (record && record.owner) {
       this.storage.gadgets.delete(gadgetId);
-      this.storage.outputs.byWorkspace.delete(gadgetId);
+      this.storage.outputs.byThread.delete(gadgetId);
     }
   }
 
@@ -794,7 +794,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   async updateTitle(gadgetId: string, title: string) {
     let record = this.storage.gadgets.get(gadgetId);
     if (!record) {
-      throw new Error("No such workspace belonging to user.");
+      throw new Error("No such thread belonging to user.");
     }
     record.title = title;
     this.storage.gadgets.put(record);
@@ -803,7 +803,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   async updatePinned(gadgetId: string, pinned: boolean) {
     let record = this.storage.gadgets.get(gadgetId);
     if (!record) {
-      throw new Error("No such workspace belonging to user.");
+      throw new Error("No such thread belonging to user.");
     }
     record.pinned = pinned;
     this.storage.gadgets.put(record);
@@ -836,21 +836,21 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
   async deleteGadget(id: string): Promise<void> {
     this.storage.gadgets.delete(id);
-    this.storage.outputs.byWorkspace.delete(id);
+    this.storage.outputs.byThread.delete(id);
   }
 
   /**
-   * Replace the set of outputs recorded for one workspace. Called by that workspace's Overseer
+   * Replace the set of outputs recorded for one thread. Called by that thread's Overseer
    * whenever its gadget registry changes and whenever it is opened.
    *
-   * A workspace the user no longer tracks (deleted, or a shared one they dismissed) has its
+   * A thread the user no longer tracks (deleted, or a shared one they dismissed) has its
    * entries dropped.
    */
-  syncWorkspaceOutputs(workspaceId: string, entries: WorkspaceOutputEntry[]): void {
-    this.storage.outputs.byWorkspace.delete(workspaceId);
-    if (!this.storage.gadgets.get(workspaceId)) return;
+  syncThreadOutputs(threadId: string, entries: ThreadOutputEntry[]): void {
+    this.storage.outputs.byThread.delete(threadId);
+    if (!this.storage.gadgets.get(threadId)) return;
     for (let entry of entries) {
-      this.storage.outputs.put({...entry, workspaceId});
+      this.storage.outputs.put({...entry, threadId});
     }
   }
 
@@ -859,11 +859,11 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return {outputs: this.#readOutputs(), catchingUp};
   }
 
-  // Ask the user's pre-existing workspaces to populate the outputs index, once. Workspaces push as
+  // Ask the user's pre-existing threads to populate the outputs index, once. Threads push as
   // they change and when opened, so only those predating the index need this.
   //
   // Sweeps one bounded page and reports whether more remains, rather than sweeping everything: a
-  // first Outputs load must not wait on every workspace the user has ever created. The caller
+  // first Outputs load must not wait on every thread the user has ever created. The caller
   // drains the rest, so the list fills in while the page is open.
   async #backfillOutputs(): Promise<boolean> {
     if (this.storage.outputsBackfilled.get()) return false;
@@ -875,7 +875,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     for (let gadget of this.storage.gadgets.list({startAfter, limit: OUTPUTS_BACKFILL_PAGE})) {
       ++examined;
       cursor = gadget.id;
-      // A shared workspace is mirrored on open, not swept; a half-created one has nothing yet.
+      // A shared thread is mirrored on open, not swept; a half-created one has nothing yet.
       if (!gadget.owner && isFullyCreated(gadget)) targets.push(gadget.id);
     }
     let done = examined < OUTPUTS_BACKFILL_PAGE;
@@ -889,7 +889,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let firstError: unknown;
     for (let [index, result] of results.entries()) {
       if (result.status === "fulfilled") {
-        if (result.value) this.syncWorkspaceOutputs(targets[index], result.value);
+        if (result.value) this.syncThreadOutputs(targets[index], result.value);
       } else {
         if (failureCount === 0) firstError = result.reason;
         ++failureCount;
@@ -897,16 +897,16 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     }
 
     if (failureCount > 0) {
-      logger.warn("failed to backfill outputs for some workspaces", {
+      logger.warn("failed to backfill outputs for some threads", {
         event: "outputs.backfill.partial",
         failureCount,
         error: firstError,
       });
     }
 
-    // Advance past workspaces that failed, rather than retrying them. The index is self-healing,
+    // Advance past threads that failed, rather than retrying them. The index is self-healing,
     // so one missed here reappears the moment it is touched, whereas holding the cursor lets a
-    // single unwakeable workspace stall the sweep forever.
+    // single unwakeable thread stall the sweep forever.
     if (done) {
       this.storage.outputsBackfilled.put(true);
     } else {
@@ -922,18 +922,18 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   #readOutputs(): OutputSummary[] {
     let result: OutputSummary[] = [];
     for (let output of this.storage.outputs.list()) {
-      let workspace = this.storage.gadgets.get(output.workspaceId);
-      if (!workspace || !isFullyCreated(workspace)) continue;
+      let thread = this.storage.gadgets.get(output.threadId);
+      if (!thread || !isFullyCreated(thread)) continue;
       result.push({
-        workspaceId: output.workspaceId,
+        threadId: output.threadId,
         workpieceId: output.workpieceId,
         ...(output.output ? {output: output.output} : {}),
         title: output.title,
-        workspaceTitle: workspace.title,
+        threadTitle: thread.title,
         created: output.created,
-        lastActive: workspace.lastActive,
-        ...(workspace.owner ? {owner: workspace.owner} : {}),
-        ...(workspace.role ? {role: workspace.role} : {}),
+        lastActive: thread.lastActive,
+        ...(thread.owner ? {owner: thread.owner} : {}),
+        ...(thread.role ? {role: thread.role} : {}),
       });
     }
     result.sort((a, b) => b.lastActive.getTime() - a.lastActive.getTime());
@@ -1112,13 +1112,13 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   // A template with no `gadgetId` was added to the library rather than published from one of this
-  // user's workspaces; one whose workspace is no longer registered here was published from a
-  // workspace that has since been deleted.
+  // user's threads; one whose thread is no longer registered here was published from a
+  // thread that has since been deleted.
   private templateSource(record: TemplateUserRecord): TemplateSource {
     if (!record.gadgetId) return { type: "imported" };
-    let workspace = this.storage.gadgets.get(record.gadgetId);
-    if (!workspace) return { type: "deletedWorkspace" };
-    return { type: "workspace", workspaceId: record.gadgetId, workspaceTitle: workspace.title };
+    let thread = this.storage.gadgets.get(record.gadgetId);
+    if (!thread) return { type: "deletedThread" };
+    return { type: "thread", threadId: record.gadgetId, threadTitle: thread.title };
   }
 
   async listLibraryTemplates(): Promise<TemplateLibrarySummary[]> {

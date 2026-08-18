@@ -15,7 +15,7 @@ import {
 import { RpcStub, RpcTarget } from 'capnweb'
 import { useAuthenticatedApi } from './AuthContext'
 import { useGadgets, useWhoami } from './query/hooks'
-import { persistWorkspaceWorkpieces, readCachedWorkpieces } from './query/workpieces'
+import { persistThreadWorkpieces, readCachedWorkpieces } from './query/workpieces'
 import {
   GadgetClient,
   ConsoleLogSubscriber,
@@ -47,9 +47,9 @@ import TemplateModal from './TemplateModal'
 import { WorkshopButton, WorkshopIconButton, WorkshopInput } from './components/WorkshopControls'
 import { useActions } from './useActions'
 import DeleteConfirmationDialog from './components/DeleteConfirmationDialog'
-import WorkspaceOpenErrorPage from './components/WorkspaceOpenErrorPage'
-import { useWorkspaceOpen } from './useWorkspaceOpen'
-import { takeWorkspaceBoot } from './query/workspace-session'
+import ThreadOpenErrorPage from './components/ThreadOpenErrorPage'
+import { useThreadOpen } from './useThreadOpen'
+import { takeThreadBoot } from './query/thread-session'
 import { reportIssue } from './errorReporting'
 import GadgetExportMenu from './GadgetExportMenu'
 
@@ -81,7 +81,7 @@ class ConsoleLogSubscriberImpl extends RpcTarget implements ConsoleLogSubscriber
 
 // ─── workpieces subscriber ────────────────────────────────────────────────────
 
-// Receives the workspace's workpiece list (see Overseer.subscribeToWorkpieces()). Entries
+// Receives the thread's workpiece list (see Overseer.subscribeToWorkpieces()). Entries
 // received before ready() are buffered so a (re)subscription replaces the list atomically instead
 // of flashing a partially-populated one.
 class WorkpiecesSubscriberImpl extends RpcTarget implements WorkpiecesSubscriber {
@@ -144,7 +144,7 @@ function formatConsoleLogs(logs: BufferedLogEntry[]): string {
 
 type RightTab = 'app' | 'code' | 'connections'
 
-type WorkspaceView =
+type ThreadView =
   | { mode: 'chat' }
   // `appId` is absent only while lazily migrating the legacy "open" value.
   | { mode: 'app'; appId?: WorkpieceId }
@@ -172,7 +172,7 @@ const ACTIVITY_TABS: { value: ActivityView; label: string }[] = [
   { value: 'history', label: 'History' },
 ]
 
-// Names what the pane is showing. `icon` is for the workspace-level views (Activity); a workpiece
+// Names what the pane is showing. `icon` is for the thread-level views (Activity); a workpiece
 // passes its `output` instead, so a Doc gets a document glyph rather than the gadget hexagon.
 function PaneLabel({
   icon: LabelIcon,
@@ -207,9 +207,9 @@ function PaneLabel({
 // only just fits doesn't look clipped.
 const TAB_REVEAL_MARGIN = 8
 
-// The workpiece tabs in the pane header, shown when the workspace holds more than one. The Outputs
+// The workpiece tabs in the pane header, shown when the thread holds more than one. The Outputs
 // rail only shows when the pane is closed, so without these an open output gives no sign that the
-// workspace holds others.
+// thread holds others.
 function PaneWorkpieceTabs({
   gadgets,
   activeId,
@@ -319,18 +319,18 @@ function PaneTab({
 
 const CHAT_WIDTH_STORAGE_KEY = 'gadgets:workshop:chatWidth'
 // Keep the old key prefix so existing "open" / "closed" preferences can migrate lazily.
-const WORKSPACE_VIEW_STORAGE_KEY_PREFIX = 'gadgets:workshop:workspaceVisibility:'
+const THREAD_VIEW_STORAGE_KEY_PREFIX = 'gadgets:workshop:threadVisibility:'
 const APP_RAIL_EXPANDED_STORAGE_KEY = 'gadgets:workshop:appRailExpanded'
 const MIN_CHAT_WIDTH = 280
-const MIN_WORKSPACE_WIDTH = 400
+const MIN_THREAD_WIDTH = 400
 const DEFAULT_CHAT_WIDTH = 420
-const WORKSPACE_TRANSITION_MS = 200
+const THREAD_TRANSITION_MS = 200
 
 const isBrowser = typeof window !== 'undefined'
 
 function clampChatWidth(width: number) {
   if (!isBrowser) return Math.max(MIN_CHAT_WIDTH, Math.min(DEFAULT_CHAT_WIDTH, width))
-  const max = Math.max(MIN_CHAT_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH)
+  const max = Math.max(MIN_CHAT_WIDTH, window.innerWidth - MIN_THREAD_WIDTH)
   return Math.max(MIN_CHAT_WIDTH, Math.min(max, width))
 }
 
@@ -347,28 +347,28 @@ function getInitialChatWidth() {
   return clampChatWidth(Number.isFinite(parsed) ? parsed : fallback)
 }
 
-function workspaceViewStorageKey(gadgetId: string) {
-  // Per-workspace keys may outlive deleted workspaces, but each entry is tiny and bounded by
-  // workspaces created or opened.
-  return `${WORKSPACE_VIEW_STORAGE_KEY_PREFIX}${gadgetId}`
+function threadViewStorageKey(gadgetId: string) {
+  // Per-thread keys may outlive deleted threads, but each entry is tiny and bounded by
+  // threads created or opened.
+  return `${THREAD_VIEW_STORAGE_KEY_PREFIX}${gadgetId}`
 }
 
-function persistWorkspaceView(gadgetId: string, view: {mode: 'chat'} | {mode: 'app', appId: WorkpieceId}) {
+function persistThreadView(gadgetId: string, view: {mode: 'chat'} | {mode: 'app', appId: WorkpieceId}) {
   try {
-    window.localStorage.setItem(workspaceViewStorageKey(gadgetId), JSON.stringify(view))
+    window.localStorage.setItem(threadViewStorageKey(gadgetId), JSON.stringify(view))
   } catch {
     // The preference still works for the current session when storage is unavailable.
   }
 }
 
-function getStoredWorkspaceView(gadgetId: string | undefined): WorkspaceView | null {
+function getStoredThreadView(gadgetId: string | undefined): ThreadView | null {
   if (!isBrowser || !gadgetId) return null
   try {
-    const stored = window.localStorage.getItem(workspaceViewStorageKey(gadgetId))
+    const stored = window.localStorage.getItem(threadViewStorageKey(gadgetId))
     if (stored === 'open') return { mode: 'app' }
     if (stored === 'closed') {
       const view = { mode: 'chat' } as const
-      persistWorkspaceView(gadgetId, view)
+      persistThreadView(gadgetId, view)
       return view
     }
     if (!stored) return null
@@ -423,10 +423,10 @@ export default function GadgetEditor() {
   const urlChatId = chatParam !== undefined ? chatParam : null
   const urlWorkpieceId = workpieceParam !== undefined ? workpieceParam : null
   const [bootId, setBootId] = useState(id)
-  const [boot, setBoot] = useState(() => id ? takeWorkspaceBoot(id) : null)
+  const [boot, setBoot] = useState(() => id ? takeThreadBoot(id) : null)
   const bootRef = useRef(boot)
   if (id !== bootId) {
-    const nextBoot = id ? takeWorkspaceBoot(id) : null
+    const nextBoot = id ? takeThreadBoot(id) : null
     bootRef.current = nextBoot
     setBootId(id)
     setBoot(nextBoot)
@@ -438,7 +438,7 @@ export default function GadgetEditor() {
   const toasts = useKumoToastManager()
 
   // ── core state ──────────────────────────────────────────────────────────────
-  // The workspace's workpiece list (gadget-type workpieces only in v1), kept live via
+  // The thread's workpiece list (gadget-type workpieces only in v1), kept live via
   // subscribeToWorkpieces(). `workpiecesReady` flips once the initial listing has arrived.
   const takenBoot = bootRef.current
   const cachedWorkpieces = (takenBoot && takenBoot.id === id ? takenBoot.workpieces : undefined)
@@ -448,7 +448,7 @@ export default function GadgetEditor() {
   const [workpiecesReady, setWorkpiecesReady] = useState(() => cachedWorkpieces !== undefined)
   const knownWorkpieceIdsRef = useRef<Set<WorkpieceId> | null>(null)
   // GadgetClient stub for the currently-selected gadget workpiece. Per-gadget operations (UI
-  // bundle, RPC connection, bindings, templates) go through this stub. Null while the workspace
+  // bundle, RPC connection, bindings, templates) go through this stub. Null while the thread
   // has no (visible) gadgets.
   const [gadget, setGadget] = useState<{ id: WorkpieceId; stub: RpcStub<GadgetClient> } | null>(null)
 
@@ -466,7 +466,7 @@ export default function GadgetEditor() {
     retry: retryOpen,
     cancelObserverConfig,
     updateTitle,
-  } = useWorkspaceOpen({
+  } = useThreadOpen({
     id,
     authenticatedApi,
     existing: boot,
@@ -474,7 +474,7 @@ export default function GadgetEditor() {
       if (!isEditingTitleRef.current) setTitleInput(nextMetadata.title)
     },
     onShareKeyConsumed: () => {
-      if (id) navigate({ to: '/workspace/$id', params: { id }, search: {}, replace: true })
+      if (id) navigate({ to: '/thread/$id', params: { id }, search: {}, replace: true })
     },
     onInvalidShareKey: () => {
       toasts.add({ title: 'Invalid or expired share link.', variant: 'error' })
@@ -498,11 +498,11 @@ export default function GadgetEditor() {
   const chatWidthRef = useRef(chatWidth)
   const [isResizing, setIsResizing] = useState(false)
   const [activeTab, setActiveTab] = useState<RightTab>('app')
-  const [workspaceView, setWorkspaceView] = useState<WorkspaceView | null>(() =>
-    getStoredWorkspaceView(id)
+  const [threadView, setThreadView] = useState<ThreadView | null>(() =>
+    getStoredThreadView(id)
   )
-  const [workspaceTransitionEnabled, setWorkspaceTransitionEnabled] = useState(false)
-  const activityReturnViewRef = useRef<WorkspaceView | null>(null)
+  const [threadTransitionEnabled, setThreadTransitionEnabled] = useState(false)
+  const activityReturnViewRef = useRef<ThreadView | null>(null)
   const [activityView, setActivityView] = useState<ActivityView>('history')
   const [activityClosing, setActivityClosing] = useState(false)
   const [shareModalOpen, setShareModalOpen] = useState(false)
@@ -513,7 +513,7 @@ export default function GadgetEditor() {
     ? WORKPIECE_RAIL_EXPANDED_WIDTH
     : WORKPIECE_RAIL_COLLAPSED_WIDTH
   const handleWorkpieceRailExpandedChange = useCallback((expanded: boolean) => {
-    setWorkspaceTransitionEnabled(true)
+    setThreadTransitionEnabled(true)
     setWorkpieceRailExpanded(expanded)
     try {
       window.localStorage.setItem(APP_RAIL_EXPANDED_STORAGE_KEY, String(expanded))
@@ -550,7 +550,7 @@ export default function GadgetEditor() {
   const enterGadgetFullscreen = useCallback(() => {
     if (window.location.hash !== '#fullscreen') {
       // pushState so the browser Back button also exits fullscreen — natural for many users
-      // and helpful for bookmarks: a bookmarked /workspace/foo#fullscreen can still go Back to a
+      // and helpful for bookmarks: a bookmarked /thread/foo#fullscreen can still go Back to a
       // useful (non-fullscreen) state if there's prior history.
       window.history.pushState(null, '', '#fullscreen')
     }
@@ -622,7 +622,7 @@ export default function GadgetEditor() {
   // Note: raw `hasCode` (not `effectiveHasCode` below) is deliberate here, to avoid a dependency
   // cycle: the effective value depends on the selected workpiece, whose pending-gadget visibility
   // depends on `effectiveSelectedChatId`, which depends on this pin. When no gadget is selected
-  // yet, `hasCode` is null and the pin stays on -- the right behavior for new workspaces.
+  // yet, `hasCode` is null and the pin stays on -- the right behavior for new threads.
   const pinInitialChatSelection =
     singleInitialChat && hasCode !== true && !userNavigatedToList
 
@@ -641,7 +641,7 @@ export default function GadgetEditor() {
 
   // The format a workpiece was built as, for surfaces that only know an id (the chat's "created
   // app" cards, the tool-call rows). Read from the live workpiece list, so it stays correct as the
-  // workspace changes.
+  // thread changes.
   //
   // Keyed on the formats, not on the workpiece list: this feeds buildChatDisplayEntries(), which
   // rebuilds the whole transcript when its inputs change, while `workpieces` is replaced by every
@@ -666,12 +666,12 @@ export default function GadgetEditor() {
   }, [allGadgets, effectiveSelectedChatId])
 
   // The selected gadget: explicit URL state wins, followed by the app open in this session (only
-  // accepted apps are persisted), then the workspace default and the first visible gadget.
+  // accepted apps are persisted), then the thread default and the first visible gadget.
   const selectedGadgetId = useMemo(() => {
     if (urlWorkpieceId !== null && visibleGadgets.some(g => g.id === urlWorkpieceId)) {
       return urlWorkpieceId
     }
-    const storedId = workspaceView?.mode === 'app' ? workspaceView.appId : undefined
+    const storedId = threadView?.mode === 'app' ? threadView.appId : undefined
     if (storedId !== undefined && visibleGadgets.some(g => g.id === storedId)) {
       return storedId
     }
@@ -680,7 +680,7 @@ export default function GadgetEditor() {
       return defaultId
     }
     return visibleGadgets.length > 0 ? visibleGadgets[0].id : null
-  }, [urlWorkpieceId, workspaceView, visibleGadgets, metadata?.defaultGadgetId])
+  }, [urlWorkpieceId, threadView, visibleGadgets, metadata?.defaultGadgetId])
 
   const selectedGadgetSummary = selectedGadgetId !== null
     ? visibleGadgets.find(g => g.id === selectedGadgetId)
@@ -689,13 +689,13 @@ export default function GadgetEditor() {
   // Lazily normalize legacy "open" preferences once the accepted app list is known. Draft apps
   // remain session-only until accepted; at that point this effect persists them automatically.
   useEffect(() => {
-    if (!id || !workpiecesReady || workspaceView?.mode !== 'app') return
+    if (!id || !workpiecesReady || threadView?.mode !== 'app') return
 
-    if (workspaceView.appId !== undefined) {
-      const chosen = allGadgets.find(g => g.id === workspaceView.appId)
+    if (threadView.appId !== undefined) {
+      const chosen = allGadgets.find(g => g.id === threadView.appId)
       if (chosen?.chatId !== undefined) return
       if (chosen) {
-        persistWorkspaceView(id, { mode: 'app', appId: chosen.id })
+        persistThreadView(id, { mode: 'app', appId: chosen.id })
         return
       }
     }
@@ -705,14 +705,14 @@ export default function GadgetEditor() {
       ?? acceptedApps[0]
     if (fallback) {
       const normalized = { mode: 'app', appId: fallback.id } as const
-      setWorkspaceView(normalized)
-      persistWorkspaceView(id, normalized)
+      setThreadView(normalized)
+      persistThreadView(id, normalized)
     } else {
       const normalized = { mode: 'chat' } as const
-      setWorkspaceView(normalized)
-      persistWorkspaceView(id, normalized)
+      setThreadView(normalized)
+      persistThreadView(id, normalized)
     }
-  }, [id, workpiecesReady, workspaceView, allGadgets, metadata?.defaultGadgetId])
+  }, [id, workpiecesReady, threadView, allGadgets, metadata?.defaultGadgetId])
 
   const selectedFilesRoot = selectedGadgetSummary?.filesRoot
   // The stub for the selected gadget arrives via an effect; during a switch it briefly lags the
@@ -750,7 +750,7 @@ export default function GadgetEditor() {
         if (!cancelled) setHookedGadgetIds(new Set(hooks.filter(h => h.enabled).map(h => h.gadgetId)))
       })
       .catch(err => reportIssue('gadget-hook-indicators.load', err))
-    // Clear on teardown so a workspace switch never shows the previous workspace's indicators.
+    // Clear on teardown so a thread switch never shows the previous thread's indicators.
     return () => { cancelled = true; setHookedGadgetIds(NO_GADGETS) }
   }, [overseer, hookSignature, metadata !== null, isUseOnly])
   const pendingActions = useMemo(() => {
@@ -763,7 +763,7 @@ export default function GadgetEditor() {
   const pendingActionsCount = pendingActions.length
 
   // Whether the *selected* gadget has code. When no gadget is selected, the code interface is
-  // unmounted and raw `hasCode` can't update, but a gadget-less workspace has no code to show.
+  // unmounted and raw `hasCode` can't update, but a gadget-less thread has no code to show.
   const effectiveHasCode = selectedFilesRoot !== undefined
     ? (hasCode ?? true)
     : workpiecesReady ? false : null
@@ -774,23 +774,23 @@ export default function GadgetEditor() {
     || streamingProposedChanges !== undefined
   const layoutModeReady = chatListReady && (codeStateReady || hasCodeRelatedState)
 
-  // Wait for all initial subscriptions before choosing the new-workspace chat-only layout.
+  // Wait for all initial subscriptions before choosing the new-thread chat-only layout.
   const simpleMode = layoutModeReady && !hasCodeRelatedState && singleInitialChat
     && visibleGadgets.length <= 1
   const hasAnyApps = allGadgets.length > 0
-  const showingActivity = workspaceView?.mode === 'activity'
+  const showingActivity = threadView?.mode === 'activity'
   const showFullEditor = layoutModeReady && (
-    showingActivity || (hasAnyApps && (workspaceView === null ? !simpleMode : workspaceView.mode === 'app'))
+    showingActivity || (hasAnyApps && (threadView === null ? !simpleMode : threadView.mode === 'app'))
   )
   const showOutputRail = layoutModeReady && hasAnyApps && !showFullEditor
   const paneShowsActivity = showingActivity || activityClosing
   useEffect(() => {
     if (!activityClosing) return
-    const timeout = window.setTimeout(() => setActivityClosing(false), WORKSPACE_TRANSITION_MS)
+    const timeout = window.setTimeout(() => setActivityClosing(false), THREAD_TRANSITION_MS)
     return () => window.clearTimeout(timeout)
   }, [activityClosing])
   const outputRailWidth = showOutputRail ? workpieceRailWidth : 0
-  const workspaceTransitionClass = workspaceTransitionEnabled && !isResizing
+  const threadTransitionClass = threadTransitionEnabled && !isResizing
     ? 'transition-[width,opacity] duration-200 ease-out'
     : ''
 
@@ -846,23 +846,23 @@ export default function GadgetEditor() {
     }
   }, [])
 
-  const setWorkspaceVisibility = useCallback((visibility: 'open' | 'closed', appId?: WorkpieceId) => {
-    setWorkspaceTransitionEnabled(true)
+  const setThreadVisibility = useCallback((visibility: 'open' | 'closed', appId?: WorkpieceId) => {
+    setThreadTransitionEnabled(true)
     setActivityClosing(false)
     activityReturnViewRef.current = null
     if (visibility === 'closed') {
       const view = { mode: 'chat' } as const
-      setWorkspaceView(view)
-      if (id) persistWorkspaceView(id, view)
+      setThreadView(view)
+      if (id) persistThreadView(id, view)
     } else {
       // Opening a draft is intentionally session-only. The normalization effect persists it if
       // and when the app is accepted.
-      setWorkspaceView({ mode: 'app', appId })
+      setThreadView({ mode: 'app', appId })
     }
   }, [id])
 
   // Arriving with ?w= (from the Outputs page, say) has to show that workpiece, not whichever view
-  // this workspace was last left on -- selectedGadgetId already honours the parameter, but the
+  // this thread was last left on -- selectedGadgetId already honours the parameter, but the
   // stored view is what decides whether the pane shows an app at all.
   //
   // Honoured once per workpiece so it doesn't reopen the pane when the user closes it while the
@@ -873,30 +873,30 @@ export default function GadgetEditor() {
     if (openedWorkpieceParamRef.current === urlWorkpieceId) return
     if (!visibleGadgets.some(g => g.id === urlWorkpieceId)) return
     openedWorkpieceParamRef.current = urlWorkpieceId
-    setWorkspaceVisibility('open', urlWorkpieceId)
-  }, [workpiecesReady, urlWorkpieceId, visibleGadgets, setWorkspaceVisibility])
+    setThreadVisibility('open', urlWorkpieceId)
+  }, [workpiecesReady, urlWorkpieceId, visibleGadgets, setThreadVisibility])
 
   const openActivity = useCallback((initialView: ActivityView) => {
-    setWorkspaceTransitionEnabled(true)
+    setThreadTransitionEnabled(true)
     setActivityClosing(false)
-    if (workspaceView?.mode !== 'activity') activityReturnViewRef.current = workspaceView
+    if (threadView?.mode !== 'activity') activityReturnViewRef.current = threadView
     setActivityView(initialView)
-    setWorkspaceView({ mode: 'activity' })
-  }, [workspaceView])
+    setThreadView({ mode: 'activity' })
+  }, [threadView])
 
-  const closeWorkspacePane = useCallback(() => {
-    if (workspaceView?.mode !== 'activity') {
-      setWorkspaceVisibility('closed')
+  const closeThreadPane = useCallback(() => {
+    if (threadView?.mode !== 'activity') {
+      setThreadVisibility('closed')
       return
     }
-    setWorkspaceTransitionEnabled(true)
+    setThreadTransitionEnabled(true)
     const returnView = activityReturnViewRef.current
     const returnShowsPane = returnView?.mode === 'app'
       || (returnView === null && hasAnyApps && !simpleMode)
     setActivityClosing(!returnShowsPane)
-    setWorkspaceView(returnView)
+    setThreadView(returnView)
     activityReturnViewRef.current = null
-  }, [workspaceView, setWorkspaceVisibility, hasAnyApps, simpleMode])
+  }, [threadView, setThreadVisibility, hasAnyApps, simpleMode])
 
   // Ignore the initial listing, then open apps created by the active chat.
   useEffect(() => {
@@ -916,14 +916,14 @@ export default function GadgetEditor() {
     if (!target) return
 
     setActiveTab('app')
-    setWorkspaceVisibility('open', target.id)
+    setThreadVisibility('open', target.id)
     navigate({
-      to: '/workspace/$id',
+      to: '/thread/$id',
       params: { id: id! },
       search: (prev: Record<string, unknown>) => ({ ...prev, w: target.id }),
       replace: true,
     })
-  }, [workpiecesReady, allGadgets, effectiveSelectedChatId, setWorkspaceVisibility, navigate, id])
+  }, [workpiecesReady, allGadgets, effectiveSelectedChatId, setThreadVisibility, navigate, id])
 
   useEffect(() => {
     const handleResize = () => {
@@ -1001,11 +1001,11 @@ export default function GadgetEditor() {
     setHasChatZero(fromBoot ? fromBoot.chats.some(chat => chat.id === 0) : false)
     setHasAnyProposedChanges(false)
     setSelectedChatHasProposedChanges(false)
-    setWorkspaceView(getStoredWorkspaceView(id))
+    setThreadView(getStoredThreadView(id))
     openedWorkpieceParamRef.current = null
     activityReturnViewRef.current = null
     setActivityClosing(false)
-    setWorkspaceTransitionEnabled(false)
+    setThreadTransitionEnabled(false)
     const seeded = fromBoot?.workpieces ?? (id ? readCachedWorkpieces(id) : undefined)
     setWorkpieces(seeded ? new Map(seeded.map(item => [item.id, item])) : new Map())
     setWorkpiecesReady(seeded !== undefined)
@@ -1022,15 +1022,15 @@ export default function GadgetEditor() {
       const pendingChatId = selectedGadgetSummary?.chatId
       const leavingPendingApp = pendingChatId !== undefined && chatId !== pendingChatId
       if (leavingPendingApp) {
-        setWorkspaceTransitionEnabled(true)
-        if (workspaceView?.mode === 'activity') {
+        setThreadTransitionEnabled(true)
+        if (threadView?.mode === 'activity') {
           activityReturnViewRef.current = { mode: 'chat' }
         } else {
-          setWorkspaceView({ mode: 'chat' })
+          setThreadView({ mode: 'chat' })
         }
       }
       navigate({
-        to: '/workspace/$id',
+        to: '/thread/$id',
         params: { id: id! },
         // Keep committed selections, but clear draft selections outside their branch.
         search: (prev: Record<string, unknown>) => ({
@@ -1043,7 +1043,7 @@ export default function GadgetEditor() {
         replace: options?.replace,
       })
     },
-    [id, navigate, selectedGadgetSummary?.chatId, workspaceView?.mode]
+    [id, navigate, selectedGadgetSummary?.chatId, threadView?.mode]
   )
 
   // ── keep single-chat routing aligned with the current mode ──────────────────
@@ -1054,7 +1054,7 @@ export default function GadgetEditor() {
     if (simpleMode) {
       if (urlChatId === 0) {
         navigate({
-          to: '/workspace/$id',
+          to: '/thread/$id',
           params: { id: id! },
           search: (prev: Record<string, unknown>) => ({ ...prev, chat: undefined }),
           replace: true,
@@ -1120,13 +1120,13 @@ export default function GadgetEditor() {
     const subscriber = new WorkpiecesSubscriberImpl(
       update => setWorkpieces(prev => {
         const next = update(prev)
-        if (id) persistWorkspaceWorkpieces(id, next.values())
+        if (id) persistThreadWorkpieces(id, next.values())
         return next
       }),
       initial => {
         setWorkpieces(initial)
         setWorkpiecesReady(true)
-        if (id) persistWorkspaceWorkpieces(id, initial.values())
+        if (id) persistThreadWorkpieces(id, initial.values())
       },
     )
     overseer.stub
@@ -1170,7 +1170,7 @@ export default function GadgetEditor() {
     if (userPickedWorkpieceThisTurnRef.current) return
     if (!visibleGadgets.some(g => g.id === target.workpieceId)) return
     navigate({
-      to: '/workspace/$id',
+      to: '/thread/$id',
       params: { id: id! },
       search: (prev: Record<string, unknown>) => ({ ...prev, w: target.workpieceId }),
       replace: true,
@@ -1182,10 +1182,10 @@ export default function GadgetEditor() {
     if (isAgentActive) userPickedWorkpieceThisTurnRef.current = true
     // Picking a gadget is a deliberate move to its view, so the turn must not pull the tab back.
     handleTabSelect('app')
-    setWorkspaceVisibility('open', workpieceId)
+    setThreadVisibility('open', workpieceId)
     const pendingChatId = workpieces.get(workpieceId)?.chatId
     navigate({
-      to: '/workspace/$id',
+      to: '/thread/$id',
       params: { id: id! },
       // Selecting a draft also returns to its creating conversation.
       search: (prev: Record<string, unknown>) => ({
@@ -1194,7 +1194,7 @@ export default function GadgetEditor() {
         w: workpieceId,
       }),
     })
-  }, [id, navigate, isAgentActive, setWorkspaceVisibility, workpieces, handleTabSelect])
+  }, [id, navigate, isAgentActive, setThreadVisibility, workpieces, handleTabSelect])
 
   const handleRenameWorkpiece = useCallback(async (workpieceId: WorkpieceId, title: string) => {
     if (!overseer) return
@@ -1248,8 +1248,8 @@ export default function GadgetEditor() {
   }
 
   // ── back ──────────────────────────────────────────────────────────────────────
-  const handleGoToWorkspaces = () => {
-    navigate({ to: '/workspaces' })
+  const handleGoToThreads = () => {
+    navigate({ to: '/threads' })
   }
 
   // ── delete ────────────────────────────────────────────────────────────────────
@@ -1263,7 +1263,7 @@ export default function GadgetEditor() {
       await overseer.stub.deleteSelf()
       navigate({ to: '/' })
     } catch {
-      toasts.add({ title: 'Failed to delete workspace', variant: 'error' })
+      toasts.add({ title: 'Failed to delete thread', variant: 'error' })
       setIsDeleting(false)
       setDeleteDialogOpen(false)
     }
@@ -1277,9 +1277,9 @@ export default function GadgetEditor() {
   // ── error / loading states ────────────────────────────────────────────────────
   if (error?.kind === 'open') {
     return (
-      <WorkspaceOpenErrorPage
+      <ThreadOpenErrorPage
         kind={error.failure}
-        onGoToWorkspaces={handleGoToWorkspaces}
+        onGoToThreads={handleGoToThreads}
         onRetry={retryOpen}
       />
     )
@@ -1293,8 +1293,8 @@ export default function GadgetEditor() {
           {error.message}
         </p>
         <div className="flex items-center gap-2">
-          <WorkshopButton tone="secondary" onClick={handleGoToWorkspaces}>
-            Go to workspaces
+          <WorkshopButton tone="secondary" onClick={handleGoToThreads}>
+            Go to threads
           </WorkshopButton>
           <WorkshopButton tone="primary" onClick={retryOpen}>
             Try again
@@ -1305,7 +1305,7 @@ export default function GadgetEditor() {
   }
 
   // Wait for the workpiece list (and the first selected-gadget stub, which follows it by one
-  // effect pass) before rendering; a workspace with no gadgets renders with `gadget` null.
+  // effect pass) before rendering; a thread with no gadgets renders with `gadget` null.
   if (!metadata || !overseer || !workpiecesReady) {
     return (
       <div className="relative flex h-full flex-col overflow-hidden bg-kumo-base">
@@ -1372,7 +1372,7 @@ export default function GadgetEditor() {
                 onClick={handleSaveTitle}
                 disabled={!titleInput.trim()}
                 className="!h-7 !w-7 hover:text-kumo-brand disabled:opacity-30"
-                aria-label="Save workspace title"
+                aria-label="Save thread title"
               >
                 <Check size={14} />
               </WorkshopIconButton>
@@ -1392,8 +1392,8 @@ export default function GadgetEditor() {
               <WorkshopIconButton
                 onClick={() => setIsEditingTitle(true)}
                 className="!h-7 !w-7 flex-shrink-0"
-                title="Rename workspace"
-                aria-label="Rename workspace"
+                title="Rename thread"
+                aria-label="Rename thread"
               >
                 <Pencil size={16} />
               </WorkshopIconButton>
@@ -1407,7 +1407,7 @@ export default function GadgetEditor() {
           )}
         </div>
 
-        {/* Right: presence, cost, workspace, share, templates */}
+        {/* Right: presence, cost, thread, share, templates */}
         <div className="flex items-center gap-1 flex-shrink-0">
           <GadgetPresence
             overseer={overseer.stub}
@@ -1429,8 +1429,8 @@ export default function GadgetEditor() {
 
           <WorkshopIconButton
             onClick={() => setShareModalOpen(true)}
-            title="Share workspace"
-            aria-label="Share workspace"
+            title="Share thread"
+            aria-label="Share thread"
           >
             <ShareNetwork size={15} />
           </WorkshopIconButton>
@@ -1448,8 +1448,8 @@ export default function GadgetEditor() {
             <WorkshopIconButton
               danger
               onClick={() => setDeleteDialogOpen(true)}
-              title="Delete workspace"
-              aria-label="Delete workspace"
+              title="Delete thread"
+              aria-label="Delete thread"
             >
               <Trash size={16} />
             </WorkshopIconButton>
@@ -1473,7 +1473,7 @@ export default function GadgetEditor() {
 
         {/* ── LEFT: Chat pane ──────────────────────────────────────────────────── */}
         <div
-          className={`flex h-full min-h-0 flex-col flex-shrink-0 ${workspaceTransitionClass} ${showFullEditor ? 'border-r border-kumo-line' : ''}`}
+          className={`flex h-full min-h-0 flex-col flex-shrink-0 ${threadTransitionClass} ${showFullEditor ? 'border-r border-kumo-line' : ''}`}
           style={{
             width: showFullEditor
               ? chatWidth
@@ -1485,7 +1485,7 @@ export default function GadgetEditor() {
               <div className={layoutModeReady ? 'h-full' : 'h-full invisible'}>
                 <ChatInterface
                   key={id}
-                  workspaceId={id}
+                  threadId={id}
                   overseer={overseer.stub}
                   initialChats={boot?.chats}
                   initialModels={boot?.models}
@@ -1531,7 +1531,7 @@ export default function GadgetEditor() {
 
         {/* ── Resize handle ───────────────────────────────────────────────────── */}
         <div
-          className={`flex-shrink-0 overflow-visible bg-kumo-line cursor-col-resize relative touch-none ${workspaceTransitionClass}`}
+          className={`flex-shrink-0 overflow-visible bg-kumo-line cursor-col-resize relative touch-none ${threadTransitionClass}`}
           style={{ width: showFullEditor ? 1 : 0 }}
           onPointerDown={handleResizePointerDown}
           onPointerMove={handleResizePointerMove}
@@ -1543,7 +1543,7 @@ export default function GadgetEditor() {
 
         {/* ── RIGHT: App / Code / Connections tabs ───────────────────────────── */}
         <div
-          className={`flex flex-shrink-0 min-w-0 overflow-hidden bg-kumo-base ${workspaceTransitionClass}`}
+          className={`flex flex-shrink-0 min-w-0 overflow-hidden bg-kumo-base ${threadTransitionClass}`}
           style={{
             width: showFullEditor ? `calc(100% - ${chatWidth}px - 1px)` : 0,
             opacity: showFullEditor ? 1 : 0,
@@ -1619,7 +1619,7 @@ export default function GadgetEditor() {
               <WorkshopIconButton
                 aria-label={paneShowsActivity ? 'Close activity' : 'Close gadget pane'}
                 title="Close"
-                onClick={closeWorkspacePane}
+                onClick={closeThreadPane}
               >
                 <X size={16} />
               </WorkshopIconButton>
@@ -1779,7 +1779,7 @@ export default function GadgetEditor() {
 
       <DeleteConfirmationDialog
         open={deleteDialogOpen}
-        title="Delete workspace?"
+        title="Delete thread?"
         description={<>This removes <span className="font-medium text-kumo-default">{metadata.title}</span>. You can&apos;t undo this.</>}
         isDeleting={isDeleting}
         onOpenChange={setDeleteDialogOpen}

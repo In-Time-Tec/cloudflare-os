@@ -197,7 +197,7 @@ export default function Activity({
               Nothing to review
             </p>
             <p className="mt-1 max-w-xs text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-subtle">
-              Requests that need your approval show up here and in the workspace header.
+              Requests that need your approval show up here and in the thread header.
             </p>
             <WorkshopButton className="mt-4" onClick={() => onViewChange('history')}>
               View history

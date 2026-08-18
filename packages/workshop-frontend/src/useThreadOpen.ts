@@ -11,15 +11,15 @@ import type {
 import { reportIssue } from './errorReporting'
 import { useDocumentTitle } from './useDocumentTitle'
 import {
-  classifyWorkspaceOpenFailure,
-  type WorkspaceOpenFailureKind,
-} from './components/WorkspaceOpenErrorPage'
-import type { WorkspaceBoot } from './query/workspace-session'
+  classifyThreadOpenFailure,
+  type ThreadOpenFailureKind,
+} from './components/ThreadOpenErrorPage'
+import type { ThreadBoot } from './query/thread-session'
 
 const OBSERVER_CANCELLED = 'OBSERVER_CONFIG_CANCELLED'
 
-export type WorkspaceLoadError =
-  | { kind: 'open'; failure: WorkspaceOpenFailureKind }
+export type ThreadLoadError =
+  | { kind: 'open'; failure: ThreadOpenFailureKind }
   | { kind: 'message'; message: string }
 
 type ObserverConfigState = {
@@ -31,13 +31,13 @@ type ObserverConfigState = {
 type Options = {
   id: string | undefined
   authenticatedApi: RpcStub<AuthenticatedApi>
-  existing?: WorkspaceBoot | null
+  existing?: ThreadBoot | null
   onMetadata: (metadata: GadgetMetadata) => void
   onShareKeyConsumed: () => void
   onInvalidShareKey: () => void
 }
 
-export function useWorkspaceOpen({
+export function useThreadOpen({
   id,
   authenticatedApi,
   existing,
@@ -49,11 +49,11 @@ export function useWorkspaceOpen({
     () => existing ? { stub: existing.overseer } : null,
   )
   const [metadata, setMetadata] = useState<GadgetMetadata | null>(() => existing?.metadata ?? null)
-  const [error, setError] = useState<WorkspaceLoadError | null>(null)
+  const [error, setError] = useState<ThreadLoadError | null>(null)
   const [connectionLost, setConnectionLost] = useState(false)
   const [observerConfig, setObserverConfig] = useState<ObserverConfigState | null>(null)
   const [reloadNonce, setReloadNonce] = useState(0)
-  const openWorkspaceIdRef = useRef<string | undefined>(undefined)
+  const openThreadIdRef = useRef<string | undefined>(undefined)
   const usedExistingForIdRef = useRef<string | undefined>(undefined)
   const pendingObserverRejectRef = useRef<((error: unknown) => void) | null>(null)
   const callbacksRef = useRef({ onMetadata, onShareKeyConsumed, onInvalidShareKey })
@@ -66,7 +66,7 @@ export function useWorkspaceOpen({
     let metadataSubscription: RpcStub<{}> | null = null
     let configureObservers: RpcStub<ObserverConfigCallback> | null = null
     let cancelled = false
-    const hadOpenWorkspace = id !== undefined && openWorkspaceIdRef.current === id
+    const hadOpenThread = id !== undefined && openThreadIdRef.current === id
 
     const disposeAttempt = () => {
       metadataSubscription?.[Symbol.dispose]()
@@ -77,9 +77,9 @@ export function useWorkspaceOpen({
       configureObservers = null
     }
 
-    const showTerminalError = (nextError: WorkspaceLoadError) => {
+    const showTerminalError = (nextError: ThreadLoadError) => {
       disposeAttempt()
-      openWorkspaceIdRef.current = undefined
+      openThreadIdRef.current = undefined
       setOverseer(null)
       setMetadata(null)
       setConnectionLost(false)
@@ -91,7 +91,7 @@ export function useWorkspaceOpen({
         showTerminalError({ kind: 'open', failure: 'not-found' })
         return
       }
-      if (!hadOpenWorkspace) setError(null)
+      if (!hadOpenThread) setError(null)
 
       try {
         const hash = window.location.hash
@@ -145,7 +145,7 @@ export function useWorkspaceOpen({
         }
         metadataSubscription = resolvedSubscription
 
-        openWorkspaceIdRef.current = id
+        openThreadIdRef.current = id
         setError(null)
         if (connectionLost) setConnectionLost(false)
       } catch (caught) {
@@ -161,17 +161,17 @@ export function useWorkspaceOpen({
         if (message.includes(OBSERVER_CANCELLED)) {
           showTerminalError({
             kind: 'message',
-            message: 'To open this workspace, you must choose connected accounts for the services it uses.',
+            message: 'To open this thread, you must choose connected accounts for the services it uses.',
           })
         } else if (message.includes('permitted to observe') ||
                    message.includes('no longer connected') ||
                    message.includes('connect an account for every service')) {
           showTerminalError({ kind: 'message', message })
         } else {
-          const failure = classifyWorkspaceOpenFailure(caught)
+          const failure = classifyThreadOpenFailure(caught)
           if (failure !== 'unexpected') {
             showTerminalError({ kind: 'open', failure })
-          } else if (!hadOpenWorkspace) {
+          } else if (!hadOpenThread) {
             reportIssue('gadget.load', caught, { gadgetId: id })
             showTerminalError({ kind: 'open', failure })
           } else if (!connectionLost) {

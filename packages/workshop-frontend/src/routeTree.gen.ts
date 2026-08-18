@@ -25,11 +25,11 @@ import { Route as AuthenticatedOutputsRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
 import { Route as AuthenticatedProvidersRouteImport } from './routes/_authenticated/providers'
 import { Route as AuthenticatedTemplatesRouteImport } from './routes/_authenticated/templates'
-import { Route as AuthenticatedWorkspacesRouteImport } from './routes/_authenticated/workspaces'
+import { Route as AuthenticatedThreadsRouteImport } from './routes/_authenticated/threads'
 import { Route as GadgetIdRouteImport } from './routes/gadget.$id'
 import { Route as TemplateIdRouteImport } from './routes/template.$id'
 import { Route as AuthenticatedGatekeepersAppIdRouteImport } from './routes/_authenticated/gatekeepers_.$appId'
-import { Route as AuthenticatedWorkspaceIdRouteImport } from './routes/_authenticated/workspace.$id'
+import { Route as AuthenticatedThreadIdRouteImport } from './routes/_authenticated/thread.$id'
 
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
@@ -112,9 +112,9 @@ const AuthenticatedTemplatesRoute = AuthenticatedTemplatesRouteImport.update({
   path: '/templates',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
-const AuthenticatedWorkspacesRoute = AuthenticatedWorkspacesRouteImport.update({
-  id: '/workspaces',
-  path: '/workspaces',
+const AuthenticatedThreadsRoute = AuthenticatedThreadsRouteImport.update({
+  id: '/threads',
+  path: '/threads',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const GadgetIdRoute = GadgetIdRouteImport.update({
@@ -133,12 +133,11 @@ const AuthenticatedGatekeepersAppIdRoute =
     path: '/gatekeepers/$appId',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
-const AuthenticatedWorkspaceIdRoute =
-  AuthenticatedWorkspaceIdRouteImport.update({
-    id: '/workspace/$id',
-    path: '/workspace/$id',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
+const AuthenticatedThreadIdRoute = AuthenticatedThreadIdRouteImport.update({
+  id: '/thread/$id',
+  path: '/thread/$id',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
@@ -156,11 +155,11 @@ export interface FileRoutesByFullPath {
   '/profile': typeof AuthenticatedProfileRoute
   '/providers': typeof AuthenticatedProvidersRoute
   '/templates': typeof AuthenticatedTemplatesRoute
-  '/workspaces': typeof AuthenticatedWorkspacesRoute
+  '/threads': typeof AuthenticatedThreadsRoute
   '/gadget/$id': typeof GadgetIdRoute
   '/template/$id': typeof TemplateIdRoute
   '/gatekeepers/$appId': typeof AuthenticatedGatekeepersAppIdRoute
-  '/workspace/$id': typeof AuthenticatedWorkspaceIdRoute
+  '/thread/$id': typeof AuthenticatedThreadIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -177,12 +176,12 @@ export interface FileRoutesByTo {
   '/profile': typeof AuthenticatedProfileRoute
   '/providers': typeof AuthenticatedProvidersRoute
   '/templates': typeof AuthenticatedTemplatesRoute
-  '/workspaces': typeof AuthenticatedWorkspacesRoute
+  '/threads': typeof AuthenticatedThreadsRoute
   '/gadget/$id': typeof GadgetIdRoute
   '/template/$id': typeof TemplateIdRoute
   '/': typeof AuthenticatedIndexRoute
   '/gatekeepers/$appId': typeof AuthenticatedGatekeepersAppIdRoute
-  '/workspace/$id': typeof AuthenticatedWorkspaceIdRoute
+  '/thread/$id': typeof AuthenticatedThreadIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -201,12 +200,12 @@ export interface FileRoutesById {
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/providers': typeof AuthenticatedProvidersRoute
   '/_authenticated/templates': typeof AuthenticatedTemplatesRoute
-  '/_authenticated/workspaces': typeof AuthenticatedWorkspacesRoute
+  '/_authenticated/threads': typeof AuthenticatedThreadsRoute
   '/gadget/$id': typeof GadgetIdRoute
   '/template/$id': typeof TemplateIdRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/gatekeepers_/$appId': typeof AuthenticatedGatekeepersAppIdRoute
-  '/_authenticated/workspace/$id': typeof AuthenticatedWorkspaceIdRoute
+  '/_authenticated/thread/$id': typeof AuthenticatedThreadIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -226,11 +225,11 @@ export interface FileRouteTypes {
     | '/profile'
     | '/providers'
     | '/templates'
-    | '/workspaces'
+    | '/threads'
     | '/gadget/$id'
     | '/template/$id'
     | '/gatekeepers/$appId'
-    | '/workspace/$id'
+    | '/thread/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -247,12 +246,12 @@ export interface FileRouteTypes {
     | '/profile'
     | '/providers'
     | '/templates'
-    | '/workspaces'
+    | '/threads'
     | '/gadget/$id'
     | '/template/$id'
     | '/'
     | '/gatekeepers/$appId'
-    | '/workspace/$id'
+    | '/thread/$id'
   id:
     | '__root__'
     | '/_authenticated'
@@ -270,12 +269,12 @@ export interface FileRouteTypes {
     | '/_authenticated/profile'
     | '/_authenticated/providers'
     | '/_authenticated/templates'
-    | '/_authenticated/workspaces'
+    | '/_authenticated/threads'
     | '/gadget/$id'
     | '/template/$id'
     | '/_authenticated/'
     | '/_authenticated/gatekeepers_/$appId'
-    | '/_authenticated/workspace/$id'
+    | '/_authenticated/thread/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -400,11 +399,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTemplatesRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/workspaces': {
-      id: '/_authenticated/workspaces'
-      path: '/workspaces'
-      fullPath: '/workspaces'
-      preLoaderRoute: typeof AuthenticatedWorkspacesRouteImport
+    '/_authenticated/threads': {
+      id: '/_authenticated/threads'
+      path: '/threads'
+      fullPath: '/threads'
+      preLoaderRoute: typeof AuthenticatedThreadsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/gadget/$id': {
@@ -428,11 +427,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedGatekeepersAppIdRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/workspace/$id': {
-      id: '/_authenticated/workspace/$id'
-      path: '/workspace/$id'
-      fullPath: '/workspace/$id'
-      preLoaderRoute: typeof AuthenticatedWorkspaceIdRouteImport
+    '/_authenticated/thread/$id': {
+      id: '/_authenticated/thread/$id'
+      path: '/thread/$id'
+      fullPath: '/thread/$id'
+      preLoaderRoute: typeof AuthenticatedThreadIdRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
   }
@@ -451,10 +450,10 @@ interface AuthenticatedRouteChildren {
   AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
   AuthenticatedProvidersRoute: typeof AuthenticatedProvidersRoute
   AuthenticatedTemplatesRoute: typeof AuthenticatedTemplatesRoute
-  AuthenticatedWorkspacesRoute: typeof AuthenticatedWorkspacesRoute
+  AuthenticatedThreadsRoute: typeof AuthenticatedThreadsRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedGatekeepersAppIdRoute: typeof AuthenticatedGatekeepersAppIdRoute
-  AuthenticatedWorkspaceIdRoute: typeof AuthenticatedWorkspaceIdRoute
+  AuthenticatedThreadIdRoute: typeof AuthenticatedThreadIdRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
@@ -470,10 +469,10 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedProfileRoute: AuthenticatedProfileRoute,
   AuthenticatedProvidersRoute: AuthenticatedProvidersRoute,
   AuthenticatedTemplatesRoute: AuthenticatedTemplatesRoute,
-  AuthenticatedWorkspacesRoute: AuthenticatedWorkspacesRoute,
+  AuthenticatedThreadsRoute: AuthenticatedThreadsRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedGatekeepersAppIdRoute: AuthenticatedGatekeepersAppIdRoute,
-  AuthenticatedWorkspaceIdRoute: AuthenticatedWorkspaceIdRoute,
+  AuthenticatedThreadIdRoute: AuthenticatedThreadIdRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

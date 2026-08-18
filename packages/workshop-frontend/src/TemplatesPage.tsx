@@ -89,7 +89,7 @@ export default function TemplatesPage() {
             message={
               search
                 ? "Try a different search term."
-                : "Featured templates will appear here when they’re published. You can still create templates from your own workspaces."
+                : "Featured templates will appear here when they’re published. You can still create templates from your own threads."
             }
           />
         ) : view === "grid" ? (

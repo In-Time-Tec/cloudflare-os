@@ -556,7 +556,7 @@ export default function TemplateLandingPage({ rpcStub }: Props) {
     const overseer = authenticatedApi.newGadgetFromTemplate(id, draftAssignments)
     try {
       let metadata = await overseer.getMetadata()
-      window.location.href = `/workspace/${metadata.id}`
+      window.location.href = `/thread/${metadata.id}`
     } catch (err: any) {
       setError(err.message || 'Failed to create gadget from template.')
     } finally {
@@ -690,10 +690,10 @@ export default function TemplateLandingPage({ rpcStub }: Props) {
     setRemovingFromLibrary(true)
     let overseer: ReturnType<typeof authenticatedApi.openGadget> | null = null
     try {
-      // The source workspace owns its templates, so it must do the deleting. Once it is gone (or
+      // The source thread owns its templates, so it must do the deleting. Once it is gone (or
       // the template was never published from one), the user record is all there is to clean up.
-      if (ownTemplateSummary?.source.type === 'workspace') {
-        overseer = authenticatedApi.openGadget(ownTemplateSummary.source.workspaceId)
+      if (ownTemplateSummary?.source.type === 'thread') {
+        overseer = authenticatedApi.openGadget(ownTemplateSummary.source.threadId)
         await overseer.deleteTemplate(id)
       } else {
         await authenticatedApi.deleteOrphanedTemplate(id)
@@ -758,9 +758,9 @@ export default function TemplateLandingPage({ rpcStub }: Props) {
   }
   let createDisabled = creating
   let canDeleteOwnedTemplate = isOwnTemplate && !loadingOwnTemplateState
-  // Only set when the workspace this template was published from is still around to open.
-  let sourceWorkspace =
-    ownTemplateSummary?.source.type === 'workspace' ? ownTemplateSummary.source : null
+  // Only set when the thread this template was published from is still around to open.
+  let sourceThread =
+    ownTemplateSummary?.source.type === 'thread' ? ownTemplateSummary.source : null
 
   return (
     <div className="min-h-full bg-kumo-base">
@@ -868,13 +868,13 @@ export default function TemplateLandingPage({ rpcStub }: Props) {
                   {updatingPinned ? 'Updating...' : (isPinned ? 'Unfavorite' : 'Favorite')}
                 </DropdownMenu.Item>
 
-                {sourceWorkspace && (
+                {sourceThread && (
                   <DropdownMenu.Item
                     icon={<ArrowSquareOut size={13} className="mr-2" />}
-                    onClick={() => window.open(`/workspace/${sourceWorkspace.workspaceId}`, '_blank', 'noopener,noreferrer')}
+                    onClick={() => window.open(`/thread/${sourceThread.threadId}`, '_blank', 'noopener,noreferrer')}
                     className={MENU_ITEM}
                   >
-                    Go to workspace
+                    Go to thread
                   </DropdownMenu.Item>
                 )}
 

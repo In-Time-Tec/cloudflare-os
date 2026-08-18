@@ -11,7 +11,7 @@ import {
   queryClient,
 } from './query/client'
 import { clearGatekeeperFrames } from './query/gatekeeper-app'
-import { clearWorkspaceBoots } from './query/workspace-session'
+import { clearThreadBoots } from './query/thread-session'
 import { ThemeProvider } from './ThemeContext'
 import { createRouter } from './router'
 import AnnouncementBanner from './components/AnnouncementBanner'
@@ -50,7 +50,7 @@ await workshopSession.applyStoredAuth()
 workshopSession.setLogoutCleanup(async (scope) => {
   queryClient.clear()
   clearGatekeeperFrames()
-  clearWorkspaceBoots()
+  clearThreadBoots()
   await createAccountPersister(scope).removeClient()
 })
 

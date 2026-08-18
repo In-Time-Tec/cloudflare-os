@@ -14,7 +14,7 @@ import { createFromFormat } from '../format/useOutputFormats'
 import { useGadgets, useLibraryTemplates, useOutputFormatsQuery, useOwnTemplates } from '../../query/hooks'
 import { asTime } from '../../query/time'
 
-// A ⌘K command palette: jump to a workspace or a primary destination. Because it's keyboard-driven
+// A ⌘K command palette: jump to a thread or a primary destination. Because it's keyboard-driven
 // and opened many times a day, it deliberately has *no* open/close animation (instant feels faster
 // than any transition here — see the Raycast example in our motion guidance). Results stream in as
 // the gadget list loads.
@@ -178,7 +178,7 @@ export default function CommandPalette({
     const needle = query.trim()
     const searching = needle.length > 0
 
-    // One entry per standard format. "New workspace" remains the first action because it is the
+    // One entry per standard format. "New thread" remains the first action because it is the
     // general starting point; the format shortcuts follow it in the admin's configured order.
     const formatCommands: Command[] = formats.map((format) => ({
       id: `format-${format.templateId}`,
@@ -191,16 +191,16 @@ export default function CommandPalette({
     const nav: Command[] = [
       {
         id: 'nav-new',
-        label: 'New workspace',
+        label: 'New thread',
         icon: <Plus size={15} weight="bold" />,
         run: () => navigate({ to: '/' }),
       },
       ...formatCommands,
       {
-        id: 'nav-workspaces',
-        label: 'Workspaces',
+        id: 'nav-threads',
+        label: 'Threads',
         icon: <SquaresFour size={15} />,
-        run: () => navigate({ to: '/workspaces' }),
+        run: () => navigate({ to: '/threads' }),
       },
       {
         id: 'nav-templates',
@@ -214,10 +214,10 @@ export default function CommandPalette({
       .toSorted((a, b) => asTime(b.lastActive) - asTime(a.lastActive))
       .map((g) => ({
         id: `ws-${g.id}`,
-        label: g.title || 'Untitled workspace',
-        hint: 'Workspace',
+        label: g.title || 'Untitled thread',
+        hint: 'Thread',
         icon: <SquaresFour size={15} className="text-kumo-inactive" />,
-        run: () => navigate({ to: '/workspace/$id', params: { id: g.id } }),
+        run: () => navigate({ to: '/thread/$id', params: { id: g.id } }),
       }))
 
     const bpBase: Command[] = templates
@@ -230,7 +230,7 @@ export default function CommandPalette({
         run: () => navigate({ to: '/template/$id', params: { id: b.id } }),
       }))
 
-    // Empty state shows a short, curated list (actions + a few recent workspaces). Once the user
+    // Empty state shows a short, curated list (actions + a few recent threads). Once the user
     // types, we fuzzy-match across everything and rank by score, expanding the per-group limits.
     const refine = (cmds: Command[], limit: number): ScoredCommand[] => {
       if (!searching) return cmds.slice(0, limit).map((c) => ({ ...c, indices: [] }))
@@ -246,12 +246,12 @@ export default function CommandPalette({
     const built: Group[] = searching
       ? [
           { heading: 'Actions', items: refine(nav, nav.length) },
-          { heading: 'Workspaces', items: refine(wsBase, 8) },
+          { heading: 'Threads', items: refine(wsBase, 8) },
           { heading: 'Templates', items: refine(bpBase, 8) },
         ]
       : [
           { heading: 'Actions', items: refine(nav, nav.length) },
-          { heading: 'Recent workspaces', items: refine(wsBase, 4) },
+          { heading: 'Recent threads', items: refine(wsBase, 4) },
         ]
 
     const groups = built.filter((g) => g.items.length > 0)
@@ -311,7 +311,7 @@ export default function CommandPalette({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Search workspaces and actions…"
+            placeholder="Search threads and actions…"
             className="h-12 w-full bg-transparent text-[14px] leading-5 tracking-[-0.25px] text-kumo-default placeholder:text-kumo-inactive focus:outline-none"
           />
           <kbd className="shrink-0 rounded border border-kumo-line px-1.5 py-0.5 font-sans text-[10px] leading-none text-kumo-inactive">

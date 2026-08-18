@@ -18,22 +18,22 @@ import { openCommandPalette } from './commandPaletteBus'
 import { PendingIcon, useLinkPending } from '../PendingIcon'
 import SidebarItem from './SidebarItem'
 import {
-  SidebarWorkspacesProvider,
+  SidebarThreadsProvider,
   SidebarFavorites,
-  SidebarRecentWorkspaces,
-} from './SidebarWorkspaces'
+  SidebarRecentThreads,
+} from './SidebarThreads'
 import SidebarConversations from '../../conversations/SidebarConversations'
 import SidebarUtilityStrip from './SidebarUtilityStrip'
 import SidebarScrollRegion from './SidebarScrollRegion'
 
 /**
  * The persistent left rail. The brand row and the bottom utility strip stay pinned; everything
- * between them — primary nav, communications sections, Favorites / Recent workspaces — scrolls as
+ * between them — primary nav, communications sections, Favorites / Recent threads — scrolls as
  * one region with edge fades that appear only while content is actually beneath them.
  *
  * Layout (top → bottom):
  *   • brand row                                    pinned
- *   • nav + conversations + workspace lists        SCROLLS (fades top/bottom)
+ *   • nav + conversations + thread lists        SCROLLS (fades top/bottom)
  *   • utility strip (plug, avatar)                 pinned
  */
 export default function Sidebar({
@@ -135,7 +135,7 @@ export default function Sidebar({
         </button>
       )}
 
-      <SidebarWorkspacesProvider>
+      <SidebarThreadsProvider>
         {/* Everything between the brand row and the utility strip scrolls as one region, with
             edge fades that appear only while content is beneath them. */}
         <SidebarScrollRegion>
@@ -149,8 +149,8 @@ export default function Sidebar({
               collapsed={collapsed}
             />
             <SidebarItem
-              to="/workspaces"
-              label="Workspaces"
+              to="/threads"
+              label="Threads"
               icon={<SquaresFour size={14} weight="regular" />}
               collapsed={collapsed}
             />
@@ -225,10 +225,10 @@ export default function Sidebar({
         <div className="mt-1 pb-2">
           <SidebarFavorites collapsed={collapsed} />
           <SidebarConversations collapsed={collapsed} />
-          <SidebarRecentWorkspaces collapsed={collapsed} />
+          <SidebarRecentThreads collapsed={collapsed} />
         </div>
         </SidebarScrollRegion>
-      </SidebarWorkspacesProvider>
+      </SidebarThreadsProvider>
 
       <SidebarUtilityStrip collapsed={collapsed} />
     </aside>

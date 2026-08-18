@@ -7,8 +7,8 @@ import {
 
 describe("open gadget errors", () => {
   it.each([
-    [OPEN_GADGET_ERROR_CODES.workspaceNotFound, "Workspace not found."],
-    [OPEN_GADGET_ERROR_CODES.workspaceAccessDenied, "You don't have access to this workspace."],
+    [OPEN_GADGET_ERROR_CODES.threadNotFound, "Thread not found."],
+    [OPEN_GADGET_ERROR_CODES.threadAccessDenied, "You don't have access to this thread."],
   ] as const)(
     "creates an enumerable %s code with a readable message",
     (code, message) => {

@@ -19,14 +19,14 @@ import { Route as GadgetRedirectRouteImport } from "./routes/gadget.$id";
 // jsdom doesn't implement scrolling; the router's hash scroll restoration calls it on mount.
 window.scrollTo = () => {};
 
-// Exercises the real legacy-route module (routes/gadget.$id.tsx) against a stub /workspace/$id
+// Exercises the real legacy-route module (routes/gadget.$id.tsx) against a stub /thread/$id
 // target, the same way routeTree.gen.ts wires it into the app's router. The stub avoids
 // rendering the heavyweight editor; only the redirect behavior is under test.
 function makeRouter(initialEntry: string) {
   const rootRoute = createRootRoute({ component: () => <Outlet /> });
-  const workspaceRoute = createRoute({
+  const threadRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: "/workspace/$id",
+    path: "/thread/$id",
     component: () => null,
   });
   const gadgetRoute = GadgetRedirectRouteImport.update({
@@ -37,11 +37,11 @@ function makeRouter(initialEntry: string) {
   const history = createMemoryHistory({ initialEntries: [initialEntry] });
   return createRouter({
     history,
-    routeTree: rootRoute.addChildren([workspaceRoute, gadgetRoute]),
+    routeTree: rootRoute.addChildren([threadRoute, gadgetRoute]),
   });
 }
 
-describe("legacy workspace URL redirects", () => {
+describe("legacy thread URL redirects", () => {
   let container: HTMLDivElement | undefined;
   let root: Root | undefined;
 
@@ -59,10 +59,10 @@ describe("legacy workspace URL redirects", () => {
     return router;
   }
 
-  it("redirects /gadget/$id to /workspace/$id preserving search and hash", async () => {
-    const router = await renderAt("/gadget/my-workspace?chat=5&other=thing#share=abc123");
+  it("redirects /gadget/$id to /thread/$id preserving search and hash", async () => {
+    const router = await renderAt("/gadget/my-thread?chat=5&other=thing#share=abc123");
 
-    expect(router.state.location.pathname).toBe("/workspace/my-workspace");
+    expect(router.state.location.pathname).toBe("/thread/my-thread");
     expect(router.state.location.search).toEqual({ chat: 5, other: "thing" });
     expect(router.state.location.hash).toBe("share=abc123");
     // The redirect replaces the legacy entry, so Back doesn't bounce off it.
@@ -70,9 +70,9 @@ describe("legacy workspace URL redirects", () => {
   });
 
   it("redirects a bare /gadget/$id without search or hash", async () => {
-    const router = await renderAt("/gadget/my-workspace");
+    const router = await renderAt("/gadget/my-thread");
 
-    expect(router.state.location.pathname).toBe("/workspace/my-workspace");
+    expect(router.state.location.pathname).toBe("/thread/my-thread");
     expect(router.state.location.search).toEqual({});
     expect(router.state.location.hash).toBe("");
   });

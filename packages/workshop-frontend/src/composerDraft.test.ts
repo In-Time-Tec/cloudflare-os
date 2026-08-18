@@ -33,7 +33,7 @@ describe("composer drafts", () => {
 
   it("isolates structured drafts by user and destination", () => {
     const home = composerDraftStorageKey("user-a", "home");
-    const chat = composerDraftStorageKey("user-a", "workspace:one:chat:2");
+    const chat = composerDraftStorageKey("user-a", "thread:one:chat:2");
     const otherUser = composerDraftStorageKey("user-b", "home");
 
     writeComposerDraft(home, draft);
@@ -135,7 +135,7 @@ describe("composer drafts", () => {
   });
 
   it("round-trips the exact slash command provider selection", () => {
-    const key = composerDraftStorageKey("user-a", "workspace:one:chat:2");
+    const key = composerDraftStorageKey("user-a", "thread:one:chat:2");
     const stored = serializeComposerDraft(
       "Please /deploy this",
       [],

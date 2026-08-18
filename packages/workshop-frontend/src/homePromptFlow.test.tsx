@@ -74,7 +74,7 @@ describe("Home prompt route flow", () => {
     vi.clearAllMocks();
   });
 
-  it("seeds the composer once, clears route state, and does not create a workspace", async () => {
+  it("seeds the composer once, clears route state, and does not create a thread", async () => {
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);

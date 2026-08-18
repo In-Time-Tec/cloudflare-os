@@ -311,9 +311,9 @@ export default function ObserverConfigModal({
         </Dialog.Title>
         <Text variant="secondary" size="sm" as="p">
           {isRetry
-            ? 'We couldn’t confirm your access to everything this workspace has read. Re-authenticate ' +
+            ? 'We couldn’t confirm your access to everything this thread has read. Re-authenticate ' +
               'the account below, or choose a different one, then try again.'
-            : 'Before opening this workspace, confirm that your own accounts can access the connected ' +
+            : 'Before opening this thread, confirm that your own accounts can access the connected ' +
               'data it uses.'}
         </Text>
 

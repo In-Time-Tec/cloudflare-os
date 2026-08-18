@@ -16,7 +16,7 @@ import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './menuStyles'
 import { TemplatePreviewImage } from './TemplatePreviewImage'
 import DeleteConfirmationDialog from './DeleteConfirmationDialog'
 
-// Neutral monogram for a workspace — matches the sidebar treatment (no per-item color noise).
+// Neutral monogram for a thread — matches the sidebar treatment (no per-item color noise).
 function initials(title: string | undefined): string {
   const t = (title || 'Untitled').trim()
   if (!t) return 'UG'
@@ -74,11 +74,11 @@ function AppRow({
     setRenameValue(gadget.title || '')
     setIsRenaming(true)
   }
-  const pending = useLinkPending({ to: '/workspace/$id', params: { id: gadget.id } })
+  const pending = useLinkPending({ to: '/thread/$id', params: { id: gadget.id } })
 
   return (
     <Link
-      to="/workspace/$id"
+      to="/thread/$id"
       params={{ id: gadget.id }}
       aria-busy={pending}
       className="group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint"
@@ -113,7 +113,7 @@ function AppRow({
             />
           ) : (
             <h3 className="text-sm font-medium text-kumo-default truncate">
-              {gadget.title || 'Untitled Workspace'}
+              {gadget.title || 'Untitled Thread'}
             </h3>
           )}
         </div>
@@ -238,7 +238,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
       overseer = null
     } catch (err) {
       overseer?.[Symbol.dispose]()
-      console.error('Failed to open workspace for sharing:', err)
+      console.error('Failed to open thread for sharing:', err)
       toasts.add({ title: 'Failed to open share settings', variant: 'error' })
     }
   }
@@ -266,11 +266,11 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
       {showHeader && (
         <div className="px-6 sm:px-10 lg:px-10 pt-10 lg:pt-10 mb-4">
           <h2 className="text-lg font-semibold text-kumo-default">
-            Your workspaces
+            Your threads
           </h2>
           {rawGadgets !== undefined && gadgets.length === 0 && !loadError && (
             <p className="mt-1 text-sm text-kumo-inactive">
-              You haven&apos;t created any workspaces yet
+              You haven&apos;t created any threads yet
             </p>
           )}
         </div>
@@ -289,7 +289,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search workspaces…"
+              placeholder="Search threads…"
               className="h-9 w-full rounded-lg border border-kumo-line bg-kumo-base pl-9 pr-4 text-[13px] tracking-[-0.25px] text-kumo-default placeholder:text-kumo-inactive transition-[border-color,box-shadow] duration-150 ease-out focus:border-kumo-ring focus:outline-none focus:ring-[3px] focus:ring-kumo-ring/15"
             />
           </div>
@@ -302,7 +302,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
       <div className="chat-panel flex flex-1 min-h-0 flex-col gap-0.5 overflow-y-auto pt-1">
         {loadError ? (
           <div className="text-center py-12 text-sm">
-            <p className="text-kumo-danger">Something went wrong loading your workspaces.</p>
+            <p className="text-kumo-danger">Something went wrong loading your threads.</p>
             <button onClick={loadGadgets} className="text-kumo-brand mt-1 underline">Try again</button>
           </div>
         ) : rawGadgets === undefined ? (
@@ -310,7 +310,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
         ) : filtered.length === 0 ? (
           search ? (
             <div className="text-center py-12 text-kumo-inactive text-sm">
-              No workspaces found
+              No threads found
             </div>
           ) : (
             <FeaturedTemplatesGallery />
@@ -335,11 +335,11 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
         open={deleteTarget !== null}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
         isDeleting={remove.isPending}
-        title={deleteTarget?.owner ? 'Remove workspace' : 'Delete workspace'}
+        title={deleteTarget?.owner ? 'Remove thread' : 'Delete thread'}
         description={
           deleteTarget?.owner
-            ? `Remove "${deleteTarget?.title || 'Untitled Workspace'}" from your list? You can still access it via its link.`
-            : `Delete "${deleteTarget?.title || 'Untitled Workspace'}"? This cannot be undone.`
+            ? `Remove "${deleteTarget?.title || 'Untitled Thread'}" from your list? You can still access it via its link.`
+            : `Delete "${deleteTarget?.title || 'Untitled Thread'}"? This cannot be undone.`
         }
         confirmLabel={deleteTarget?.owner ? 'Remove' : 'Delete'}
         confirmingLabel={deleteTarget?.owner ? 'Removing...' : 'Deleting...'}
@@ -353,7 +353,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
       >
         <Dialog className="p-8" size="sm">
           <Dialog.Title className="text-lg font-semibold">
-            {infoTarget?.title || 'Untitled Workspace'}
+            {infoTarget?.title || 'Untitled Thread'}
           </Dialog.Title>
           <div className="mt-4 flex flex-col gap-3 text-sm">
             <div className="flex justify-between">

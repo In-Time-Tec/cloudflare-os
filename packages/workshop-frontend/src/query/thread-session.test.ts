@@ -1,17 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AiChatAuthorInfo, AiChatHistoryPage, AiChatMetadata, GadgetMetadata } from '@gadgets/workshop-shared/api'
 import {
-  clearWorkspaceBoots,
-  ensureWorkspaceBoot,
-  takeWorkspaceBoot,
-} from './workspace-session'
+  clearThreadBoots,
+  ensureThreadBoot,
+  takeThreadBoot,
+} from './thread-session'
 
 afterEach(() => {
-  clearWorkspaceBoots()
+  clearThreadBoots()
 })
 
-describe('ensureWorkspaceBoot', () => {
-  it('opens the workspace and stashes chats before navigation', async () => {
+describe('ensureThreadBoot', () => {
+  it('opens the thread and stashes chats before navigation', async () => {
     const chats: AiChatMetadata[] = [{
       id: 0,
       title: 'New chat',
@@ -41,11 +41,11 @@ describe('ensureWorkspaceBoot', () => {
     const api = {
       openGadget: vi.fn<() => typeof overseer>(() => overseer),
     }
-    const boot = await ensureWorkspaceBoot('w1', api as never)
+    const boot = await ensureThreadBoot('w1', api as never)
     expect(boot.metadata.title).toBe('Daily Brief')
     expect(boot.chats).toEqual(chats)
     expect(boot.workpieces).toEqual([])
-    expect(takeWorkspaceBoot('w1')).toBe(boot)
-    expect(takeWorkspaceBoot('w1')).toBeNull()
+    expect(takeThreadBoot('w1')).toBe(boot)
+    expect(takeThreadBoot('w1')).toBeNull()
   })
 })

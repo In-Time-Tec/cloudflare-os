@@ -26,7 +26,7 @@ import { foldProposedChanges, isCompactionTurn, type ChangeBatch } from "./agent
 import { ambientGatekeeperMode } from "./provisioning-policy";
 import { listFeaturedTemplatesFromKv, readTemplateContent, readTemplateKvRecord, sanitizeTemplateOutput } from "./template-archive";
 import { WebFetchEnv } from "./web-fetch";
-import { UserDurableObject, UserAiModelRecord, type UserChatContext, type WorkspaceOutputEntry } from "./user";
+import { UserDurableObject, UserAiModelRecord, type UserChatContext, type ThreadOutputEntry } from "./user";
 import { AgentSpawnerBinding } from "./agent-spawner-binding";
 import { recordAnalytics } from "./analytics";
 import { reportIssue } from "@gadgets/backend-utils/error-reporting";
@@ -266,7 +266,7 @@ type GatekeeperRecord = {
   // Records how this gatekeeper was originally created, enabling template metadata derivation.
   creationSpec?: GatekeeperCreationSpec;
 
-  // OBSOLETE: Before we had support for multiple gadgets per workspace, the binding name and
+  // OBSOLETE: Before we had support for multiple gadgets per thread, the binding name and
   // template annotation information lived on the GatekeeperRecord. These properties continue
   // to be declared only to support migrating them away. The version 0 -> 1 migration copies
   // these into `GadgetRecord.bindings` for the default gadget. (A later migration may delete the
@@ -314,7 +314,7 @@ type GadgetRecord = {
   // a generic app. Purely descriptive: it names and draws the gadget, and confers nothing.
   output?: TemplateOutput;
 
-  // Name of the gadget to use in the workspace's default binding list for new chats. That is, when
+  // Name of the gadget to use in the thread's default binding list for new chats. That is, when
   // a new (normal, non-spawner) chat is started, this gadget will be available in its `env` under
   // this name from the start. The name is typically chosen at creation time (an argument to the
   // agent's createGadget tool). Gadgets which are still pending (`pending` is present) are
@@ -365,7 +365,7 @@ function fallbackBindingName(base: string, isTaken: (name: string) => boolean): 
 function observerVendorId(record: GatekeeperRecord): string | null {
   if (!record.creationSpec) {
     throw new Error(
-        "This workspace has a legacy connection that must be reconnected by its owner before it can be shared.");
+        "This thread has a legacy connection that must be reconnected by its owner before it can be shared.");
   }
   return "vendorId" in record.creationSpec ? record.creationSpec.vendorId : null;
 }
@@ -430,7 +430,7 @@ type TemplateGadgetRecord = {
   // Which gadget this template exports. If omitted, use `defaultGadgetId`.
   gadgetId?: WorkpieceId;
 
-  // Version of the workspace code (from the code collection) that was exported into this
+  // Version of the thread code (from the code collection) that was exported into this
   // template. (The template's snapshot itself contains only this gadget's files.)
   codeVersion: number;
 
@@ -512,7 +512,7 @@ export type ActionRecord = {
 
   /**
    * OBSOLETE: May still be present in records written when there was only one gadget per
-   * workspace. Ignore; use `resourceTitle` for display instead.
+   * thread. Ignore; use `resourceTitle` for display instead.
    */
   bindingName?: string;
 } & ({
@@ -758,9 +758,9 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
 
       // Version of this DO's storage schema, gating lazy migrations. Used to trigger migrations
       // at construction time.
-      //   0 = Workspace from before multi-gadget mode was introduced (unless `ownerId` is absent,
-      //       in which case this is a brand-new DO). The workspace contains at most one gadget,
-      //       which becomes `defaultGadgetId`. (If the workspace has no code or named bindings,
+      //   0 = Thread from before multi-gadget mode was introduced (unless `ownerId` is absent,
+      //       in which case this is a brand-new DO). The thread contains at most one gadget,
+      //       which becomes `defaultGadgetId`. (If the thread has no code or named bindings,
       //       treat as having zero gadgets.)
       //   1 = multi-gadget: the `gadgets` registry is the source of truth; binding names and
       //       template annotations live on binding edges; boundHooks/templates records carry a
@@ -771,10 +771,10 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
       //       in both the creationSpec and the class stub's baked-in props).
       version: 0,
 
-      // The workspace title. (Each chat, gatekeeper, and gadget has its own title, elsewhere.)
-      title: "Untitled Workspace",
+      // The thread title. (Each chat, gatekeeper, and gadget has its own title, elsewhere.)
+      title: "Untitled Thread",
 
-      // If present, this gadget was migrated from version zero, when a workspace had only one
+      // If present, this gadget was migrated from version zero, when a thread had only one
       // gadget. Many stored records that normally contain a `gadgetId` might be missing it; they
       // should be treated as referring to this gadget ID.
       //
@@ -784,14 +784,14 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
       // - The facet name is just "gadget", rather than "gadget<N>".
       //
       // `defaultGadgetId` is not present for new gadgets created in multi-gadget mode. It is also
-      // not present for upgraded workspaces that did not have any relevant gadget content at the
+      // not present for upgraded threads that did not have any relevant gadget content at the
       // time of upgrade.
       //
-      // Aside from when it is set while auto-creating a workspace's first (only) gadget -- during
-      // migration from version 0, or when instantiating a template into a fresh workspace (see
+      // Aside from when it is set while auto-creating a thread's first (only) gadget -- during
+      // migration from version 0, or when instantiating a template into a fresh thread (see
       // ensureDefaultGadget) -- `defaultGadgetId` must NEVER be changed. Even if the gadget is
       // deleted, `defaultGadgetId` remains so that old records can be correctly interpreted (as
-      // referring to a deleted gadget). Since it can't change after workspace initialization,
+      // referring to a deleted gadget). Since it can't change after thread initialization,
       // `defaultGadgetId` can be cached in memory after it is first read.
       defaultGadgetId: <WorkpieceId | undefined>undefined,
 
@@ -803,7 +803,7 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
       totalCost: 0,
 
       // Next workpiece ID. This is called `nextGatekeeperId` for historical reasons (it predates
-      // the ability to have multiple gadgets per workspace), but it is actually used to allocate
+      // the ability to have multiple gadgets per thread), but it is actually used to allocate
       // workpiece IDs of any type.
       nextGatekeeperId: 0,
 
@@ -846,7 +846,7 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
         primaryKey: "id",
 
         uniqueIndexes: {
-          // Enforces workspace-wide uniqueness of gadget binding names (see
+          // Enforces thread-wide uniqueness of gadget binding names (see
           // GadgetRecord.bindingName): a put() that would reuse another gadget's name throws.
           // Because pending gadgets' records are real, this makes a provisional gadget reserve its
           // name from the moment of creation, exactly like pending binding edges reserve theirs.
@@ -1410,8 +1410,8 @@ class OverseerImpl implements AgentHooks {
 
     // Mirror every gadget-registry change into the owner's outputs index. Subscribing here makes
     // the registry the single chokepoint, so creation, acceptance, renaming, reverting and
-    // deletion all propagate without each call site remembering to. (Workspace deletion is handled
-    // by UserDurableObject.deleteGadget(), which drops the whole workspace's entries.)
+    // deletion all propagate without each call site remembering to. (Thread deletion is handled
+    // by UserDurableObject.deleteGadget(), which drops the whole thread's entries.)
     this.storage.gadgets.subscribe({
       add: () => this.markOutputsDirty(),
       update: () => this.markOutputsDirty(),
@@ -1452,7 +1452,7 @@ class OverseerImpl implements AgentHooks {
   }
 
   // =======================================================================================
-  // Multi-gadget workspace helpers: storage migration, the gadget registry, and
+  // Multi-gadget thread helpers: storage migration, the gadget registry, and
   // defaultGadgetId resolution.
 
   // Migrate storage to the current schema version. Runs synchronously in the constructor.
@@ -1461,20 +1461,20 @@ class OverseerImpl implements AgentHooks {
     if (this.ownerId === undefined) {
       // Brand-new (or never-initialized) DO: there is nothing to migrate. We deliberately avoid
       // writing anything here, so that probing a nonexistent DO leaves no storage behind; the
-      // version singleton is set when the workspace is first initialized (see
+      // version singleton is set when the thread is first initialized (see
       // OverseerDurableObject.open() / receiveExternalMessage()).
       return;
     }
 
     // Run the whole migration in one transaction so that a mid-migration error can't leave the
-    // workspace half-migrated.
+    // thread half-migrated.
     let startedAt = Date.now();
     this.ctx.storage.transactionSync(() => {
-      // Version 0 -> 1: the workspace predates multi-gadget support. If it has any gadget content
+      // Version 0 -> 1: the thread predates multi-gadget support. If it has any gadget content
       // (code beyond the initial empty snapshot, or named bindings), register that content as the
-      // workspace's single gadget and record it as the default gadget; binding names and template
+      // thread's single gadget and record it as the default gadget; binding names and template
       // annotations move from the gatekeeper records onto the gadget's binding edges. (The stale
-      // originals are left on the gatekeeper records; see GatekeeperRecord.) A workspace with no
+      // originals are left on the gatekeeper records; see GatekeeperRecord.) A thread with no
       // gadget content migrates to zero gadgets.
       let hasCode = [...this.storage.code.list({limit: 1, start: 2})].length > 0;
       let allGatekeepers = [...this.storage.gatekeepers.list()];
@@ -1482,9 +1482,9 @@ class OverseerImpl implements AgentHooks {
 
       // The legacy flat env's named entries: each named gatekeeper, plus `GADGET -> the legacy
       // gadget` when one is created below. Used to resolve spawner allowlists further down.
-      // (The workspace default binding list itself needs no migration step: it is derived on
+      // (The thread default binding list itself needs no migration step: it is derived on
       // demand from the gadget record created below, whose bindingName and binding edges yield
-      // exactly this map -- so chats in old workspaces keep seeing `env.GADGET` and the same
+      // exactly this map -- so chats in old threads keep seeing `env.GADGET` and the same
       // named bindings they always did.)
       let legacyEnv: Record<string, WorkpieceId> = {};
       for (let gk of namedGatekeepers) {
@@ -1519,7 +1519,7 @@ class OverseerImpl implements AgentHooks {
       // props baked into the record's `class` stub. Props can't be edited in place, so the stub
       // is recreated the same way newAgentSpawnerGatekeeper() creates it -- except that
       // `creatorUserId` isn't recoverable from the record, so it is omitted, relying on the
-      // documented legacy fallback to the workspace owner.
+      // documented legacy fallback to the thread owner.
       for (let gk of allGatekeepers) {
         if (gk.creationSpec?.type !== "agentSpawner") continue;
         // The stored (pre-migration) shape is derived from the real type, differing only in
@@ -1549,7 +1549,7 @@ class OverseerImpl implements AgentHooks {
       this.storage.version.put(1);
     });
 
-    this.logger.info("migrated workspace storage", {
+    this.logger.info("migrated thread storage", {
       event: "storage.migration.completed", durationMs: Date.now() - startedAt,
     });
   }
@@ -1562,13 +1562,13 @@ class OverseerImpl implements AgentHooks {
     return id;
   }
 
-  // Resolve an optional gadget reference: absent means the workspace's default gadget. Throws if
-  // absent and the workspace has no default gadget.
+  // Resolve an optional gadget reference: absent means the thread's default gadget. Throws if
+  // absent and the thread has no default gadget.
   resolveGadgetId(gadgetId?: WorkpieceId): WorkpieceId {
     if (gadgetId !== undefined) return gadgetId;
     let def = this.defaultGadgetId;
     if (def === undefined) {
-      throw new Error("This workspace has no default gadget; a gadget must be named explicitly.");
+      throw new Error("This thread has no default gadget; a gadget must be named explicitly.");
     }
     return def;
   }
@@ -1580,7 +1580,7 @@ class OverseerImpl implements AgentHooks {
     let record = this.storage.gadgets.get(id);
     if (!record) {
       if (this.defaultGadgetId === id) {
-        throw new Error("This workspace's original gadget has been deleted.");
+        throw new Error("This thread's original gadget has been deleted.");
       }
       throw new Error(`No such gadget: ${id}`);
     }
@@ -1601,7 +1601,7 @@ class OverseerImpl implements AgentHooks {
   }
 
   // Resolve an agent tool's optional workpiece reference to the workpiece's files root. Absent
-  // means the workspace's default gadget; the error when there is none tells the agent how to
+  // means the thread's default gadget; the error when there is none tells the agent how to
   // proceed. When `mustExist` is set, the gadget must currently exist in the registry (used by
   // live file tools; history replay omits it so old edits to since-deleted gadgets still resolve
   // to the right root) and, if `forChatId` is also given, must be visible to that chat -- a gadget
@@ -1611,7 +1611,7 @@ class OverseerImpl implements AgentHooks {
       : {workpieceId: WorkpieceId, rootName: string} {
     if (workpieceId === undefined && this.defaultGadgetId === undefined) {
       throw new Error(
-          "No workpiece was specified, and this workspace has no default gadget. Pass the " +
+          "No workpiece was specified, and this thread has no default gadget. Pass the " +
           "`workpiece` parameter naming the gadget to operate on, or create one with " +
           "createGadget first.");
     }
@@ -1633,7 +1633,7 @@ class OverseerImpl implements AgentHooks {
   // Create a new gadget workpiece with the given title and binding name, no files, and no
   // bindings. The title is trimmed and must be non-empty (there are no default gadget titles;
   // every creation path names its gadget). The binding name must be valid (see
-  // validateBindingName) and unique among the workspace's gadgets -- including pending ones,
+  // validateBindingName) and unique among the thread's gadgets -- including pending ones,
   // whose records are real and so reserve their name from creation. If `chatId` is given, the
   // gadget is provisional to that chat (see GadgetRecord.pending); the caller is responsible for
   // getting its creation recorded in the chat log so the pending record gets sequence-stamped
@@ -1758,10 +1758,10 @@ class OverseerImpl implements AgentHooks {
     }
   }
 
-  // Auto-create the workspace's single gadget and record it as the default gadget. New workspaces
+  // Auto-create the thread's single gadget and record it as the default gadget. New threads
   // normally start with zero gadgets and the agent creates gadgets explicitly (never assigning
   // `defaultGadgetId`); the exception is template instantiation, which still creates a fresh
-  // workspace containing one gadget and is the only remaining caller.
+  // thread containing one gadget and is the only remaining caller.
   // TODO(multi-gadget): Remove once template instantiation is reworked (plan phase 5).
   ensureDefaultGadget(): void {
     if (this.defaultGadgetId !== undefined) return;
@@ -1773,14 +1773,14 @@ class OverseerImpl implements AgentHooks {
       id,
       title: this.storage.title.get(),
       created: new Date(),
-      // This only runs in a fresh workspace with no gadgets, so the name can't conflict.
+      // This only runs in a fresh thread with no gadgets, so the name can't conflict.
       bindingName: "GADGET",
       bindings: {},
     });
   }
 
   // Fallback bookkeeping target for hooks bound from executeCode when we can't tell which gadget
-  // the callback stub restores to (see bindHook): the workspace's first gadget, i.e. the default
+  // the callback stub restores to (see bindHook): the thread's first gadget, i.e. the default
   // gadget when it exists, else the lowest-numbered gadget (including a provisional one — hooks
   // recorded against it are torn down by removeGadget() if the provisional gadget is later
   // rejected), else undefined.
@@ -1931,10 +1931,10 @@ class OverseerImpl implements AgentHooks {
     }
   }
 
-  // Subscribe to the workspace's workpiece list. In v1 only gadget-type workpieces are published.
+  // Subscribe to the thread's workpiece list. In v1 only gadget-type workpieces are published.
   // When `includePending` is false (non-owner/use-role subscribers), gadgets still provisional to
   // some chat are withheld entirely: they are proposals within the owner's chats, not part of the
-  // shared workspace until accepted. (Promotion then surfaces them via the collection's update
+  // shared thread until accepted. (Promotion then surfaces them via the collection's update
   // notification.)
   subscribeToWorkpieces(subscriber: RpcStub<WorkpiecesSubscriber>,
                         includePending: boolean): RpcStub<{}> {
@@ -2747,8 +2747,8 @@ class OverseerImpl implements AgentHooks {
       if ((await this.getSharingManager()).hasAnyShares()) {
         throw new Error(
             "This observation was blocked because it contains sensitive data that must only be " +
-            "shown to the account owner, but this workspace is shared with other users. Try again " +
-            "from a workspace that is not shared.");
+            "shown to the account owner, but this thread is shared with other users. Try again " +
+            "from a thread that is not shared.");
       }
 
       this.storage.prohibitAllSharing.put(true);
@@ -2914,7 +2914,7 @@ class OverseerImpl implements AgentHooks {
       //   a search index, then it's not leaking anything. If we had a search provider we could
       //   trust... for now though, we will be extra-careful specifically when prohibiting sharing.
       throw new Error(
-          "This workspace has observed sensitive data. To prevent leaks, the workspace is prohibited " +
+          "This thread has observed sensitive data. To prevent leaks, the thread is prohibited " +
           "from fetching from public web sites.");
     }
 
@@ -2959,7 +2959,7 @@ class OverseerImpl implements AgentHooks {
       : Promise<void> {
     if (this.storage.prohibitAllSharing.get()) {
       throw new Error(
-          "This workspace has observed sensitive data. To prevent leaks, the workspace is prohibited " +
+          "This thread has observed sensitive data. To prevent leaks, the thread is prohibited " +
           "from performing actions.");
     }
 
@@ -3018,7 +3018,7 @@ class OverseerImpl implements AgentHooks {
     // encapsulates the correct restore target)? A gadget caller names itself. An agent caller
     // forged the callback via `env.<GADGET>[restore]` during the currently-running executeCode
     // invocation, so when exactly one gadget had a stub forged there, attribute the hook to it;
-    // otherwise (or for other callers) fall back to the workspace's first gadget.
+    // otherwise (or for other callers) fall back to the thread's first gadget.
     // TODO: Replace this heuristic with introspection of the callback stub's actual restore
     //   target once the runtime offers an API for that.
     let gadgetId: WorkpieceId | undefined;
@@ -3130,14 +3130,14 @@ class OverseerImpl implements AgentHooks {
   // --- Outputs index -------------------------------------------------------------------
   //
   // Each non-provisional gadget here is an "output". The `gadgets` registry is authoritative, but
-  // the Outputs page lists across all of a user's workspaces, so the registry is mirrored into an
-  // index in each interested user's DO (see UserDurableObject.syncWorkspaceOutputs()).
+  // the Outputs page lists across all of a user's threads, so the registry is mirrored into an
+  // index in each interested user's DO (see UserDurableObject.syncThreadOutputs()).
 
   // Whether a flush is already queued. Registry mutations arrive in synchronous bursts (a chat's
   // changes may create and stamp several gadgets), so pushes coalesce onto a single flush.
   #outputsFlushScheduled = false;
 
-  // User DO ids whose outputs index this workspace is keeping live, one token per open session.
+  // User DO ids whose outputs index this thread is keeping live, one token per open session.
   //
   // In memory, not persisted, which is what makes fanning out to collaborators safe: revoking
   // access aborts the DO (see scheduleRevocationRestart()), so this is destroyed with the sessions
@@ -3166,13 +3166,13 @@ class OverseerImpl implements AgentHooks {
     };
   }
 
-  // This workspace's outputs, as pushed to a user's index. Provisional gadgets are excluded: they
+  // This thread's outputs, as pushed to a user's index. Provisional gadgets are excluded: they
   // are proposals inside a chat, not things the user has made yet.
   //
   // Whole-snapshot rather than a delta, so that a user's index can be brought into line with this
-  // workspace in one call from anywhere, without either side reconciling per workpiece.
-  outputsSnapshot(): WorkspaceOutputEntry[] {
-    let entries: WorkspaceOutputEntry[] = [];
+  // thread in one call from anywhere, without either side reconciling per workpiece.
+  outputsSnapshot(): ThreadOutputEntry[] {
+    let entries: ThreadOutputEntry[] = [];
     for (let gadget of this.storage.gadgets.list()) {
       if (gadget.pending) continue;
       entries.push({
@@ -3189,16 +3189,16 @@ class OverseerImpl implements AgentHooks {
   // view, so a failed push costs a stale Outputs page until the next change or open, never
   // correctness.
   // Returns whether the index actually took it. Failures are logged rather than thrown -- an index
-  // is a convenience view and the workspace itself is unaffected -- but callers that remember what
+  // is a convenience view and the thread itself is unaffected -- but callers that remember what
   // they have sent need to know the difference.
   async syncOutputsTo(user: DurableObjectStub<UserDurableObject>,
                       snapshot = this.outputsSnapshot()): Promise<boolean> {
     try {
-      await user.syncWorkspaceOutputs(this.ctx.id.toString(), snapshot);
+      await user.syncThreadOutputs(this.ctx.id.toString(), snapshot);
       return true;
     } catch (err) {
-      this.logger.warn("failed to sync workspace outputs to user DO", {
-        event: "workspace.outputs.sync.failed", gadgetId: this.ctx.id.toString(), error: err,
+      this.logger.warn("failed to sync thread outputs to user DO", {
+        event: "thread.outputs.sync.failed", gadgetId: this.ctx.id.toString(), error: err,
       });
       return false;
     }
@@ -3213,14 +3213,14 @@ class OverseerImpl implements AgentHooks {
       this.#outputsFlushScheduled = false;
       return this.#syncOutputsToWatchers();
     }).catch(err => {
-      this.logger.warn("failed to flush workspace outputs", {
-        event: "workspace.outputs.flush.failed", gadgetId: this.ctx.id.toString(), error: err,
+      this.logger.warn("failed to flush thread outputs", {
+        event: "thread.outputs.flush.failed", gadgetId: this.ctx.id.toString(), error: err,
       });
     });
   }
 
   // Push the current snapshot to the owner's index and to every collaborator with a session open.
-  // The owner is included whether or not they are connected, since a workspace goes on producing
+  // The owner is included whether or not they are connected, since a thread goes on producing
   // while its owner is away; a disconnected collaborator is caught up by the sync in open().
   async #syncOutputsToWatchers(): Promise<void> {
     let ownerId = this.ownerId;
@@ -3442,7 +3442,7 @@ class OverseerImpl implements AgentHooks {
 
   // Validate client-supplied capsules before they are persisted: each must reference an existing
   // workpiece, and never a gadget still provisional to another chat (a pending gadget belongs to
-  // that chat's unaccepted proposal, not (yet) to the workspace). Enforcing this at the single
+  // that chat's unaccepted proposal, not (yet) to the thread). Enforcing this at the single
   // commit chokepoint means everything downstream of the chat log (binding-name stamping, env
   // build, describeBinding) can trust persisted capsule targets, though targets may of course be
   // deleted later.
@@ -3668,7 +3668,7 @@ class OverseerImpl implements AgentHooks {
     chatGatewayRpcTarget: NativeRpcStub<ChatGatewayRpcTarget>,
   ): void {
     if (this.storage.gadgetResponseDeliveries.undeliveredByChatId.get(chatId)) {
-      throw new Error("This chat already has an undelivered workspace response target.");
+      throw new Error("This chat already has an undelivered thread response target.");
     }
     chatGatewayRpcTarget = chatGatewayRpcTarget.dup();
     try {
@@ -4255,7 +4255,7 @@ class OverseerImpl implements AgentHooks {
   async deliverAgentCallback(
       chatId: number, methodName: string, args: unknown[],
       initiatorUserId: string, initiatorModelId: string): Promise<unknown> {
-    if (!this.ownerId) throw new Error("Workspace has been deleted.");
+    if (!this.ownerId) throw new Error("Thread has been deleted.");
 
     // Compute the summary eagerly (it only reads, doesn't mutate or need the sequence).
     let argsSummary = summarizeArgs(args);
@@ -4391,7 +4391,7 @@ class OverseerImpl implements AgentHooks {
     return this.storage.chatContext.get(chatId) || {chatId};
   }
 
-  // Summarize the workspace's gadgets for the agent: each gadget's identity, its files root in
+  // Summarize the thread's gadgets for the agent: each gadget's identity, its files root in
   // the session Y.Doc, and its named bindings. Used to build the system prompt. Gadgets still
   // provisional to a chat other than `forChatId` are omitted: they belong to that chat's proposed
   // changes and don't exist from any other chat's perspective.
@@ -4417,7 +4417,7 @@ class OverseerImpl implements AgentHooks {
   // =======================================================================================
 
   #ownerUserDo() {
-    if (!this.ownerId) throw new Error("Workspace is not initialized.");
+    if (!this.ownerId) throw new Error("Thread is not initialized.");
     return this.users.get(this.users.idFromString(this.ownerId));
   }
 
@@ -4486,7 +4486,7 @@ class OverseerImpl implements AgentHooks {
     }));
   }
 
-  // Derive the workspace's default binding list -- the seed binding layer for new (non-spawned)
+  // Derive the thread's default binding list -- the seed binding layer for new (non-spawned)
   // chats. Deliberately *not stored*: reconstructed on demand (only at chat seeding time) from
   // non-pending gadget records in ID order -- first every gadget under its bindingName (unique,
   // enforced by the byBindingName index), then every permanent binding edge under its edge name,
@@ -4536,7 +4536,7 @@ class OverseerImpl implements AgentHooks {
       taken = new Set(Array.isArray(env) ? env : Object.keys(env));
     } else {
       // Unseeded normal chat (or an old-style spawned chat with no allowlist, historically
-      // meaning "unrestricted"): the workspace default binding list.
+      // meaning "unrestricted"): the thread default binding list.
       taken = new Set(Object.keys(this.defaultBindingList()));
     }
     let callbackNameCounter = 0;
@@ -4609,7 +4609,7 @@ class OverseerImpl implements AgentHooks {
   }
 
   // The quick-model context used for turn-start binding naming, fetched lazily (the naming path
-  // runs at most once per legacy message) and resolved from the workspace owner's account.
+  // runs at most once per legacy message) and resolved from the thread owner's account.
   // Returns undefined when no quick model is configured (callers fall back to deterministic
   // names).
   async #getNamingQuickModel()
@@ -4633,7 +4633,7 @@ class OverseerImpl implements AgentHooks {
   //
   // This is the single lazy chokepoint for seeding and naming:
   //   - The seed map (`chatContext.bindings`) is created on first use: normal chats snapshot the
-  //     workspace default binding list, spawned chats their frozen spawner env (resolving an
+  //     thread default binding list, spawned chats their frozen spawner env (resolving an
   //     old-style allowlist the same way the storage migration does). Chats created before named
   //     chat bindings are seeded here on their next turn, with zero upfront migration.
   //   - The ambient resource set is frozen on first use (ordered by gatekeeper id) and folded
@@ -5021,7 +5021,7 @@ class OverseerImpl implements AgentHooks {
       }
     }
 
-    // Agent spawner bindings: workpiece IDs are workspace-local, so a spawner's env transfers
+    // Agent spawner bindings: workpiece IDs are thread-local, so a spawner's env transfers
     // symbolically (see SpawnerEnvTarget). Each env entry references the exporting gadget
     // itself, one of the gadget's own bindings by name, or -- for a target bound by no edge --
     // an additional top-level binding synthesized just to feed the spawner (marked
@@ -5101,7 +5101,7 @@ class OverseerImpl implements AgentHooks {
   // Create a minimal Yjs doc snapshot (no edit history) of one gadget's files at the given code
   // version. Returns a gzip-compressed Yjs V2 encoded state update. The snapshot always uses the
   // unnamed root "" (the canonical archive root), regardless of which root holds the gadget's
-  // files in the workspace doc, so archives stay compatible across gadgets.
+  // files in the thread doc, so archives stay compatible across gadgets.
   async snapshotCode(gadgetId: WorkpieceId,
                      version: number | "current" = "current"): Promise<Uint8Array> {
     let {ydoc} = this.buildYDoc(version);
@@ -5134,7 +5134,7 @@ class OverseerImpl implements AgentHooks {
       codeSnapshot?: Uint8Array,
       screenshot?: TemplateScreenshotUpload | null,
   ): Promise<void> {
-    if (!this.ownerId) throw new Error("Workspace not initialized.");
+    if (!this.ownerId) throw new Error("Thread not initialized.");
 
     // Mark dirty.
     record.dirty = true;
@@ -5190,7 +5190,7 @@ class OverseerImpl implements AgentHooks {
 
   // Delete a template's propagated data (KV, R2, User DO, local).
   async deleteTemplatePropagation(record: TemplateGadgetRecord): Promise<void> {
-    if (!this.ownerId) throw new Error("Workspace not initialized.");
+    if (!this.ownerId) throw new Error("Thread not initialized.");
 
     // Delete from KV first (stops public access).
     await this.env.TEMPLATES.delete(record.id);
@@ -5282,7 +5282,7 @@ class OverseerImpl implements AgentHooks {
       // Also rename the gadget if this is the first chat. Since the gadget likely doesn't have
       // any code yet, the user still sees it as just a chat, and therefore it makes sense to
       // apply the same title as the chat itself.
-      if (chatId === 0 && ["Untitled Gadget", "Untitled Workspace"].includes(this.storage.title.get()) && this.ownerId) {
+      if (chatId === 0 && ["Untitled Gadget", "Untitled Thread"].includes(this.storage.title.get()) && this.ownerId) {
         this.storage.title.put(result);
         let owner = this.users.get(this.users.idFromString(this.ownerId));
         await owner.updateTitle(this.ctx.id.toString(), result);
@@ -5418,7 +5418,7 @@ class OverseerImpl implements AgentHooks {
         `${keyString(chatId)}.${keyString(sequence)}`)?.message;
   }
 
-  // Adds an inference cost (in dollars) to a chat's running total and the workspace-wide total.
+  // Adds an inference cost (in dollars) to a chat's running total and the thread-wide total.
   #addChatCost(chatId: number, cost: number) {
     let meta = this.storage.chatMeta.get(chatId);
     if (!meta) {
@@ -5605,7 +5605,7 @@ class OverseerImpl implements AgentHooks {
   // --- Connection-request hooks ---
 
   #ownerUserStub() {
-    if (!this.ownerId) throw new Error("Workspace has been deleted.");
+    if (!this.ownerId) throw new Error("Thread has been deleted.");
     return this.users.get(this.users.idFromString(this.ownerId));
   }
 
@@ -5750,7 +5750,7 @@ class OverseerImpl implements AgentHooks {
   // List the templates the turn's initiator could instantiate with createGadget: their own
   // published templates, their template library, and the deployment's featured set. Template
   // libraries are per-user, so this lists the initiator's -- a collaborator driving the agent gets
-  // their own library, not the workspace owner's. There is no search index; these corpora are
+  // their own library, not the thread owner's. There is no search index; these corpora are
   // small, so the formatted text is handed to the model to scan directly.
   async listAvailableTemplates(initiator: AiChatAuthorInfo): Promise<string> {
     // `initiator.id` is an opaque user DO id: the initiating user for "user" turns, the spawning
@@ -5830,7 +5830,7 @@ class OverseerImpl implements AgentHooks {
         `This deployment offers these as ready-made outputs, and users ask for them by name. When ` +
         `the user asks for something one of them produces, instantiate that template with ` +
         `\`createGadget\` rather than writing an equivalent from scratch -- including when the ` +
-        `workspace already contains Gadgets, since the user is asking for a new output alongside ` +
+        `thread already contains Gadgets, since the user is asking for a new output alongside ` +
         `them rather than for an existing one to be repurposed. If the Gadget they are talking ` +
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
@@ -6055,7 +6055,7 @@ class OverseerImpl implements AgentHooks {
     }
   }
 
-  // Reconcile this workspace's cached listing for collaborators whose access changed: remove it
+  // Reconcile this thread's cached listing for collaborators whose access changed: remove it
   // for those who lost access entirely, and refresh the presentation-only role for those who were
   // downgraded.
   async refreshAffectedCollaboratorListings(affected: AffectedCollaborator[]): Promise<void> {
@@ -6076,7 +6076,7 @@ class OverseerImpl implements AgentHooks {
       for (let j = 0; j < results.length; j++) {
         let result = results[j];
         if (result.status !== "rejected") continue;
-        this.logger.warn("failed to refresh affected collaborator's workspace listing", {
+        this.logger.warn("failed to refresh affected collaborator's thread listing", {
           event: "shared.gadget.access.refresh.failed", gadgetId, error: result.reason,
         });
       }
@@ -6158,7 +6158,7 @@ class OverseerImpl implements AgentHooks {
           if (!configureCb) {
             // Non-interactive open (e.g. no UI). We can't configure, so deny.
             throw new Error(
-                "To open this workspace, you must choose connected accounts for the services it " +
+                "To open this thread, you must choose connected accounts for the services it " +
                 "uses, but no configuration channel was provided.");
           }
 
@@ -6185,7 +6185,7 @@ class OverseerImpl implements AgentHooks {
           let stillUncovered = uncovered.filter(gk => !(gk.id in accountChoices));
           if (stillUncovered.length > 0) {
             throw new Error(
-                "You must connect an account for every service this workspace uses in order to open " +
+                "You must connect an account for every service this thread uses in order to open " +
                 "it.");
           }
         }
@@ -6248,7 +6248,7 @@ class OverseerImpl implements AgentHooks {
           // Terminal. Name each failed connection and account so the user knows what to fix, rather
           // than reporting an anonymous refusal.
           throw new Error(
-              "This workspace could not confirm that you are permitted to observe all of the data it " +
+              "This thread could not confirm that you are permitted to observe all of the data it " +
               "has accessed:\n" +
               await this.#describeObserverFailures(clientUser, inScope, failures));
         }
@@ -6316,7 +6316,7 @@ class OverseerImpl implements AgentHooks {
       return ownerProfileId;
     }
 
-    if (!this.ownerId) throw new Error("Workspace is not initialized.");
+    if (!this.ownerId) throw new Error("Thread is not initialized.");
     const ownerDo = this.users.get(this.users.idFromString(this.ownerId));
     const ownerProfile = await ownerDo.whoami();
     this.ownerProfileId = ownerProfile.id;
@@ -6419,7 +6419,7 @@ type OverseerRestoreParams = {
 
   // Which gadget to restore to. Optional, resolving to `defaultGadgetId` when absent: instances
   // recorded before multi-gadget support are persisted in the wild, sealed inside hook callback
-  // stubs where a migration cannot rewrite them. If absent and the workspace has no default
+  // stubs where a migration cannot rewrite them. If absent and the thread has no default
   // gadget (or the default gadget was deleted), restoration fails with an explicit error.
   gadgetId?: WorkpieceId;
 
@@ -6471,17 +6471,17 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
 
     this.impl.storage.codeVersion.put(1);
 
-    // A workspace initialized by this version of the code is born at the current schema version;
+    // A thread initialized by this version of the code is born at the current schema version;
     // there is nothing to migrate.
     this.impl.storage.version.put(1);
   }
 
   /**
-   * This workspace's outputs, for the owner to fold into their index. Every registry change and
-   * every owner open already pushes, so this exists only to catch up workspaces that predate the
+   * This thread's outputs, for the owner to fold into their index. Every registry change and
+   * every owner open already pushes, so this exists only to catch up threads that predate the
    * index. Null unless the caller really is the owner, so nobody else can read the snapshot.
    */
-  async getOutputsForOwnerBackfill(ownerId: string): Promise<WorkspaceOutputEntry[] | null> {
+  async getOutputsForOwnerBackfill(ownerId: string): Promise<ThreadOutputEntry[] | null> {
     if (this.impl.ownerId !== ownerId) return null;
     return this.impl.outputsSnapshot();
   }
@@ -6503,7 +6503,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
         let owner = this.impl.users.get(this.impl.users.idFromString(userId));
         let meta = await owner.getGadget(this.ctx.id.toString());
         if (!meta) {
-          throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceNotFound);
+          throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.threadNotFound);
         }
         if (meta.owner) {
           // The user's DO contains a record indicating that this gadget was shared to them by
@@ -6511,7 +6511,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
           // which does not proactively clean up share recipient's references. We need to treat
           // this as missing otherwise we'll inadvertently create a new gadget with this ID
           // belonging to a different user than the original.
-          throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceNotFound);
+          throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.threadNotFound);
         }
 
         // Owner says we exist, so let's initialize ourselves.
@@ -6548,7 +6548,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
         ? owner
         : this.impl.users.get(this.impl.users.idFromString(userId));
 
-    // Refresh the owner's outputs index. Pushes are best-effort, and workspaces predating the
+    // Refresh the owner's outputs index. Pushes are best-effort, and threads predating the
     // index have never pushed at all, so re-syncing on open is what corrects both.
     if (isOwner) {
       this.impl.markOutputsDirty();
@@ -6562,7 +6562,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
         // `prohibitAllSharing` can only have been set when the gadget had no shares (see
         // `authorizeObservation`), and no new shares can be created while it's set, so any
         // non-owner reaching here is necessarily unauthorized.
-        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceAccessDenied);
+        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.threadAccessDenied);
       }
 
       let sharing = await this.impl.getSharingManager();
@@ -6581,11 +6581,11 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
       // both authorizes the session and determines which capability we hand back.
       //
       // An unauthorized caller (no effective role -- never had access, or was removed) gets a
-      // distinct denial without workspace metadata. A removed collaborator who reconnects after
+      // distinct denial without thread metadata. A removed collaborator who reconnects after
       // their session is force-restarted lands here and sees the terminal access-denied page.
       let effectiveRole = sharing.getEffectiveRole(profileId);
       if (!effectiveRole) {
-        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceAccessDenied);
+        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.threadAccessDenied);
       }
       role = effectiveRole;
 
@@ -6675,14 +6675,14 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
       if (this.impl.storage.prohibitAllSharing.get()) {
         return {
           accepted: false,
-          message: "This workspace has sharing disabled, so only its owner can access it.",
+          message: "This thread has sharing disabled, so only its owner can access it.",
         };
       }
       let role = (await this.impl.getSharingManager()).getEffectiveRole(callerProfile.id);
       if (role !== "build") {
         return {
           accepted: false,
-          message: "You do not have access to interact with this workspace through its agent.",
+          message: "You do not have access to interact with this thread through its agent.",
         };
       }
     }
@@ -6752,11 +6752,11 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
       );
     }
 
-    return { accepted: true, chatPath: `/workspace/${this.ctx.id.toString()}?chat=${chatId}` };
+    return { accepted: true, chatPath: `/thread/${this.ctx.id.toString()}?chat=${chatId}` };
   }
 
   /**
-   * Initialize this workspace's default gadget from a template's code snapshot. Called by
+   * Initialize this thread's default gadget from a template's code snapshot. Called by
    * AuthenticatedApi.newGadgetFromTemplate() after creating (and opening) the DO.
    */
   async initializeFromTemplate(code: Uint8Array, title: string, output?: TemplateOutput)
@@ -6764,7 +6764,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
     // Set the title. The default gadget (created just below) inherits it.
     this.impl.storage.title.put(title);
 
-    // Template instantiation still creates a fresh workspace containing one auto-created gadget,
+    // Template instantiation still creates a fresh thread containing one auto-created gadget,
     // recorded as the default gadget (see ensureDefaultGadget).
     this.impl.ensureDefaultGadget();
     let gadgetId = this.impl.resolveGadgetId(undefined);
@@ -6870,7 +6870,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
   async spawnAgent(
       title: string, prompt: string, config: AgentSpawnerConfig,
       creatorUserId?: string, callable?: boolean) {
-    if (!this.impl.ownerId) throw new Error("Workspace has been deleted.");
+    if (!this.impl.ownerId) throw new Error("Thread has been deleted.");
     if (callable && !config.modelId) {
       throw new Error("Cannot create a callable agent without a model.");
     }
@@ -6896,7 +6896,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
     this.impl.storage.chatMeta.put(meta);
 
     // Snapshot the spawner's configured bindings as the chat's seed binding layer -- the spawned
-    // agent sees only these, never the workspace default list. Entries whose targets no longer
+    // agent sees only these, never the thread default list. Entries whose targets no longer
     // exist are dropped.
     let bindings: Record<string, WorkpieceId> = Object.create(null);
     for (let [name, target] of Object.entries(config.env)) {
@@ -7299,7 +7299,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
   // We create a new stub for every call so that we don't have to worry about detecting when a
   // stub has become broken (see AuthenticatedApiImpl.#user in server.ts).
   get #owner(): DurableObjectStub<UserDurableObject> {
-    if (!this.impl.ownerId) throw new Error("Workspace has been deleted.");
+    if (!this.impl.ownerId) throw new Error("Thread has been deleted.");
     return wrapDoStubForTelemetry(
         this.impl.users.get(this.impl.users.idFromString(this.impl.ownerId)),
         this.impl.logger);
@@ -7496,7 +7496,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
 
   async deleteSelf(): Promise<void> {
     if (!this.isOwner) {
-      throw new Error("Only the workspace owner can delete it.");
+      throw new Error("Only the thread owner can delete it.");
     }
     let startedAt = Date.now();
 
@@ -7526,8 +7526,8 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       this.impl.ownerId = undefined;
     });
 
-    this.impl.logger.info("deleted workspace", {
-      event: "workspace.delete.completed", durationMs: Date.now() - startedAt,
+    this.impl.logger.info("deleted thread", {
+      event: "thread.delete.completed", durationMs: Date.now() - startedAt,
     });
   }
 
@@ -7680,7 +7680,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
   async newAgentSpawnerGatekeeper(config: AgentSpawnerConfig): Promise<GatekeeperClient<any>> {
     // Validate the configured env: names must be valid binding names and targets must exist --
     // and must not be gadgets still provisional to some chat, which belong to that chat's
-    // unaccepted proposal, not (yet) to the workspace. (Spawn-time snapshotting tolerates targets
+    // unaccepted proposal, not (yet) to the thread. (Spawn-time snapshotting tolerates targets
     // deleted later; this just catches bad input.)
     for (let [name, target] of Object.entries(config.env)) {
       validateBindingName(name);
@@ -7771,7 +7771,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
         id: record.id,
         gatekeeperId: record.gatekeeperId,
         // Hooks recorded before multi-gadget support carry no gadgetId; they belong to the
-        // default gadget, which necessarily exists in any workspace old enough to have them.
+        // default gadget, which necessarily exists in any thread old enough to have them.
         gadgetId: (record.gadgetId ?? defaultGadgetId)!,
         resourceTitle: gatekeeper?.resourceTitle,
         resourceUrl: gatekeeper?.resourceUrl,
@@ -7802,7 +7802,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
           this.impl.ctx.exports.GatekeeperHookLoopback({props}) as unknown as
               Fetcher<HookInitiator<RpcTarget>>,
           {
-            workspaceId: this.impl.ctx.id.toString(),
+            threadId: this.impl.ctx.id.toString(),
             ...(record.gadgetId !== undefined ? {gadgetId: record.gadgetId} : {}),
           });
 
@@ -7914,7 +7914,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
   // Enable auto-approval of actions carrying `actionKind` on the given gatekeeper. Stores the
   // opt-in rule (one of the two gates required to auto-apply -- the action's own `autoApprovable`
   // verdict is the other) with the kind's display label, and immediately drains any pending
-  // actions that this newly unblocks. Auto-approval rules are workspace-wide per gatekeeper.
+  // actions that this newly unblocks. Auto-approval rules are thread-wide per gatekeeper.
   async setAutoApprovedActionKind(gatekeeperId: WorkpieceId, actionKind: ActionKind)
       : Promise<void> {
     let gatekeeper = this.impl.storage.gatekeepers.get(gatekeeperId);
@@ -8413,7 +8413,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     }
 
     // Promote provisional gadgets whose creation is covered by this merge: accepting the chat's
-    // changes through `mergeThrough` makes them permanent workspace members. (Reap crash orphans
+    // changes through `mergeThrough` makes them permanent thread members. (Reap crash orphans
     // first. An unstamped record that survives reconciliation -- a crashed turn's not-yet-resumed
     // tail -- has no sequence and is simply not covered by this merge.) Each stamped creation
     // sits on an unmerged, unreverted "changes" message at `pending.sequence` (a reverted
@@ -8428,7 +8428,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     }
 
     // Likewise promote provisional binding edges covered by this merge; this is also the moment
-    // an edge becomes visible to mainline loads and the derived workspace default binding list.
+    // an edge becomes visible to mainline loads and the derived thread default binding list.
     for (let gadget of this.impl.storage.gadgets.list()) {
       let promoted = false;
       for (let edge of Object.values(gadget.bindings)) {
@@ -8825,7 +8825,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
 
     if (this.impl.storage.prohibitAllSharing.get()) {
       throw new Error(
-          "This workspace has observed sensitive data. To prevent leaks, the workspace cannot be " +
+          "This thread has observed sensitive data. To prevent leaks, the thread cannot be " +
           "shared.");
     }
 
@@ -8847,7 +8847,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
         .removeCollaborator(this.#sharingCaller(), profileId, keepUsers);
     // Tear down observer records for anyone who lost access (best-effort; see tearDownLostObservers).
     await this.impl.tearDownLostObservers(affected);
-    // Likewise update or remove their cached workspace listing. Must happen before the restart
+    // Likewise update or remove their cached thread listing. Must happen before the restart
     // below, which destroys this DO.
     await this.impl.refreshAffectedCollaboratorListings(affected);
     // Only restart if someone actually lost access or was downgraded (kept users are already
@@ -8869,7 +8869,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
         .revokeShareLink(this.#sharingCaller(), linkId, keepUsers);
     // Tear down observer records for anyone who lost access (best-effort; see tearDownLostObservers).
     await this.impl.tearDownLostObservers(affected);
-    // Likewise update or remove their cached workspace listing (see removeCollaborator).
+    // Likewise update or remove their cached thread listing (see removeCollaborator).
     await this.impl.refreshAffectedCollaboratorListings(affected);
     // Only restart if someone actually lost access or was downgraded (see removeCollaborator).
     if (affected.length > 0) {
@@ -8884,7 +8884,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       : Promise<{ key: string; linkId: string }> {
     if (this.impl.storage.prohibitAllSharing.get()) {
       throw new Error(
-          "This workspace has observed sensitive data. To prevent leaks, the workspace cannot be " +
+          "This thread has observed sensitive data. To prevent leaks, the thread cannot be " +
           "shared.");
     }
 
@@ -8895,7 +8895,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
   async newShareLinkKey(linkId: string): Promise<{ key: string }> {
     if (this.impl.storage.prohibitAllSharing.get()) {
       throw new Error(
-          "This workspace has observed sensitive data. To prevent leaks, the workspace cannot be " +
+          "This thread has observed sensitive data. To prevent leaks, the thread cannot be " +
           "shared.");
     }
 
@@ -8979,7 +8979,7 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
 
   // Fresh stub per call; see OverseerClientInterface.#clientUser.
   get #owner(): DurableObjectStub<UserDurableObject> {
-    if (!this.impl.ownerId) throw new Error("Workspace has been deleted.");
+    if (!this.impl.ownerId) throw new Error("Thread has been deleted.");
     return wrapDoStubForTelemetry(
         this.impl.users.get(this.impl.users.idFromString(this.impl.ownerId)),
         this.impl.logger);
@@ -9060,7 +9060,7 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
     return this.impl.addPresenceSubscriber(subscriber);
   }
 
-  // The gadget list is visible to "use" collaborators (v1 shares the whole workspace), and each
+  // The gadget list is visible to "use" collaborators (v1 shares the whole thread), and each
   // gadget is exposed through a restricted UseGadgetClientInterface that only permits rendering
   // its deployed UI. Gadgets still provisional to a chat are withheld: they are proposals within
   // the owner's chats, and their mainline code is empty anyway.
@@ -9393,7 +9393,7 @@ class GadgetClientImpl extends RpcTarget implements GadgetClient {
   async createTemplate(title?: string, description?: string,
                         screenshotUpload?: TemplateScreenshotUpload)
       : Promise<TemplateGadgetSummary> {
-    if (!this.impl.ownerId) throw new Error("Workspace not initialized.");
+    if (!this.impl.ownerId) throw new Error("Thread not initialized.");
 
     // NOTE: It is INTENTIONAL that collaborators can publish templates on behalf of the owner.
     //   We may in the future create different collaborator permission levels, in which case we'd
@@ -9595,7 +9595,7 @@ class GatekeeperClientImpl<Session extends RpcCompatible<Session>>
   }
 
   async setTitle(title: string): Promise<void> {
-    // This changes only the display title used locally within this workspace (resourceTitle is a
+    // This changes only the display title used locally within this thread (resourceTitle is a
     // denormalized copy of the remote resource's title), never the remote resource.
     let record = this.#getRecord();
     record.resourceTitle = title;

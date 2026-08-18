@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import GadgetEditor from '../../GadgetEditor'
 import { aiConfigOptions, gadgetsOptions, modelsOptions } from '../../query/hooks'
-import { ensureWorkspaceBoot } from '../../query/workspace-session'
+import { ensureThreadBoot } from '../../query/thread-session'
 
 type GadgetSearch = {
   chat?: number
@@ -19,7 +19,7 @@ function parseIntParam(value: unknown): number | undefined {
   return undefined
 }
 
-export const Route = createFileRoute('/_authenticated/workspace/$id')({
+export const Route = createFileRoute('/_authenticated/thread/$id')({
   component: GadgetEditor,
   validateSearch: (search: Record<string, unknown>): GadgetSearch => ({
     chat: typeof search.chat === 'number' ? search.chat
@@ -45,7 +45,7 @@ export const Route = createFileRoute('/_authenticated/workspace/$id')({
     ])
     if (cause === 'preload' || cause === 'stay') return
     try {
-      await ensureWorkspaceBoot(params.id, context.session.requireAuthenticatedApi())
+      await ensureThreadBoot(params.id, context.session.requireAuthenticatedApi())
     } catch {
     }
   },

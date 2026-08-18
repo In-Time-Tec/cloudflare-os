@@ -36,7 +36,7 @@ interface ConnectionsProps {
 }
 
 /**
- * Auto-approval rules live in Activity because they apply across the workspace, while this view is
+ * Auto-approval rules live in Activity because they apply across the thread, while this view is
  * scoped to one gadget.
  */
 export default function Connections({ overseer, gadget, chatId, authenticatedApi, onConnectionsChange, isVisible, onHasGatekeepersChange }: ConnectionsProps) {
@@ -62,7 +62,7 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
         gadget.getTitle(),
         // Pass the open chat so bindings this tab added provisionally to it are listed too.
         gadget.listBindings(chatId),
-        // Workspace-wide; filtered to this gadget below.
+        // Thread-wide; filtered to this gadget below.
         overseer.listHooks(),
       ])
       setGadgetInfo({ id, title: gadgetTitle })

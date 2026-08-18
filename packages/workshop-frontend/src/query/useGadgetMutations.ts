@@ -24,7 +24,7 @@ export function useGadgetMutations() {
     renameGadget(gadget: GadgetMetadataWithTimestamps, title: string) {
       rename.mutate(
         { id: gadget.id, title },
-        { onError: () => toasts.add({ title: 'Failed to rename workspace', variant: 'error' }) },
+        { onError: () => toasts.add({ title: 'Failed to rename thread', variant: 'error' }) },
       )
     },
     deleteGadget(gadget: GadgetMetadataWithTimestamps) {
@@ -32,10 +32,10 @@ export function useGadgetMutations() {
         { id: gadget.id, shared: !!gadget.owner },
         {
           onSuccess: () => toasts.add({
-            title: gadget.owner ? 'Workspace removed from list' : 'Workspace deleted',
+            title: gadget.owner ? 'Thread removed from list' : 'Thread deleted',
             variant: 'success',
           }),
-          onError: () => toasts.add({ title: 'Failed to delete workspace', variant: 'error' }),
+          onError: () => toasts.add({ title: 'Failed to delete thread', variant: 'error' }),
         },
       )
     },

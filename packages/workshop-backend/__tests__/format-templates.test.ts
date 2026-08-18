@@ -60,7 +60,7 @@ describe("bundled format templates", () => {
       // must not apply to them.
       expect(record.ownerId).toBeUndefined();
       // Presentation comes from the sidecar, not from whatever the archive was called in the
-      // workspace it was exported from.
+      // thread it was exported from.
       expect(record.metadata.title).toBe(entry.title);
       expect(record.metadata.description).toBe(entry.description);
       expect(record.metadata.author).toEqual(entry.author);

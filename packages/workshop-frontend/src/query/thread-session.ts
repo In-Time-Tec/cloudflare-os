@@ -13,9 +13,9 @@ import type {
   WorkpieceSummary,
   WorkpiecesSubscriber,
 } from '@gadgets/workshop-shared/api'
-import { persistWorkspaceWorkpieces } from './workpieces'
+import { persistThreadWorkpieces } from './workpieces'
 
-export type WorkspaceBoot = {
+export type ThreadBoot = {
   id: string
   overseer: RpcStub<Overseer>
   metadata: GadgetMetadata
@@ -26,26 +26,26 @@ export type WorkspaceBoot = {
   configureObservers: RpcStub<ObserverConfigCallback>
 }
 
-const boots = new Map<string, WorkspaceBoot>()
+const boots = new Map<string, ThreadBoot>()
 
-function disposeBoot(boot: WorkspaceBoot): void {
+function disposeBoot(boot: ThreadBoot): void {
   boot.overseer[Symbol.dispose]?.()
   boot.configureObservers[Symbol.dispose]?.()
 }
 
-export function stashWorkspaceBoot(boot: WorkspaceBoot): void {
+export function stashThreadBoot(boot: ThreadBoot): void {
   const previous = boots.get(boot.id)
   if (previous && previous !== boot) disposeBoot(previous)
   boots.set(boot.id, boot)
 }
 
-export function takeWorkspaceBoot(id: string): WorkspaceBoot | null {
+export function takeThreadBoot(id: string): ThreadBoot | null {
   const boot = boots.get(id) ?? null
   if (boot) boots.delete(id)
   return boot
 }
 
-export function clearWorkspaceBoots(): void {
+export function clearThreadBoots(): void {
   for (const boot of boots.values()) disposeBoot(boot)
   boots.clear()
 }
@@ -91,10 +91,10 @@ async function listWorkpiecesOnce(overseer: RpcStub<Overseer>): Promise<Workpiec
   }
 }
 
-export async function ensureWorkspaceBoot(
+export async function ensureThreadBoot(
   id: string,
   api: RpcStub<AuthenticatedApi>,
-): Promise<WorkspaceBoot> {
+): Promise<ThreadBoot> {
   const existing = boots.get(id)
   if (existing) return existing
 
@@ -118,9 +118,9 @@ export async function ensureWorkspaceBoot(
     const history = first
       ? { chatId: first.id, page: await overseer.getChatHistory(first.id) }
       : null
-    persistWorkspaceWorkpieces(id, workpieces)
+    persistThreadWorkpieces(id, workpieces)
     const boot = { id, overseer, metadata, chats, models, history, workpieces, configureObservers }
-    stashWorkspaceBoot(boot)
+    stashThreadBoot(boot)
     return boot
   } catch (error) {
     overseer[Symbol.dispose]?.()

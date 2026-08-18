@@ -3,7 +3,7 @@ import { Star, ShareNetwork, Trash, Pencil } from '@phosphor-icons/react'
 import { useState, useEffect, useRef } from 'react'
 import type { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
 import { PendingIcon, useLinkPending } from '../PendingIcon'
-import { workspacePreview } from '../../conversations/hoverPreviews'
+import { threadPreview } from '../../conversations/hoverPreviews'
 import { hoverRowClassName } from './sidebarHover'
 import { HoverActionBar, HoverFadeLabel, HoverRowTrail, bindRowRef, useRowPreview } from './SidebarHoverRow'
 
@@ -32,9 +32,9 @@ export default function SidebarGadgetRow({
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(gadget.title || '')
   const inputRef = useRef<HTMLInputElement>(null)
-  const preview = collapsed || renaming ? undefined : workspacePreview(gadget)
+  const preview = collapsed || renaming ? undefined : threadPreview(gadget)
   const { rowRef, previewBind, previewPortal } = useRowPreview(preview)
-  const pending = useLinkPending({ to: '/workspace/$id', params: { id: gadget.id } })
+  const pending = useLinkPending({ to: '/thread/$id', params: { id: gadget.id } })
 
   useEffect(() => {
     if (renaming) inputRef.current?.focus()
@@ -46,7 +46,7 @@ export default function SidebarGadgetRow({
     setRenaming(false)
   }
 
-  const title = gadget.title || 'Untitled workspace'
+  const title = gadget.title || 'Untitled thread'
   const rowClass = hoverRowClassName({
     hasActions: !collapsed && !renaming,
     className: 'h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default',
@@ -61,7 +61,7 @@ export default function SidebarGadgetRow({
     <>
       <Link
         ref={bindRowRef(rowRef)}
-        to="/workspace/$id"
+        to="/thread/$id"
         params={{ id: gadget.id }}
         className={rowClass}
         activeProps={{ className: activeClass }}

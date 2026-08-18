@@ -12,8 +12,8 @@ import {
   type GadgetMetadata,
   type Overseer,
 } from '@gadgets/workshop-shared/api'
-import WorkspaceOpenErrorPage from './components/WorkspaceOpenErrorPage'
-import { useWorkspaceOpen } from './useWorkspaceOpen'
+import ThreadOpenErrorPage from './components/ThreadOpenErrorPage'
+import { useThreadOpen } from './useThreadOpen'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -44,14 +44,14 @@ function api(overseer: RpcStub<Overseer>): RpcStub<AuthenticatedApi> {
 }
 
 const METADATA = {
-  id: 'workspace-1',
+  id: 'thread-1',
   title: 'Quarterly planning',
   provisional: false,
 } as GadgetMetadata
 
-function WorkspaceProbe({ authenticatedApi }: { authenticatedApi: RpcStub<AuthenticatedApi> }) {
-  const state = useWorkspaceOpen({
-    id: 'workspace-1',
+function ThreadProbe({ authenticatedApi }: { authenticatedApi: RpcStub<AuthenticatedApi> }) {
+  const state = useThreadOpen({
+    id: 'thread-1',
     authenticatedApi,
     onInvalidShareKey: () => {},
     onMetadata: () => {},
@@ -59,9 +59,9 @@ function WorkspaceProbe({ authenticatedApi }: { authenticatedApi: RpcStub<Authen
   })
   if (state.error?.kind === 'open') {
     return (
-      <WorkspaceOpenErrorPage
+      <ThreadOpenErrorPage
         kind={state.error.failure}
-        onGoToWorkspaces={() => {}}
+        onGoToThreads={() => {}}
         onRetry={state.retry}
       />
     )
@@ -69,7 +69,7 @@ function WorkspaceProbe({ authenticatedApi }: { authenticatedApi: RpcStub<Authen
   return <p>{state.metadata?.title}</p>
 }
 
-describe('useWorkspaceOpen', () => {
+describe('useThreadOpen', () => {
   let root: Root | undefined
   let container: HTMLDivElement | undefined
 
@@ -91,8 +91,8 @@ describe('useWorkspaceOpen', () => {
     const authenticatedApi = api(overseer)
 
     function Probe() {
-      useWorkspaceOpen({
-        id: 'workspace-1',
+      useThreadOpen({
+        id: 'thread-1',
         authenticatedApi,
         onInvalidShareKey: () => {},
         onMetadata: () => {},
@@ -129,19 +129,19 @@ describe('useWorkspaceOpen', () => {
     const deniedOverseerDispose = vi.fn<() => void>()
     const deniedOverseer = disposableStub({
       subscribeToMetadata: vi.fn<() => Promise<RpcStub<{}>>>(async () => {
-        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceAccessDenied)
+        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.threadAccessDenied)
       }),
     }, deniedOverseerDispose) as unknown as RpcStub<Overseer>
 
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
-    await act(async () => root!.render(<WorkspaceProbe authenticatedApi={api(firstOverseer)} />))
+    await act(async () => root!.render(<ThreadProbe authenticatedApi={api(firstOverseer)} />))
     expect(container.textContent).toContain('Quarterly planning')
     expect(document.title).toBe('Quarterly planning - Cloudflare OS')
 
-    await act(async () => root!.render(<WorkspaceProbe authenticatedApi={api(deniedOverseer)} />))
-    expect(container.textContent).toContain("You don't have access to this workspace")
+    await act(async () => root!.render(<ThreadProbe authenticatedApi={api(deniedOverseer)} />))
+    expect(container.textContent).toContain("You don't have access to this thread")
     expect(container.textContent).not.toContain('Quarterly planning')
     expect(document.title).toBe('Cloudflare OS')
     expect(firstSubscriptionDispose).toHaveBeenCalledOnce()

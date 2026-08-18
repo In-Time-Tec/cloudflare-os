@@ -3,24 +3,24 @@ import { workshopSession, type WorkshopSession } from '../session'
 import { persistQueryData, queryClient } from './client'
 import { accountKey } from './hooks'
 
-export function workspaceWorkpiecesKey(
-  workspaceId: string,
+export function threadWorkpiecesKey(
+  threadId: string,
   session: WorkshopSession = workshopSession,
 ) {
-  return accountKey(session.cacheScope, 'workspaceWorkpieces', workspaceId)
+  return accountKey(session.cacheScope, 'threadWorkpieces', threadId)
 }
 
 export function readCachedWorkpieces(
-  workspaceId: string,
+  threadId: string,
   session: WorkshopSession = workshopSession,
 ): WorkpieceSummary[] | undefined {
-  return queryClient.getQueryData(workspaceWorkpiecesKey(workspaceId, session))
+  return queryClient.getQueryData(threadWorkpiecesKey(threadId, session))
 }
 
-export function persistWorkspaceWorkpieces(
-  workspaceId: string,
+export function persistThreadWorkpieces(
+  threadId: string,
   workpieces: Iterable<WorkpieceSummary>,
   session: WorkshopSession = workshopSession,
 ): void {
-  persistQueryData(queryClient, workspaceWorkpiecesKey(workspaceId, session), [...workpieces])
+  persistQueryData(queryClient, threadWorkpiecesKey(threadId, session), [...workpieces])
 }

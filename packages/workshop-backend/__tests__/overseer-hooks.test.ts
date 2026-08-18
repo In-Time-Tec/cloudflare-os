@@ -123,7 +123,7 @@ async function makeTargetOverseer(gadgetId?: number) {
         }),
       },
       ctx: {
-        id: {toString: () => "workspace-id"},
+        id: {toString: () => "thread-id"},
         exports: {GatekeeperHookLoopback: ({props}: {props: object}) => props},
       },
       storage: {
@@ -140,13 +140,13 @@ async function makeTargetOverseer(gadgetId?: number) {
 
 describe("hook target", () => {
 
-  it("passes the workspace and gadget IDs to enable()", async () => {
+  it("passes the thread and gadget IDs to enable()", async () => {
     let {client, controllerEnable} = await makeTargetOverseer(17);
 
     await client.enableHook(4);
 
     expect(controllerEnable).toHaveBeenCalledTimes(1);
-    expect(controllerEnable.mock.calls[0][1]).toEqual({workspaceId: "workspace-id", gadgetId: 17});
+    expect(controllerEnable.mock.calls[0][1]).toEqual({threadId: "thread-id", gadgetId: 17});
   });
 
   it("omits the gadget ID for a hook that is not pinned to one", async () => {
@@ -154,7 +154,7 @@ describe("hook target", () => {
 
     await client.enableHook(4);
 
-    expect(controllerEnable.mock.calls[0][1]).toEqual({workspaceId: "workspace-id"});
+    expect(controllerEnable.mock.calls[0][1]).toEqual({threadId: "thread-id"});
   });
 
 });
