@@ -1528,8 +1528,8 @@ export interface CodeSubscriber {
  * The outcome of an entry in the activity log:
  * * succeeded: The action was performed.
  * * failed: The action was attempted and did not complete. See `failure` for what is known.
- * * blocked: The action was refused before it was attempted, by deployment policy, the workspace
- *   sharing lockdown, or the turn's action budget. Nothing was performed.
+ * * blocked: The action was refused before it was attempted, by deployment policy or the workspace
+ *   sharing lockdown. Nothing was performed.
  *
  * Observations are always "succeeded"; the state is not meaningful for hooks, which are
  * enabled/disabled instead.

@@ -1050,8 +1050,7 @@ export interface ActionRecorder extends ObservationAuthorizer {
    *
    * Like `authorizeObservation()`, this is a synchronous gate: it returns normally when the action
    * is permitted, or throws when it is not (the workspace is in sharing lockdown, an administrator
-   * has disabled the action's kind, or the turn's action budget is exhausted). The exception
-   * should propagate through to the gadget.
+   * has disabled the action's kind). The exception should propagate through to the gadget.
    *
    * The gatekeeper must call this *before* performing the action, then perform it, then report the
    * result on the returned handle exactly once. `description.actionKind` is required and must name

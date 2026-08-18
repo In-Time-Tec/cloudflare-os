@@ -499,11 +499,6 @@ type ChatAttachmentContentRecord = {
 // this value; observations never dereference the gatekeeper, so no lookup is ever attempted.
 const BUILTIN_TOOL_GATEKEEPER_ID = -1;
 
-// How many side-effecting actions one agent turn may take. Nothing pauses for a human any more, so
-// this is what bounds a runaway turn. Exceeding it is recorded as a blocked action and reported to
-// the agent, which can stop and let the user decide whether to continue.
-const MAX_ACTIONS_PER_TURN = 100;
-
 export type ActionRecord = {
   id: number,
   gatekeeperId: WorkpieceId;
@@ -2685,13 +2680,6 @@ class OverseerImpl implements AgentHooks {
   // the chat log after the tool returns.
   #capturedActions = new Map<number, {actions: number[], accessedGadget: boolean}>();
 
-  // Actions charged against the current agent turn, per chat. Reset when a turn starts. The
-  // activity log is the record of what happened; this is the only thing bounding how much can
-  // happen in one turn, now that nothing pauses for a human.
-  #turnActionCount = new Map<number, number>();
-
-  // Actions are only budgeted for agent turns: a user or gadget acting directly is not something
-  // the agent can run away with.
   // Who this action runs under. For an agent turn that is the person who started it -- their grant
   // is what made the gatekeeper reachable. A user or gadget acting directly speaks for itself.
   #actionAuthority(caller: GatekeeperCaller): AiChatAuthorInfo | undefined {
@@ -2699,20 +2687,6 @@ class OverseerImpl implements AgentHooks {
       return this.storage.activeAgents.get(caller.chatId)?.initiator;
     }
     return undefined;
-  }
-
-  #actionBudget(caller: GatekeeperCaller): number | undefined {
-    if (caller.from !== "agent") return undefined;
-    return MAX_ACTIONS_PER_TURN - (this.#turnActionCount.get(caller.chatId) ?? 0);
-  }
-
-  #chargeActionBudget(caller: GatekeeperCaller): void {
-    if (caller.from !== "agent") return;
-    this.#turnActionCount.set(caller.chatId, (this.#turnActionCount.get(caller.chatId) ?? 0) + 1);
-  }
-
-  resetTurnActionBudget(chatId: number): void {
-    this.#turnActionCount.delete(chatId);
   }
 
   #getOrCreateCapturedActions(chatId: number) {
@@ -3013,13 +2987,6 @@ class OverseerImpl implements AgentHooks {
               `administrator.`);
       }
     }
-
-    let budget = this.#actionBudget(caller);
-    if (budget !== undefined && budget <= 0) {
-      block(`This turn has reached its limit of ${MAX_ACTIONS_PER_TURN} actions. Stop and report ` +
-            `what you have done so far; the user can ask you to continue.`);
-    }
-    this.#chargeActionBudget(caller);
 
     // Written as an unreported failure, not a success: the action has not run yet, and if this
     // Durable Object dies before the handle reports, the log must say the outcome is unknown
