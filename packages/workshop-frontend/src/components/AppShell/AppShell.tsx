@@ -58,6 +58,12 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault()
         setPaletteOpen((o) => !o)
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
+        if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable="true"]')) return
+        e.preventDefault()
+        toggleCollapsed()
       }
     }
     const onOpen = () => setPaletteOpen(true)
@@ -67,7 +73,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       document.removeEventListener('keydown', onKey)
       window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpen)
     }
-  }, [])
+  }, [toggleCollapsed])
 
   return (
     <div className="h-screen min-h-screen w-screen overflow-hidden bg-app-frame p-0 md:p-3">

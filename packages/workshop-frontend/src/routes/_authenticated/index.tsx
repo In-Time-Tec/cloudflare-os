@@ -149,7 +149,6 @@ export function HomePageContent({ prompt }: HomeSearch) {
           </h1>
         </header>
 
-        {/* Composer */}
         <ChatInput
           createCapsuleGatekeeper={createCapsuleGatekeeper}
           getOverseer={getOverseer}
@@ -169,7 +168,6 @@ export function HomePageContent({ prompt }: HomeSearch) {
             : undefined}
         />
 
-        {/* A few example work tasks to spark ideas. Picking one seeds the composer above. */}
         <HomeTaskSuggestions
           onPick={(suggestion) =>
             setSeed((prev) => ({ text: suggestion, nonce: (prev?.nonce ?? 0) + 1 }))

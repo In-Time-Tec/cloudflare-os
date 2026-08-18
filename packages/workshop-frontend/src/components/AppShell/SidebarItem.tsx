@@ -51,16 +51,16 @@ export default function SidebarItem({
       title={collapsed ? label : undefined}
       aria-busy={pending}
       className={[
-        'group relative flex h-7 items-center rounded-md text-sm leading-5 tracking-normal transition-colors',
-        collapsed ? 'justify-center' : 'gap-1.5 px-2.5',
+        'group relative flex items-center rounded-md text-sm font-medium leading-5 tracking-normal transition-colors',
+        collapsed ? 'h-7 justify-center' : 'h-7 gap-1',
         isActive
-          ? 'bg-kumo-fill font-medium text-kumo-strong'
-          : 'font-normal text-kumo-default hover:bg-kumo-tint',
+          ? 'bg-kumo-fill text-kumo-strong'
+          : 'text-kumo-default hover:bg-kumo-tint',
       ].join(' ')}
     >
       <span
         className={[
-          'flex h-3.5 w-3.5 shrink-0 items-center justify-center transition-colors',
+          'flex w-7 shrink-0 items-center justify-center transition-colors',
           isActive ? 'text-kumo-brand' : 'text-kumo-subtle group-hover:text-kumo-default',
         ].join(' ')}
       >

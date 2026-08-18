@@ -86,8 +86,10 @@ describe('route guards', () => {
         },
       }),
     } as unknown as WorkshopSession
+    const loader = OutputsRoute.options.loader
+    if (typeof loader !== 'function') throw new Error('expected function loader')
     await expect(
-      OutputsRoute.options.loader!(context(session, queryClient) as never),
+      loader(context(session, queryClient) as never),
     ).resolves.toBeUndefined()
   })
 })

@@ -34,9 +34,9 @@ export function hoverRowClassName(options: {
   className?: string
 }): string {
   return [
-    'group/hover-row relative flex w-full cursor-pointer items-center text-left transition-colors',
+    'group/hover-row relative flex w-full cursor-pointer items-center text-left text-sm font-medium leading-5 tracking-normal transition-colors',
     options.hasActions ? 'sidebar-hover-has-actions' : '',
-    options.active ? 'bg-kumo-fill font-medium text-kumo-strong' : 'hover:bg-kumo-tint',
+    options.active ? 'bg-kumo-fill text-kumo-strong' : 'hover:bg-kumo-tint',
     options.pending ? 'opacity-70' : '',
     options.className ?? '',
   ].filter(Boolean).join(' ')

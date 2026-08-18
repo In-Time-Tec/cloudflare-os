@@ -24,7 +24,7 @@ vi.mock('./components/WorkshopControls', () => ({
 }))
 
 vi.mock('./ServerConfigContext', () => ({
-  useSiteName: () => 'Cloudflare OS',
+  useSiteName: () => 'OpenWork',
   useServerConfig: () => null,
   useServerConfigError: () => false,
 }))
@@ -138,12 +138,12 @@ describe('useThreadOpen', () => {
     root = createRoot(container)
     await act(async () => root!.render(<ThreadProbe authenticatedApi={api(firstOverseer)} />))
     expect(container.textContent).toContain('Quarterly planning')
-    expect(document.title).toBe('Quarterly planning - Cloudflare OS')
+    expect(document.title).toBe('Quarterly planning - OpenWork')
 
     await act(async () => root!.render(<ThreadProbe authenticatedApi={api(deniedOverseer)} />))
     expect(container.textContent).toContain("You don't have access to this thread")
     expect(container.textContent).not.toContain('Quarterly planning')
-    expect(document.title).toBe('Cloudflare OS')
+    expect(document.title).toBe('OpenWork')
     expect(firstSubscriptionDispose).toHaveBeenCalledOnce()
     expect(deniedOverseerDispose).toHaveBeenCalledOnce()
   })

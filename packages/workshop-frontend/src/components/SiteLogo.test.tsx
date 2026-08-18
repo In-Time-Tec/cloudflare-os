@@ -56,9 +56,11 @@ describe('SiteLogo', () => {
     expect(container!.querySelector('[data-fallback]')).toBeNull()
   })
 
-  it('uses the supplied fallback when no logo is configured or loading fails', () => {
+  it('uses the default brand mark when no custom logo is configured', () => {
     render()
-    expect(container!.querySelector('[data-fallback]')).not.toBeNull()
+    const image = container!.querySelector('img')!
+    expect(image.getAttribute('src')).toBe('/logo.png')
+    expect(container!.querySelector('[data-fallback]')).toBeNull()
 
     act(() => root!.unmount())
     container!.remove()
@@ -73,7 +75,7 @@ describe('SiteLogo', () => {
     expect(container!.querySelector('img')).not.toBeNull()
   })
 
-  it('uses an explicit null override for the Admin reset preview', () => {
+  it('uses the default brand mark for the Admin reset preview', () => {
     render('/api/site-logo?v=configured')
     act(() => root!.render(
       <SiteLogo size={20} srcOverride={null}>
@@ -81,7 +83,7 @@ describe('SiteLogo', () => {
       </SiteLogo>,
     ))
 
-    expect(container!.querySelector('img')).toBeNull()
-    expect(container!.querySelector('[data-fallback]')).not.toBeNull()
+    expect(container!.querySelector('img')!.getAttribute('src')).toBe('/logo.png')
+    expect(container!.querySelector('[data-fallback]')).toBeNull()
   })
 })

@@ -20,7 +20,7 @@ import {
 } from './sidebarHidden'
 
 const SECTION_HEADER =
-  'flex h-6 w-full cursor-pointer items-center gap-2 px-1.5 text-[10px] font-medium ' +
+  'flex h-6 w-full cursor-pointer items-center gap-2 px-1.5 text-[10px] ' +
   'text-kumo-inactive transition-colors hover:text-kumo-subtle'
 
 const INITIAL_LIMIT = 6
@@ -34,7 +34,7 @@ function Section({ label, count, hiddenCount, onShowHidden, children }: {
 }) {
   const [open, setOpen] = useState(true)
   return (
-    <div className="mt-3 flex flex-col px-2">
+    <div className="mt-2 flex flex-col px-1.5">
       <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}
           className={SECTION_HEADER}>
         <span className="shrink-0">{label}</span>
@@ -48,7 +48,7 @@ function Section({ label, count, hiddenCount, onShowHidden, children }: {
             <button
               type="button"
               onClick={onShowHidden}
-              className="mt-0.5 flex h-7 items-center px-2.5 text-[12px] tracking-[-0.2px] text-kumo-inactive transition-colors hover:text-kumo-default"
+              className="mt-0.5 flex h-7 items-center px-1.5 text-[12px] tracking-[-0.2px] text-kumo-inactive transition-colors hover:text-kumo-default"
             >
               {`Show ${hiddenCount} hidden`}
             </button>
@@ -86,15 +86,17 @@ function ConversationHoverRow({ conversation, section, onHide }: {
         className={hoverRowClassName({
           pending,
           hasActions: true,
-          className: 'h-7 gap-1.5 rounded-md px-2.5',
+          className: 'h-7 gap-1.5 rounded-md',
         })}
         {...previewBind}
       >
-        <PendingIcon pending={pending} size={18}>
-          <Avatar photo={photo} title={conversation.title} size="sm" />
-        </PendingIcon>
+        <span className="flex w-7 shrink-0 items-center justify-center">
+          <PendingIcon pending={pending} size={18}>
+            <Avatar photo={photo} title={conversation.title} size="sm" />
+          </PendingIcon>
+        </span>
         <HoverRowTrail>
-          <HoverFadeLabel className="text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default">
+          <HoverFadeLabel className="text-sm font-medium leading-5 tracking-normal text-kumo-default">
             {conversation.title}
           </HoverFadeLabel>
           <HoverActionBar
@@ -129,16 +131,18 @@ function EmailHoverRow({ email, onHide }: {
         className={hoverRowClassName({
           pending,
           hasActions: true,
-          className: 'h-7 gap-1.5 rounded-md px-2.5',
+          className: 'h-7 gap-1.5 rounded-md',
         })}
         {...previewBind}
       >
-        <PendingIcon pending={pending} size={14}>
-          <EnvelopeSimple size={14} className="shrink-0 text-kumo-inactive" />
-        </PendingIcon>
+        <span className="flex w-7 shrink-0 items-center justify-center">
+          <PendingIcon pending={pending} size={14}>
+            <EnvelopeSimple size={14} className="shrink-0 text-kumo-inactive" />
+          </PendingIcon>
+        </span>
         <HoverRowTrail>
-          <HoverFadeLabel className={`text-[12.5px] leading-[18px] tracking-[-0.1px] ${
-            email.isRead ? 'text-kumo-default' : 'font-semibold text-kumo-default'
+          <HoverFadeLabel className={`text-sm font-medium leading-5 tracking-normal ${
+            email.isRead ? 'text-kumo-default' : 'text-kumo-strong'
           }`}>
             {email.from?.name || email.from?.address || email.subject}
           </HoverFadeLabel>

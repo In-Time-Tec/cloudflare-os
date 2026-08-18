@@ -23,7 +23,7 @@ type Props = {
   currentUserId: string | null
 }
 
-const TOPBAR_H = 56
+const TOPBAR_H = 36
 
 export default function ArtifactUseView({
   overseer,
@@ -38,7 +38,7 @@ export default function ArtifactUseView({
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-kumo-base">
       <div
-        className="relative flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-4 sm:px-6"
+        className="relative flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-3"
         style={{ height: TOPBAR_H }}
       >
         <div className="flex min-w-0 items-center gap-2">

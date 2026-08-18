@@ -28,10 +28,10 @@ export default function UserMenu({
           <button
             className={
               showName
-                ? 'flex min-w-0 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left transition-colors hover:bg-kumo-tint'
+                ? 'flex min-w-0 w-full cursor-pointer items-center gap-1.5 rounded-lg px-1.5 h-7 text-left transition-colors hover:bg-kumo-tint'
                 : [
                     'flex cursor-pointer items-center justify-center overflow-hidden bg-kumo-tint transition-colors hover:bg-kumo-fill',
-                    square ? 'h-5 w-5 rounded-md' : 'h-7 w-7 rounded-full',
+                    square ? 'h-7 w-7 rounded-lg' : 'h-7 w-7 rounded-full',
                   ].join(' ')
             }
             title="Open profile menu"
@@ -50,7 +50,7 @@ export default function UserMenu({
               )}
             </span>
             {showName && (
-              <span className="min-w-0 truncate text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-default">
+              <span className="min-w-0 truncate text-sm font-medium leading-5 tracking-normal text-kumo-default">
                 {name}
               </span>
             )}

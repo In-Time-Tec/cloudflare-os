@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useServerConfig } from '../ServerConfigContext'
+import { DEFAULT_SITE_LOGO_SRC } from '../siteLogoUtils'
 
 export default function SiteLogo({
   size,
@@ -14,7 +15,9 @@ export default function SiteLogo({
 }) {
   const serverConfig = useServerConfig()
   const configuredUrl = serverConfig?.siteLogo?.url
-  const src = srcOverride === undefined ? configuredUrl : srcOverride ?? undefined
+  const src = srcOverride === undefined
+    ? (configuredUrl ?? DEFAULT_SITE_LOGO_SRC)
+    : (srcOverride ?? DEFAULT_SITE_LOGO_SRC)
   const [failed, setFailed] = useState(false)
 
   useEffect(() => setFailed(false), [src, serverConfig])

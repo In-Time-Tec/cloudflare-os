@@ -75,7 +75,7 @@ function CalendarPage() {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-3 md:px-6">
+      <header className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-3">
         <h1 className="min-w-0 truncate text-[14px] font-medium tracking-[-0.25px] text-kumo-default">
           Calendar
         </h1>

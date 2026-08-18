@@ -52,12 +52,12 @@ export default function SidebarGadgetRow({
   const title = gadget.title || 'Untitled thread'
   const rowClass = hoverRowClassName({
     hasActions: !collapsed && !renaming,
-    className: `h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-sm font-medium leading-5 tracking-normal text-kumo-default${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
+    className: `h-7 gap-1.5 rounded-md pr-1 text-sm font-medium leading-5 tracking-normal text-kumo-default${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
   })
   const activeClass = hoverRowClassName({
     active: true,
     hasActions: !collapsed && !renaming,
-    className: `h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-sm font-medium leading-5 tracking-normal text-kumo-strong${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
+    className: `h-7 gap-1.5 rounded-md pr-1 text-sm font-medium leading-5 tracking-normal text-kumo-strong${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
   })
 
   return (
@@ -76,12 +76,14 @@ export default function SidebarGadgetRow({
         {...(renaming || collapsed ? {} : previewBind)}
       >
         <div
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-fill text-[10px] font-medium text-kumo-subtle"
+          className="flex h-7 w-7 shrink-0 items-center justify-center"
           aria-hidden="true"
         >
-          <PendingIcon pending={pending} size={16}>
-            {initials(gadget.title)}
-          </PendingIcon>
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-kumo-fill text-[10px] font-medium text-kumo-subtle">
+            <PendingIcon pending={pending} size={16}>
+              {initials(gadget.title)}
+            </PendingIcon>
+          </span>
         </div>
 
         {!collapsed && (

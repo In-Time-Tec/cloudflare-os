@@ -1,5 +1,8 @@
 import { MAX_SITE_LOGO_BYTES } from '@gadgets/workshop-shared/api'
 
+export const DEFAULT_SITE_LOGO_SRC = '/logo.png'
+export const DEFAULT_FAVICON_HREF = '/favicon.png'
+
 const SITE_LOGO_SIZE = 256
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024
 const MAX_SOURCE_PIXELS = 16_000_000
@@ -249,8 +252,8 @@ export function applySiteFavicon(logoUrl: string | undefined): () => void {
   let objectUrl: string | undefined
   let disposed = false
   const useDefault = () => {
-    favicon.href = '/favicon.svg'
-    favicon.type = 'image/svg+xml'
+    favicon.href = DEFAULT_FAVICON_HREF
+    favicon.type = 'image/png'
   }
   useDefault()
   if (!logoUrl) return () => {}

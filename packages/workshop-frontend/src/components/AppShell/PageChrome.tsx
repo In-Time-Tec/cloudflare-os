@@ -27,7 +27,7 @@ export default function PageChrome({
 
   return (
     <div className="flex h-full w-full flex-col">
-      <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-6">
+      <header className="flex h-9 shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-3">
         <h1 className="min-w-0 truncate text-[14px] font-medium tracking-[-0.25px] text-kumo-default">
           {title}
         </h1>

@@ -1201,7 +1201,7 @@ export default function ThreadEditor() {
   }
 
   // ── shared height tokens ──────────────────────────────────────────────────────
-  const TOPBAR_H = 56
+  const TOPBAR_H = 36
   const TABBAR_H = 48
   const RIGHT_CONTENT_H = '100%'
 
@@ -1242,7 +1242,7 @@ export default function ThreadEditor() {
       <div className="relative flex h-full flex-col overflow-hidden bg-kumo-base">
         {displayMetadata && (
           <div
-            className="relative flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-4 sm:px-6"
+            className="relative flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-3"
             style={{ height: TOPBAR_H }}
           >
             <span className="min-w-0 truncate text-[14px] leading-5 font-medium tracking-[-0.25px] text-kumo-default">
@@ -1282,7 +1282,7 @@ export default function ThreadEditor() {
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-kumo-base">
       <div
-        className="relative flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-4 sm:px-6"
+        className="relative flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-3"
         style={{ height: TOPBAR_H }}
       >
         <div className="flex min-w-0 items-center gap-2">

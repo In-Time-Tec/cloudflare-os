@@ -253,7 +253,7 @@ export function SidebarRecentThreads({ collapsed = false }: { collapsed?: boolea
   if (collapsed) {
     const compact = [...favorites, ...recent].slice(0, 8)
     return (
-      <div className="flex flex-col items-center gap-1.5 px-2">
+      <div className="flex flex-col gap-1 px-2">
         {compact.map((g) => (
           <SidebarGadgetRow
             key={g.id}
@@ -362,12 +362,12 @@ function SidebarSection({
   children: ReactNode
 }) {
   return (
-    <div className="mt-3 flex flex-col px-2">
+    <div className="mt-2 flex flex-col px-1.5">
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex h-6 w-full cursor-pointer items-center gap-2 px-1.5 text-[10px] font-medium text-kumo-inactive transition-colors hover:text-kumo-subtle"
+        className="flex h-6 w-full cursor-pointer items-center gap-2 px-1.5 text-[10px] text-kumo-inactive transition-colors hover:text-kumo-subtle"
       >
         <span className="shrink-0">{label}</span>
         <span className="h-px min-w-2 flex-1 bg-kumo-line" aria-hidden="true" />

@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router'
+import type { ReactNode } from 'react'
 import {
   Blueprint as BlueprintIcon,
   BookOpen,
@@ -7,9 +8,11 @@ import {
   Hexagon,
   House,
   MagnifyingGlass,
+  NotePencil,
   SidebarSimple,
   Stack,
 } from '@phosphor-icons/react'
+import { Tooltip } from '@cloudflare/kumo'
 import { useSiteName } from '../../ServerConfigContext'
 import SiteLogo from '../SiteLogo'
 import { useGatekeeperApps } from '../../useGatekeeperApps'
@@ -24,6 +27,54 @@ import {
 import SidebarConversations from '../../conversations/SidebarConversations'
 import SidebarUtilityStrip from './SidebarUtilityStrip'
 import SidebarScrollRegion from './SidebarScrollRegion'
+
+function BrandMark({
+  siteName,
+  homePending,
+  brand,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  siteName: string
+  homePending: boolean
+  brand: ReactNode
+  collapsed: boolean
+  onToggleCollapsed: () => void
+}) {
+  const label = collapsed ? 'Show sidebar' : 'Hide sidebar'
+  return (
+    <div className="group/mark relative flex h-7 w-7 shrink-0 items-center justify-center">
+      <Tooltip
+        side="bottom"
+        delay={200}
+        content={
+          <span className="flex items-center gap-1.5">
+            {label}
+            <span className="text-kumo-inactive">⌘B</span>
+          </span>
+        }
+        render={
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            aria-label={`${label} ⌘B`}
+            className="absolute inset-0 z-10 flex cursor-pointer items-center justify-center rounded-lg text-kumo-inactive opacity-0 pointer-events-none transition-opacity transition-colors hover:bg-kumo-tint hover:text-kumo-default group-hover/sidebar:pointer-events-auto group-hover/sidebar:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+          >
+            <SidebarSimple size={15} />
+          </button>
+        }
+      />
+      <Link
+        to="/"
+        aria-label={siteName}
+        aria-busy={homePending}
+        className="flex items-center justify-center group-hover/sidebar:invisible group-has-[:focus-visible]/mark:invisible"
+      >
+        {brand}
+      </Link>
+    </div>
+  )
+}
 
 /**
  * The persistent left rail. The brand row and the bottom utility strip stay pinned; everything
@@ -59,88 +110,80 @@ export default function Sidebar({
       className={[
         // Sidebar is the app chrome: a hair greyer than the (lighter) content canvas so the two
         // surfaces read as distinct without a heavy divider.
-        'group/sidebar flex h-full flex-col border-r border-kumo-line bg-kumo-elevated',
-        collapsed ? 'w-[56px]' : 'w-[260px]',
+        'group/sidebar flex h-full flex-col overflow-hidden border-r border-kumo-line bg-kumo-elevated md:rounded-l-2xl',
+        collapsed ? 'w-11' : 'w-[260px]',
         'shrink-0 transition-[width] duration-200 ease-out',
       ].join(' ')}
     >
       <div
         className={[
           'flex h-9 shrink-0 items-center border-b border-kumo-line',
-          collapsed ? 'justify-center px-1.5' : 'justify-between gap-1.5 px-2.5',
+          collapsed ? 'justify-center' : 'justify-between gap-1.5 px-1.5',
         ].join(' ')}
       >
         {collapsed ? (
-          <div className="relative flex h-7 w-7 items-center justify-center">
-            <button
-              type="button"
-              onClick={onToggleCollapsed}
-              aria-label="Expand sidebar"
-              title="Expand sidebar"
-              className="peer absolute inset-0 z-10 flex cursor-pointer items-center justify-center rounded-md text-kumo-inactive opacity-0 pointer-events-none transition-colors hover:bg-kumo-tint hover:text-kumo-default group-hover/sidebar:pointer-events-auto group-hover/sidebar:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
-            >
-              <SidebarSimple size={15} className="rotate-180" />
-            </button>
-            <Link
-              to="/"
-              aria-label={siteName}
-              aria-busy={homePending}
-              className="flex items-center justify-center group-hover/sidebar:invisible peer-focus-visible:invisible"
-            >
-              {brand}
-            </Link>
-          </div>
+          <BrandMark
+            siteName={siteName}
+            homePending={homePending}
+            brand={brand}
+            collapsed
+            onToggleCollapsed={onToggleCollapsed}
+          />
         ) : (
           <>
-            <Link to="/" aria-label={siteName} aria-busy={homePending} className="flex min-w-0 items-center gap-1.5">
-              {brand}
-              <span className="truncate text-sm font-medium text-kumo-default">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <BrandMark
+                siteName={siteName}
+                homePending={homePending}
+                brand={brand}
+                collapsed={false}
+                onToggleCollapsed={onToggleCollapsed}
+              />
+              <Link to="/" aria-label={siteName} aria-busy={homePending} className="min-w-0 truncate text-sm font-medium text-kumo-default">
                 {siteName}
-              </span>
-            </Link>
-            <div className="flex items-center gap-0.5">
+              </Link>
+            </div>
+            <div className="flex shrink-0 items-center">
               <button
                 type="button"
                 onClick={() => openCommandPalette()}
                 aria-label="Search"
                 title="Search (⌘K)"
-                className="press flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
+                className="press flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
               >
                 <MagnifyingGlass size={15} />
               </button>
-              <button
-                type="button"
-                onClick={onToggleCollapsed}
-                aria-label="Collapse sidebar"
-                title="Collapse sidebar"
-                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
+              <Link
+                to="/"
+                aria-label="New thread"
+                title="New thread"
+                className="press flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
               >
-                <SidebarSimple size={15} />
-              </button>
+                <NotePencil size={15} />
+              </Link>
             </div>
           </>
         )}
       </div>
 
-      {collapsed && (
-        <button
-          type="button"
-          onClick={() => openCommandPalette()}
-          aria-label="Search"
-          title="Search (⌘K)"
-          className="press mx-auto mt-2 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
-        >
-          <MagnifyingGlass size={15} />
-        </button>
-      )}
-
       <SidebarThreadsProvider>
         {/* Everything between the brand row and the utility strip scrolls as one region, with
             edge fades that appear only while content is beneath them. */}
         <SidebarScrollRegion>
-        <div className={['flex flex-col', collapsed ? 'pt-2' : 'pt-3'].join(' ')}>
+        <div className={['flex flex-col', collapsed ? 'pt-1.5' : 'pt-2'].join(' ')}>
           {/* Primary nav */}
-          <nav className="flex flex-col gap-0.5 px-2">
+          <nav className={['flex flex-col gap-0.5', collapsed ? 'px-2' : 'px-1.5'].join(' ')}>
+            {collapsed && (
+              <button
+                type="button"
+                onClick={() => openCommandPalette()}
+                aria-label="Search"
+                title="Search (⌘K)"
+                className="press mx-auto flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-kumo-inactive transition-colors hover:bg-kumo-tint hover:text-kumo-default"
+              >
+                <MagnifyingGlass size={15} />
+              </button>
+            )}
             <SidebarItem
               to="/"
               label="Home"
@@ -215,7 +258,7 @@ export default function Sidebar({
 
         {/* Favorites leads the sections: it is the user's own shortlist, so it sits directly
             under the nav rather than below the communications sections. */}
-        <div className="mt-1 pb-2">
+        <div className="pb-2">
           <SidebarFavorites collapsed={collapsed} />
           <SidebarRecentThreads collapsed={collapsed} />
           <SidebarConversations collapsed={collapsed} />
