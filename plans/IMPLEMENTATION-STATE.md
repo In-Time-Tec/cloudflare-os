@@ -108,3 +108,17 @@ for v1) — real push channel subscribeThreads deferred.
 THEN: merge to main, pnpm deploy (needs CLOUDFLARE_ACCOUNT_ID/CLOUDFLARE_API_TOKEN env vars —
 ASK USER if absent), verify deployed (thread create, orb wake/pause via E2B dashboard or status
 chip, executeShell, Pierre diff render, thread spawn).
+
+PHASE 5 COMPLETE (commit 0909dfc): thread graph.
+- receiveExternalMessage generalized: callerUserId (DO id) + parentThreadId in input
+- ThreadGraphLoopback entrypoint (exported from server.ts) = child->parent response target
+- childThreads collection on parent (pendingResponses queue, deliveredKeys dedupe)
+- Impl: spawnChildThread/sendToChildThread/waitForChildThreads/listChildThreads/
+  readChildThreadTranscript; DO RPC: deliverChildThreadResponse/renderTranscriptForParent
+- agent.ts: spawnThread/sendToThread/waitForThreads/listSpawnedThreads/readThread tools
+  + system prompt sections "Your Machine" + "Child Threads"
+- ThreadMetadata.parentThreadId; user.ts newThread/ensureThreadRegistered accept parent
+- SidebarThreads/SidebarGadgetRow: nested rendering (childrenByParent map, DFS flatten)
+All gates green (build EXIT:0, test EXIT:0, lint 74 warnings 0 errors).
+
+REMAINING: merge feat/threads-orbs -> main, pnpm deploy, verify deployed system, goal complete.
