@@ -12,14 +12,16 @@ function OrbIcon({ size = 14 }: { size?: number }) {
     <svg
       width={size}
       height={size}
-      viewBox="0 0 16 16"
+      viewBox="0 0 24 24"
       fill="none"
-      xmlns="http://www.w3.org/2000/svg"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
       aria-hidden="true"
-      focusable="false"
     >
-      <circle cx="8" cy="8" r="5.4" stroke="currentColor" strokeWidth="1.3" />
-      <path d="M8 8L5.15 4.85" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <circle cx="12" cy="12" r="10" />
+      <path d="M17 12c0-2.761-2.239-5-5-5" />
     </svg>
   )
 }
