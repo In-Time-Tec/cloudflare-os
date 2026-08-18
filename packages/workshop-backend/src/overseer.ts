@@ -1427,6 +1427,17 @@ class OverseerImpl implements AgentHooks {
       return;
     }
 
+    // The DO's single alarm is shared with the orb's idle-pause check: while the orb is running,
+    // keep an alarm armed for the pause deadline instead of deleting it.
+    let orbState = this.storage.orbState.get();
+    if (orbState.status === "running") {
+      let settings = this.orbSettings();
+      if (settings.enabled) {
+        this.ctx.storage.setAlarm(orbState.lastActivity + settings.idleMinutes * 60_000 + 30_000);
+        return;
+      }
+    }
+
     this.ctx.storage.deleteAlarm();
   }
 
