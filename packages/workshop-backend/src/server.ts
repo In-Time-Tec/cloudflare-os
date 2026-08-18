@@ -686,9 +686,8 @@ async function authenticateOrbHarnessSession(
   } catch {
     throw new Error("Invalid orb session.");
   }
-  // @ts-expect-error Cap'n Web RPC stubs and native RPC stubs are compatible but the type
-  //     system doesn't know this.
-  return ctx.exports.OverseerDurableObject.get(overseerId).getOrbHooks(claims.gen, claims.userId);
+  return ctx.exports.OverseerDurableObject.get(overseerId).getOrbHooks(
+      claims.gen, claims.userId) as unknown as OrbHooks;
 }
 
 @validateRpc()
