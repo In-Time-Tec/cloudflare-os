@@ -77,6 +77,7 @@ test("generates the workers.dev composition", async () => {
       accountId,
       await baseConfigs(),
       resolvedResources,
+      { MICROSOFT_CLIENT_ID: "client-id" },
   );
 
   assert.equal(generated.router.name, "acme-os");
@@ -91,9 +92,14 @@ test("generates the workers.dev composition", async () => {
 
   assert.equal(generated.backend.workers_dev, false);
   assert.deepEqual(generated.backend.vars.ADMINS, ["password:admin"]);
-  // Microsoft Entra is the only sign-in method.
+  // Microsoft Entra is the only sign-in method when its secrets are configured.
   assert.equal(generated.backend.vars.AUTH_GATEKEEPERS, "microsoft");
   assert.equal(generated.backend.vars.DISABLE_PASSWORD_AUTH, "true");
+
+  // Without Microsoft secrets, password auth stays on so the deployment isn't locked out.
+  const generatedNoAuth = generateConfigs(
+      validConfig, accountId, await baseConfigs(), resolvedResources, {});
+  assert.equal(generatedNoAuth.backend.vars.DISABLE_PASSWORD_AUTH, "false");
   assert.deepEqual(
       generated.backend.services.map(({ binding, service }) => ({ binding, service })), [
     { binding: "GATEKEEPER_CONTEXT", service: "acme-os-context" },

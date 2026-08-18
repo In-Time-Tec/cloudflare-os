@@ -95,7 +95,7 @@ function setCommon(base, accountId, name, workersDev = false) {
 }
 
 /** Generate the four Wrangler configurations deployed by `pnpm deploy`. */
-export function generateConfigs(config, accountId, bases, resources) {
+export function generateConfigs(config, accountId, bases, resources, environment = process.env) {
   validateConfig(config);
   if (!/^[a-f\d]{32}$/i.test(accountId)) {
     throw new Error("CLOUDFLARE_ACCOUNT_ID must be a 32-character hexadecimal account ID.");
@@ -131,9 +131,12 @@ export function generateConfigs(config, accountId, bases, resources) {
   backend.vars = {
     ...backend.vars,
     ADMINS: config.auth.admins,
-    // Microsoft Entra is the only sign-in method: allowlist it and disable password auth.
+    // Microsoft Entra is the preferred sign-in method: allowlist it and disable password auth.
+    // But when its app-registration secrets are absent the gatekeeper deploys unconfigured, and
+    // disabling password auth too would lock everyone out (auth/config.ts guards the same way) —
+    // so password login stays on until Microsoft is actually configured.
     AUTH_GATEKEEPERS: "microsoft",
-    DISABLE_PASSWORD_AUTH: "true",
+    DISABLE_PASSWORD_AUTH: environment.MICROSOFT_CLIENT_ID ? "true" : "false",
     ...(config.ai ? {
       DEPLOYMENT_AI_PROVIDERS: config.ai.providers.join(","),
       DEPLOYMENT_AI_DEFAULT_MODEL: config.ai.defaultModel,
