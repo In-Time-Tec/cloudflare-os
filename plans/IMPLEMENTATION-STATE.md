@@ -83,3 +83,28 @@ Design (research-e2b-orbs.md §4 + plan D2/D3):
   (POST https://49983-{sandboxId}.e2b.app/commands ConnectRPC JSON). Records observation.
 - Token proxy (D3) deferred to phase 4c/5 (needed before exposing gatekeeper capabilities
   inside sandbox; plain shell exec doesn't need it).
+
+PHASE 4 COMPLETE (commits 05082e3, fae15ba): E2B orb per thread.
+- src/orb/{e2b-api,orb-manager,envd}.ts (Effect TS style, effect@catalog dep added to backend)
+- Overseer: orbState singleton, ensureOrbAwake on #registerRunningAgent (waitUntil),
+  maybePauseIdleOrb in alarm(), destroyThreadOrb in thread delete, orbStatus in
+  getMetadata+subscribeToMetadata (only when settings.enabled = E2B_API_KEY present)
+- agent.ts: executeShell tool (hooks.executeShellInOrb, 120s/40k bounded)
+- env.d.ts E2B_API_KEY; deploy.mjs loads repo .env + backend.E2B_API_KEY secret
+- ThreadEditor topbar orb chip (Running/Paused/Machine w/ colored dot)
+NOTE: .wrangler/validate/ dir = stale codegen; rm -rf before bare tsc, or trust pnpm build.
+
+PHASE 5 NEXT: thread graph (spawn/send/wait/read + live sidebar).
+Existing machinery to reuse: OverseerImpl.spawnAgent (~6900, creates chat in SAME DO — that is
+the old model), AgentSpawnerGatekeeper DO (~9700), agent-spawner-binding.d.ts (spawn/spawnCallable),
+TransientStub plumbing. Plan D4: spawnThread creates a CHILD THREAD (new Overseer DO via
+this.ctx.exports/user DO newThread path server.ts:310), parentThreadId in child metadata,
+ThreadHandle capability (sendMessage=newChat/sendChatMessage on child DO, waitForResponse=
+agent-turn completion, getTranscript=getChatHistory), child appears in user thread index
+(user.newThread registers). Agent tools: spawnThread/sendToThread/waitForThread/readThread.
+Sidebar: threads list is react-query polled; live updates = invalidate on navigation (good enough
+for v1) — real push channel subscribeThreads deferred.
+
+THEN: merge to main, pnpm deploy (needs CLOUDFLARE_ACCOUNT_ID/CLOUDFLARE_API_TOKEN env vars —
+ASK USER if absent), verify deployed (thread create, orb wake/pause via E2B dashboard or status
+chip, executeShell, Pierre diff render, thread spawn).
