@@ -7,11 +7,21 @@ import { threadPreview } from '../../conversations/hoverPreviews'
 import { hoverRowClassName } from './sidebarHover'
 import { HoverActionBar, HoverFadeLabel, HoverRowTrail, bindRowRef, useRowPreview } from './SidebarHoverRow'
 
-function initials(title: string | undefined): string {
-  const t = (title || 'Untitled').trim()
-  if (!t) return 'UG'
-  const parts = t.split(/\s+/).slice(0, 2)
-  return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || t.slice(0, 2).toUpperCase()
+function OrbIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="8" cy="8" r="5.4" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M8 8L5.15 4.85" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  )
 }
 
 export default function SidebarGadgetRow({
@@ -76,14 +86,12 @@ export default function SidebarGadgetRow({
         {...(renaming || collapsed ? {} : previewBind)}
       >
         <div
-          className="flex h-7 w-7 shrink-0 items-center justify-center"
+          className="flex h-7 w-7 shrink-0 items-center justify-center text-kumo-subtle"
           aria-hidden="true"
         >
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-kumo-fill text-[10px] font-medium text-kumo-subtle">
-            <PendingIcon pending={pending} size={16}>
-              {initials(gadget.title)}
-            </PendingIcon>
-          </span>
+          <PendingIcon pending={pending} size={14}>
+            <OrbIcon size={14} />
+          </PendingIcon>
         </div>
 
         {!collapsed && (
