@@ -7,8 +7,8 @@ import {
   Star,
 } from "@phosphor-icons/react";
 import {
-  BlueprintBinding,
-  BlueprintMetadata,
+  TemplateBinding,
+  TemplateMetadata,
 } from "@gadgets/workshop-shared/api";
 import { VendorDescription } from "@gadgets/workshop-shared/gatekeeper";
 
@@ -28,7 +28,7 @@ export function getGradient(id: string) {
 }
 
 export type BindingBadgeInfo = {
-  type: BlueprintBinding["type"];
+  type: TemplateBinding["type"];
   label: string;
   /** For gatekeeper bindings, the vendor key (e.g. "google", "github"). */
   vendorKey?: string;
@@ -37,7 +37,7 @@ export type BindingBadgeInfo = {
 /** Deduplicate binding types for display. Returns one badge per unique gatekeeper vendor
  *  and one per aiModel / agentSpawner type. */
 export function uniqueBindingBadges(
-  bindings: Record<string, BlueprintBinding>,
+  bindings: Record<string, TemplateBinding>,
 ): BindingBadgeInfo[] {
   const seen = new Set<string>();
   const badges: BindingBadgeInfo[] = [];
@@ -105,19 +105,19 @@ export function BindingBadge({
   );
 }
 
-export function BlueprintCard({
+export function TemplateCard({
   id,
   metadata,
   featured,
   vendorDescriptions,
 }: {
   id: string;
-  metadata: BlueprintMetadata;
+  metadata: TemplateMetadata;
   featured?: boolean;
   vendorDescriptions?: Map<string, VendorDescription>;
 }) {
   const badges = uniqueBindingBadges(metadata.bindings);
-  const pending = useLinkPending({ to: "/blueprint/$id", params: { id } });
+  const pending = useLinkPending({ to: "/template/$id", params: { id } });
 
   return (
     <div className="themed-card-hover-shadow group relative isolate flex min-h-[150px] flex-col overflow-hidden rounded-2xl border border-kumo-line bg-kumo-base text-left transition-[border-color,transform,box-shadow] duration-150 ease-out hover:-translate-y-px hover:border-kumo-fill active:scale-[0.995]">
@@ -129,9 +129,9 @@ export function BlueprintCard({
         />
       )}
       <Link
-        to="/blueprint/$id"
+        to="/template/$id"
         params={{ id }}
-        aria-label={`Open blueprint ${metadata.title}`}
+        aria-label={`Open template ${metadata.title}`}
         aria-busy={pending}
         className="absolute inset-0 z-10 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kumo-brand"
       />

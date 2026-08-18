@@ -1,23 +1,23 @@
-# Bundled format blueprints
+# Bundled format templates
 
-This directory contains the output-format blueprints that ship with this repo, so a fresh deployment
+This directory contains the output-format templates that ship with this repo, so a fresh deployment
 can write a doc or build a deck without anyone having to build one first. A *format* is an ordinary
-blueprint the deployment has promoted (see `AdminConfig.formats`); these are the ones it promotes out
+template the deployment has promoted (see `AdminConfig.formats`); these are the ones it promotes out
 of the box.
 
 Each `.gadget` file here is committed **as data**. The first `/api` request a deployment serves
-installs them into the BLUEPRINTS KV namespace and BLUEPRINT_CONTENT R2 bucket (see
-`src/format-blueprints.ts`), after which they are ordinary blueprints. Nothing wakes on deploy, so a
+installs them into the TEMPLATES KV namespace and TEMPLATE_CONTENT R2 bucket (see
+`src/format-templates.ts`), after which they are ordinary templates. Nothing wakes on deploy, so a
 fresh deployment is provisioned by its first visitor.
 
 ## Who owns what
 
-A blueprint is two files with the same stem:
+A template is two files with the same stem:
 
 | | lives in | why |
 | --- | --- | --- |
-| the code, and the `bindings` it needs | `<name>.gadget` | what the blueprint *does* |
-| `blueprintId`, title, description, `output` (noun/plural/icon), author, `revision` | `<name>.json` | what a human *curates*, so it's text in a reviewable file rather than fields inside a binary |
+| the code, and the `bindings` it needs | `<name>.gadget` | what the template *does* |
+| `templateId`, title, description, `output` (noun/plural/icon), author, `revision` | `<name>.json` | what a human *curates*, so it's text in a reviewable file rather than fields inside a binary |
 
 The installer writes the sidecar's values over whatever the archive happens to carry,
 so an archive's own title and author are inert. The import script normalizes them anyway,
@@ -27,18 +27,18 @@ so the committed bytes don't contradict the sidecar.
 
 Edit the sidecar and rebuild. That's all — no archive rewrite, no `revision` bump: everything that
 ends up in the installed metadata is part of the installed-version fingerprint (see
-`formatBlueprintsManifestVersion`), so a reinstall follows on the next deploy.
+`formatTemplatesManifestVersion`), so a reinstall follows on the next deploy.
 
-## Updating a blueprint's code
+## Updating a template's code
 
 Build it in a real Workshop, export it, and import the export:
 
 ```
-pnpm import:format-blueprint ~/Downloads/Gadgets-Doc-v4.gadget format.document
+pnpm import:format-template ~/Downloads/Gadgets-Doc-v4.gadget format.document
 ```
 
 That rewrites the archive, bumps `revision` in the sidecar, rebuilds
-`src/generated/format-blueprints.ts`, and reports what it did:
+`src/generated/format-templates.ts`, and reports what it did:
 
 ```
 Updated workspace-docs.gadget (format.document)
@@ -54,7 +54,7 @@ Updated workspace-docs.gadget (format.document)
 The line worth reading is **`bindings`**, flagged `[CHANGED]` when the export needs something the old
 copy didn't — an instantiating user will now be asked for it. `revision` is the reinstall trigger for
 the one input the fingerprint can't see, the archive bytes; it's automated because forgetting it is
-invisible (everything builds and deploys, and the old blueprint quietly stays put).
+invisible (everything builds and deploys, and the old template quietly stays put).
 
 The script also round-trips the bytes it just wrote and checks the metadata and a content hash,
 because these are committed as data and a corrupt archive would otherwise first surface when a
@@ -65,28 +65,28 @@ deployment tried to install it.
 `--new` writes the sidecar for you, filling in what it can from the export:
 
 ```
-pnpm import:format-blueprint ~/Downloads/Brief.gadget --new acme-brief
+pnpm import:format-template ~/Downloads/Brief.gadget --new acme-brief
 ```
 
 It then prints the handful of fields worth editing before you deploy — chiefly `output`, the noun,
 plural and icon the sidecar owns rather than the archive, and `output.id`, the grouping key on the
 Outputs page.
 Make that one **generic** (`document`, not `acme-brief`): the Outputs page groups by it, so a
-"Contract" blueprint declaring `document` is listed with the rest of the documents instead of
+"Contract" template declaring `document` is listed with the rest of the documents instead of
 adding a filter chip of its own.
 
-`blueprintId` defaults to the name you passed. It is the install key: reimporting the same id
-updates that blueprint in place, and **changing it after a deployment has installed it** promotes
+`templateId` defaults to the name you passed. It is the install key: reimporting the same id
+updates that template in place, and **changing it after a deployment has installed it** promotes
 the new id as a *second* format while the old one stays in the New menu, updated by nothing.
 Rename files freely; the id is the load-bearing part.
 
 
 ## Shipping your own formats
 
-This directory is only the **default**. `FORMAT_BLUEPRINTS_DIR` points the build somewhere else:
+This directory is only the **default**. `FORMAT_TEMPLATES_DIR` points the build somewhere else:
 
 ```
-FORMAT_BLUEPRINTS_DIR=../../acme-formats pnpm build
+FORMAT_TEMPLATES_DIR=../../acme-formats pnpm build
 ```
 
 Whatever directory it names *is* the deployment's format set — it replaces this one rather than
@@ -100,18 +100,18 @@ stays pristine forever. The import script honours the same variable, so you get 
 
 Two lighter options need no build change at all:
 
-1. **Promote your own blueprints.** These are ordinary blueprints, and the standard set is admin
-   curation (`AdminConfig.formats`). Publish a blueprint in your deployment and promote it in the
+1. **Promote your own templates.** These are ordinary templates, and the standard set is admin
+   curation (`AdminConfig.formats`). Publish a template in your deployment and promote it in the
    admin Formats panel; disable the bundled ones you don't want. Nothing needs rebuilding, and this
    is the mechanism the bundled set is a convenience on top of, not a special case beside.
-2. **Ship no formats.** Point `FORMAT_BLUEPRINTS_DIR` at an empty directory, and the deployment
+2. **Ship no formats.** Point `FORMAT_TEMPLATES_DIR` at an empty directory, and the deployment
    simply has none until an admin promotes something.
 
-## Repository-generated blueprints
+## Repository-generated templates
 
 Most archives in this directory are exports authored in a running Workshop. A deployment may also
 own a reproducible source-to-archive build when a bundled Gadget contains policy that must be code
 reviewed and tested. The In Time Tec fixed-bid estimator is the local example: its TypeScript source,
 tests, and regeneration command live in `packages/fixed-bid-pricing/`, while the generated
 `fixed-bid-pricing.gadget` and curated sidecar stay here so installation follows the one ordinary
-bundled-Blueprint path. Its package build fails if source and the checked-in archive drift.
+bundled-Template path. Its package build fails if source and the checked-in archive drift.

@@ -7,22 +7,22 @@ import {
   MagnifyingGlass,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BlueprintPublicInfo } from "@gadgets/workshop-shared/api";
+import { TemplatePublicInfo } from "@gadgets/workshop-shared/api";
 import { VendorDescription } from "@gadgets/workshop-shared/gatekeeper";
-import { useFeaturedBlueprints, useGatekeeperVendors } from "./query/hooks";
-import { BindingBadge, uniqueBindingBadges } from "./components/BlueprintCard";
-import { BlueprintPreviewPlaceholder } from "./components/BlueprintPreviewImage";
+import { useFeaturedTemplates, useGatekeeperVendors } from "./query/hooks";
+import { BindingBadge, uniqueBindingBadges } from "./components/TemplateCard";
+import { TemplatePreviewPlaceholder } from "./components/TemplatePreviewImage";
 import ViewToggle from "./components/ViewToggle";
 import PageChrome from "./components/AppShell/PageChrome";
 
 type VendorMap = Map<string, VendorDescription>;
 
-export default function BlueprintsPage() {
+export default function TemplatesPage() {
   const toasts = useKumoToastManager();
   const toastsRef = useRef(toasts);
   toastsRef.current = toasts;
 
-  const { data: featuredBlueprints = [], isLoading: loading } = useFeaturedBlueprints();
+  const { data: featuredTemplates = [], isLoading: loading } = useFeaturedTemplates();
   const { data: rawVendors } = useGatekeeperVendors();
   const vendorDescriptions = useMemo(
     () => new Map<string, VendorDescription>((rawVendors ?? []).map((vendor) =>
@@ -42,7 +42,7 @@ export default function BlueprintsPage() {
 
 
   const q = search.trim().toLowerCase();
-  const filtered = featuredBlueprints.filter((b) => {
+  const filtered = featuredTemplates.filter((b) => {
     if (!q) return true;
     return (
       b.metadata.title.toLowerCase().includes(q) ||
@@ -70,7 +70,7 @@ export default function BlueprintsPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search blueprints…"
+            placeholder="Search templates…"
             className="h-9 w-full rounded-lg border border-kumo-line bg-kumo-base pl-9 pr-4 text-[13px] tracking-[-0.25px] text-kumo-default placeholder:text-kumo-inactive transition-[border-color,box-shadow] duration-150 ease-out focus:border-kumo-ring focus:outline-none focus:ring-[3px] focus:ring-kumo-ring/15"
           />
         </div>
@@ -83,31 +83,31 @@ export default function BlueprintsPage() {
           <EmptySection
             title={
               search
-                ? "No blueprints match"
-                : "No featured blueprints yet"
+                ? "No templates match"
+                : "No featured templates yet"
             }
             message={
               search
                 ? "Try a different search term."
-                : "Featured blueprints will appear here when they’re published. You can still create blueprints from your own workspaces."
+                : "Featured templates will appear here when they’re published. You can still create templates from your own workspaces."
             }
           />
         ) : view === "grid" ? (
           <div className="grid grid-cols-1 gap-4 px-3 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((blueprint) => (
-              <FeaturedBlueprintCard
-                key={blueprint.id}
-                blueprint={blueprint}
+            {filtered.map((template) => (
+              <FeaturedTemplateCard
+                key={template.id}
+                template={template}
                 vendorDescriptions={vendorDescriptions}
               />
             ))}
           </div>
         ) : (
           <div className="flex flex-col gap-0.5">
-            {filtered.map((blueprint) => (
-              <FeaturedBlueprintRow
-                key={blueprint.id}
-                blueprint={blueprint}
+            {filtered.map((template) => (
+              <FeaturedTemplateRow
+                key={template.id}
+                template={template}
                 vendorDescriptions={vendorDescriptions}
               />
             ))}
@@ -118,44 +118,44 @@ export default function BlueprintsPage() {
   );
 }
 
-function BlueprintThumbnail({ blueprint }: { blueprint: BlueprintPublicInfo }) {
+function TemplateThumbnail({ template }: { template: TemplatePublicInfo }) {
   return (
     <div className="relative aspect-[16/9] w-full overflow-hidden border-b border-kumo-line bg-kumo-tint">
-      {blueprint.screenshotUrl ? (
+      {template.screenshotUrl ? (
         <img
-          src={blueprint.screenshotUrl}
-          alt={`Screenshot of ${blueprint.metadata.title}`}
+          src={template.screenshotUrl}
+          alt={`Screenshot of ${template.metadata.title}`}
           className="h-full w-full object-cover"
           loading="lazy"
         />
       ) : (
-        <BlueprintPreviewPlaceholder id={blueprint.id} />
+        <TemplatePreviewPlaceholder id={template.id} />
       )}
     </div>
   );
 }
 
-function FeaturedBlueprintCard({
-  blueprint,
+function FeaturedTemplateCard({
+  template,
   vendorDescriptions,
 }: {
-  blueprint: BlueprintPublicInfo;
+  template: TemplatePublicInfo;
   vendorDescriptions: VendorMap;
 }) {
-  const badges = uniqueBindingBadges(blueprint.metadata.bindings).slice(0, 2);
-  const pending = useLinkPending({ to: "/blueprint/$id", params: { id: blueprint.id } });
+  const badges = uniqueBindingBadges(template.metadata.bindings).slice(0, 2);
+  const pending = useLinkPending({ to: "/template/$id", params: { id: template.id } });
 
   return (
     <div className="themed-card-hover-shadow press group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base text-left transition-[border-color,box-shadow] duration-150 ease-out hover:border-kumo-fill">
       <Link
-        to="/blueprint/$id"
-        params={{ id: blueprint.id }}
-        aria-label={`Open featured blueprint ${blueprint.metadata.title}`}
+        to="/template/$id"
+        params={{ id: template.id }}
+        aria-label={`Open featured template ${template.metadata.title}`}
         aria-busy={pending}
         className="absolute inset-0 z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kumo-brand"
       />
 
-      <BlueprintThumbnail blueprint={blueprint} />
+      <TemplateThumbnail template={template} />
 
       <div className="flex flex-1 items-start gap-2.5 px-3 py-2.5">
         <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-kumo-fill text-kumo-subtle">
@@ -165,14 +165,14 @@ function FeaturedBlueprintCard({
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-medium leading-[18px] tracking-[-0.25px] text-kumo-default">
-            {blueprint.metadata.title}
+            {template.metadata.title}
           </p>
           <p
             className={`mt-0.5 line-clamp-1 text-[12px] leading-4 tracking-[-0.2px] ${
-              blueprint.metadata.description ? "text-kumo-subtle" : "italic text-kumo-inactive"
+              template.metadata.description ? "text-kumo-subtle" : "italic text-kumo-inactive"
             }`}
           >
-            {blueprint.metadata.description || "No description"}
+            {template.metadata.description || "No description"}
           </p>
           {badges.length > 0 && (
             <div className="relative z-20 mt-2 flex flex-wrap gap-1">
@@ -191,20 +191,20 @@ function FeaturedBlueprintCard({
   );
 }
 
-function FeaturedBlueprintRow({
-  blueprint,
+function FeaturedTemplateRow({
+  template,
   vendorDescriptions,
 }: {
-  blueprint: BlueprintPublicInfo;
+  template: TemplatePublicInfo;
   vendorDescriptions: VendorMap;
 }) {
-  const badges = uniqueBindingBadges(blueprint.metadata.bindings).slice(0, 3);
-  const pending = useLinkPending({ to: "/blueprint/$id", params: { id: blueprint.id } });
+  const badges = uniqueBindingBadges(template.metadata.bindings).slice(0, 3);
+  const pending = useLinkPending({ to: "/template/$id", params: { id: template.id } });
 
   return (
     <Link
-      to="/blueprint/$id"
-      params={{ id: blueprint.id }}
+      to="/template/$id"
+      params={{ id: template.id }}
       aria-busy={pending}
       className="group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-kumo-tint"
     >
@@ -215,14 +215,14 @@ function FeaturedBlueprintRow({
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium tracking-[-0.25px] text-kumo-default">
-          {blueprint.metadata.title}
+          {template.metadata.title}
         </p>
         <p
           className={`mt-0.5 line-clamp-1 text-[12px] leading-4 tracking-[-0.2px] ${
-            blueprint.metadata.description ? "text-kumo-subtle" : "italic text-kumo-inactive"
+            template.metadata.description ? "text-kumo-subtle" : "italic text-kumo-inactive"
           }`}
         >
-          {blueprint.metadata.description || "No description"}
+          {template.metadata.description || "No description"}
         </p>
       </div>
       {badges.length > 0 && (

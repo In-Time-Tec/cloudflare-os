@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Gadget } from "../gadget/server.js";
+import { Gadget } from "../artifact/server.js";
 
 function makeGadget() {
   const values = new Map<string, unknown>();

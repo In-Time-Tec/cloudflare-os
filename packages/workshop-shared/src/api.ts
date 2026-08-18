@@ -116,16 +116,16 @@ export interface PublicApi extends RpcTarget {
       : Promise<string | null>;
 
   /**
-   * Fetch blueprint metadata by ID. Returns null if the blueprint doesn't exist. No
-   * authentication required (knowing the ID is sufficient, since a blueprint is "just data").
+   * Fetch template metadata by ID. Returns null if the template doesn't exist. No
+   * authentication required (knowing the ID is sufficient, since a template is "just data").
    */
-  getBlueprint(id: string): Promise<BlueprintPublicInfo | null>;
+  getTemplate(id: string): Promise<TemplatePublicInfo | null>;
 
   /**
-   * Download a blueprint as a `.gadget` archive stream. The archive contains only
-   * BlueprintMetadata plus the current blueprint code snapshot, not the full KV record.
+   * Download a template as a `.template` archive stream. The archive contains only
+   * TemplateMetadata plus the current template code snapshot, not the full KV record.
    */
-  downloadBlueprint(id: string): Promise<ReadableStream<Uint8Array>>;
+  downloadTemplate(id: string): Promise<ReadableStream<Uint8Array>>;
 }
 
 /** Subscription callback for AuthenticatedApi.subscribeConnectedAccounts(). */
@@ -535,7 +535,7 @@ export interface AuthenticatedApi extends RpcTarget {
    * The deployment's standard output formats, in the order they should be offered -- what fills a
    * "New Document / New Slides / ..." menu. Empty when the deployment promotes none.
    *
-   * These are ordinary blueprints an admin has promoted.
+   * These are ordinary templates an admin has promoted.
    */
   listOutputFormats(): Promise<OutputFormatOffer[]>;
 
@@ -612,79 +612,79 @@ export interface AuthenticatedApi extends RpcTarget {
   dismissSharedGadget(gadgetId: string): Promise<void>;
 
   /**
-   * List all blueprints created by the current user (from User DO). Useful for an audit
+   * List all templates created by the current user (from User DO). Useful for an audit
    * view in Settings.
    */
-  listOwnBlueprints(): Promise<BlueprintUserSummary[]>;
+  listOwnTemplates(): Promise<TemplateUserSummary[]>;
 
-  /** Return a blueprint created by the current user, or null if it is not owned by this user. */
-  getOwnBlueprint(blueprintId: string): Promise<BlueprintUserSummary | null>;
+  /** Return a template created by the current user, or null if it is not owned by this user. */
+  getOwnTemplate(templateId: string): Promise<TemplateUserSummary | null>;
 
   /**
-   * List the blueprints currently in the user's library. This includes uploaded `.gadget`
-   * archives (stored locally) and blueprints saved by reference from other publishers.
+   * List the templates currently in the user's library. This includes uploaded `.template`
+   * archives (stored locally) and templates saved by reference from other publishers.
    */
-  listLibraryBlueprints(): Promise<BlueprintLibrarySummary[]>;
+  listLibraryTemplates(): Promise<TemplateLibrarySummary[]>;
 
   /**
-   * Pin a blueprint for quick reuse on the home page. Pinning a public blueprint that isn't
+   * Pin a template for quick reuse on the home page. Pinning a public template that isn't
    * already yours or in your library saves it to your library first.
    */
-  setBlueprintPinned(blueprintId: string, pinned: boolean): Promise<void>;
+  setTemplatePinned(templateId: string, pinned: boolean): Promise<void>;
 
-  /** Returns whether the blueprint is pinned by the current user. */
-  isBlueprintPinned(blueprintId: string): Promise<boolean>;
+  /** Returns whether the template is pinned by the current user. */
+  isTemplatePinned(templateId: string): Promise<boolean>;
 
   /**
-   * List the deployment-wide featured blueprints. This is served from a KV snapshot rather
+   * List the deployment-wide featured templates. This is served from a KV snapshot rather
    * than directly from the AdminSettings durable object.
    */
-  listFeaturedBlueprints(): Promise<BlueprintPublicInfo[]>;
+  listFeaturedTemplates(): Promise<TemplatePublicInfo[]>;
 
   /**
-   * Add a blueprint to the user's library by reference, caching the current public metadata
+   * Add a template to the user's library by reference, caching the current public metadata
    * snapshot for list rendering.
    */
-  addBlueprintToLibrary(blueprintId: string): Promise<void>;
+  addTemplateToLibrary(templateId: string): Promise<void>;
 
   /**
-   * Remove a blueprint from the user's library. If the library entry was uploaded by the
-   * current user, this also deletes the backing blueprint content from storage.
+   * Remove a template from the user's library. If the library entry was uploaded by the
+   * current user, this also deletes the backing template content from storage.
    */
-  removeBlueprintFromLibrary(blueprintId: string): Promise<void>;
+  removeTemplateFromLibrary(templateId: string): Promise<void>;
 
   /**
-   * Returns info about whether the blueprint is in the user's library.
+   * Returns info about whether the template is in the user's library.
    * Returns null if not in library, or { uploaded } if it is.
    */
-  isBlueprintInLibrary(blueprintId: string): Promise<{ uploaded: boolean } | null>;
+  isTemplateInLibrary(templateId: string): Promise<{ uploaded: boolean } | null>;
 
   /**
-   * Create a new gadget from a blueprint. Reads the blueprint from KV, downloads code from
-   * R2, creates a new Overseer DO, initializes it with the blueprint's code, and creates
+   * Create a new gadget from a template. Reads the template from KV, downloads code from
+   * R2, creates a new Overseer DO, initializes it with the template's code, and creates
    * gatekeepers from the provided binding assignments.
    *
-   * Every required binding in the blueprint must have a corresponding entry in `bindings`,
+   * Every required binding in the template must have a corresponding entry in `bindings`,
    * keyed by binding name. Throws if any are missing or if accountId/modelId are invalid.
    *
    * The returned Overseer can be used immediately (pipelining-friendly).
    */
-  newGadgetFromBlueprint(
-    blueprintId: string,
-    bindings: Record<string, BlueprintBindingAssignment>
+  newGadgetFromTemplate(
+    templateId: string,
+    bindings: Record<string, TemplateBindingAssignment>
   ): Promise<RpcStub<Overseer>>;
 
   /**
-   * Delete a blueprint that the user owns. Works even if the source gadget has been deleted
+   * Delete a template that the user owns. Works even if the source gadget has been deleted
    * (operates on User DO + KV directly).
    */
-  deleteOrphanedBlueprint(blueprintId: string): Promise<void>;
+  deleteOrphanedTemplate(templateId: string): Promise<void>;
 
   /**
-   * Import a `.gadget` archive from another Workshop instance. The imported blueprint is stored
-   * as a local blueprint owned by the current user.
+   * Import a `.template` archive from another Workshop instance. The imported template is stored
+   * as a local template owned by the current user.
    */
-  importBlueprint(archive: ReadableStream<Uint8Array>): Promise<string>;
+  importTemplate(archive: ReadableStream<Uint8Array>): Promise<string>;
 
   /**
    * Re-authenticate a connected account whose credentials have expired (or may be about to
@@ -885,33 +885,33 @@ export type AdminSettingsView = {
   accentColor: string;
   /** Every bound gatekeeper and its resource types, with enabled state (not hidden when disabled). */
   resourceVendors: AdminResourceVendor[];
-  /** The blueprints promoted as standard output formats, in menu order (including disabled ones). */
+  /** The templates promoted as standard output formats, in menu order (including disabled ones). */
   formats: AdminFormat[];
 };
 
 /**
- * One promoted blueprint, as the admin Formats panel sees it: the deployment's curation plus
- * enough of the blueprint to show what is being curated.
+ * One promoted template, as the admin Formats panel sees it: the deployment's curation plus
+ * enough of the template to show what is being curated.
  */
 export type AdminFormat = {
-  blueprintId: string;
+  templateId: string;
 
-  blueprintTitle: string;
+  templateTitle: string;
 
   /**
-   * The blueprint's own description, which is the rest of the catalog entry the agent reads;
+   * The template's own description, which is the rest of the catalog entry the agent reads;
    * `agentHint` is only its last line.
    */
-  blueprintDescription: string;
+  templateDescription: string;
 
   /** Presentation after the deployment's overrides are applied. */
-  output?: BlueprintOutput;
+  output?: TemplateOutput;
 
-  /** What the blueprint itself declares, so the panel can show which fields are overridden. */
-  declared?: BlueprintOutput;
+  /** What the template itself declares, so the panel can show which fields are overridden. */
+  declared?: TemplateOutput;
 
   /** The deployment's presentation overrides, if any. */
-  overrides?: Partial<BlueprintOutput>;
+  overrides?: Partial<TemplateOutput>;
 
   enabled: boolean;
 
@@ -919,13 +919,13 @@ export type AdminFormat = {
   agentHint: string;
 
   /**
-   * The promoted blueprint no longer exists (deleted after promotion). Such an entry is skipped
+   * The promoted template no longer exists (deleted after promotion). Such an entry is skipped
    * everywhere else; the panel surfaces it so the admin can remove it.
    */
   missing: boolean;
 
   /**
-   * The blueprint ships with the deployment (see format-blueprints/ and the FORMAT_BLUEPRINTS the
+   * The template ships with the deployment (see format-templates/ and the FORMAT_TEMPLATES the
    * build generates from it), so an upgrade can replace its contents. Curation stays the admin's: an upgrade never re-promotes something they
    * removed, nor resets their overrides.
    */
@@ -1002,45 +1002,45 @@ export interface AdminApi {
   setAccentColor(color: string): Promise<void>;
 
   /**
-   * Returns whether the blueprint is featured on the deployment. Returns null when the blueprint
-   * can't be featured (e.g. it isn't a listable blueprint).
+   * Returns whether the template is featured on the deployment. Returns null when the template
+   * can't be featured (e.g. it isn't a listable template).
    */
-  isBlueprintFeatured(blueprintId: string): Promise<boolean | null>;
+  isTemplateFeatured(templateId: string): Promise<boolean | null>;
 
-  /** Mark or unmark a blueprint as featured on the deployment. */
-  setBlueprintFeatured(blueprintId: string, featured: boolean): Promise<void>;
+  /** Mark or unmark a template as featured on the deployment. */
+  setTemplateFeatured(templateId: string, featured: boolean): Promise<void>;
 
   // --- Standard output formats ---
   //
-  // Promotion is what makes a blueprint one of the deployment's standard formats: offered in the
-  // "New ..." menu and listed first for the agent. A blueprint declaring what it produces is
+  // Promotion is what makes a template one of the deployment's standard formats: offered in the
+  // "New ..." menu and listed first for the agent. A template declaring what it produces is
   // presentation, and never enough on its own.
 
   /**
-   * Offer a blueprint as a standard format, appended last in menu order. Throws if the blueprint
+   * Offer a template as a standard format, appended last in menu order. Throws if the template
    * doesn't exist. Promoting one that already is leaves its curation and menu position alone, so
    * that retrying a promotion whose mirror write failed repairs it rather than being refused.
    */
-  promoteFormat(blueprintId: string): Promise<void>;
+  promoteFormat(templateId: string): Promise<void>;
 
   /**
-   * Stop offering a blueprint as a standard format, and forget the deployment's curation of it.
-   * The blueprint itself is untouched.
+   * Stop offering a template as a standard format, and forget the deployment's curation of it.
+   * The template itself is untouched.
    *
-   * Refused for a bundled blueprint (see `AdminFormat.bundled`), which the deployment installed
+   * Refused for a bundled template (see `AdminFormat.bundled`), which the deployment installed
    * and will reinstall: `enabled: false` withdraws it without discarding the admin's overrides,
    * hint and menu position.
    */
-  removeFormat(blueprintId: string): Promise<void>;
+  removeFormat(templateId: string): Promise<void>;
 
   /**
    * Update one promoted format. Only the provided fields change. `agentHint: ""` clears the hint;
-   * an `overrides` field set to null reverts that field to the blueprint's own declaration.
+   * an `overrides` field set to null reverts that field to the template's own declaration.
    */
-  updateFormat(blueprintId: string, patch: AdminFormatPatch): Promise<void>;
+  updateFormat(templateId: string, patch: AdminFormatPatch): Promise<void>;
 
-  /** Reorder the menu. `blueprintIds` must be a permutation of the currently promoted ids. */
-  setFormatOrder(blueprintIds: string[]): Promise<void>;
+  /** Reorder the menu. `templateIds` must be a permutation of the currently promoted ids. */
+  setFormatOrder(templateIds: string[]): Promise<void>;
 }
 
 /** A partial edit to one promoted format. Absent fields are left alone. */
@@ -1048,10 +1048,10 @@ export type AdminFormatPatch = {
   enabled?: boolean;
   agentHint?: string;
   /**
-   * Per-field presentation overrides. A field set to null reverts to the blueprint's declaration;
+   * Per-field presentation overrides. A field set to null reverts to the template's declaration;
    * a field left absent is unchanged.
    */
-  overrides?: {[K in keyof BlueprintOutput]?: BlueprintOutput[K] | null};
+  overrides?: {[K in keyof TemplateOutput]?: TemplateOutput[K] | null};
 };
 
 /**
@@ -1349,22 +1349,22 @@ export type OutputIcon = typeof OUTPUT_ICONS[number];
 
 /**
  * Whether an unknown value names one of the icons this deployment can draw. Used wherever an icon
- * arrives from outside the kernel: a published blueprint, an admin override, or the browser.
+ * arrives from outside the kernel: a published template, an admin override, or the browser.
  */
 export function isOutputIcon(value: unknown): value is OutputIcon {
   return typeof value === "string" && (OUTPUT_ICONS as readonly string[]).includes(value);
 }
 
 /**
- * What instantiating a blueprint produces: a Document, a Spreadsheet, a Workflow, etc. Declared
- * by the blueprint's author (see `BlueprintMetadata.output`), inherited by every gadget instantiated
+ * What instantiating a template produces: a Document, a Spreadsheet, a Workflow, etc. Declared
+ * by the template's author (see `TemplateMetadata.output`), inherited by every gadget instantiated
  * from it, and used wherever that gadget is shown in place of generic gadget.
  *
- * Declaring this is presentation only. Any user can publish a blueprint calling itself a
+ * Declaring this is presentation only. Any user can publish a template calling itself a
  * Document; that must be harmless. Being offered as one of the deployment's standard formats (in
  * the New menu, or the agent's preferred list) is a separate, admin-curated decision.
  */
-export type BlueprintOutput = {
+export type TemplateOutput = {
   /**
    * Stable grouping slug, e.g. "document". Outputs sharing an id are grouped together on the
    * outputs page.
@@ -1378,22 +1378,22 @@ export type BlueprintOutput = {
 };
 
 /**
- * One entry of the "New ..." menu, as returned by `listOutputFormats()`. This names a blueprint the
- * deployment has promoted, instantiated with `newGadgetFromBlueprint(blueprintId, ...)` like any other.
+ * One entry of the "New ..." menu, as returned by `listOutputFormats()`. This names a template the
+ * deployment has promoted, instantiated with `newGadgetFromTemplate(templateId, ...)` like any other.
  */
 export type OutputFormatOffer = {
-  blueprintId: string;
+  templateId: string;
 
   /**
-   * How to name and draw it: the blueprint's own declaration with any deployment override
+   * How to name and draw it: the template's own declaration with any deployment override
    * applied. Also what the created gadget inherits.
    */
-  output: BlueprintOutput;
+  output: TemplateOutput;
 
-  /** The blueprint's description. */
+  /** The template's description. */
   description: string;
 
-  /** The blueprint needs bindings wired up before it can run. */
+  /** The template needs bindings wired up before it can run. */
   requiresSetup: boolean;
 };
 
@@ -1430,10 +1430,10 @@ export type OutputSummary = {
   workpieceId: WorkpieceId;
 
   /**
-   * The format this output was built as, if it came from a blueprint declaring one. Absent for a
+   * The format this output was built as, if it came from a template declaring one. Absent for a
    * gadget built from scratch, which displays as a generic app.
    */
-  output?: BlueprintOutput;
+  output?: TemplateOutput;
 
   title: string;
   workspaceTitle: string;
@@ -1468,7 +1468,7 @@ export type OutputSummary = {
 export type UiBundle = {
   // URL from which the main bundle of UI code can be downloaded. This download contains all the
   // Gadget's client-side assets. The URL is content-addressed to make it highly cacheable, even
-  // across multiple Gadgets sharing the same implementation (blueprint).
+  // across multiple Gadgets sharing the same implementation (template).
   //
   // TODO: Specify the format of what this URL returns. A raw HTML page doesn't quite work because
   //   the client needs to initialize the sandbox with some platform libraries before loading the
@@ -1638,7 +1638,7 @@ export type AgentSpawnerConfig = {
 /**
  * Interface to a workspace's Overseer, used to display the Gadget Workshop shell UI around that
  * workspace. Workspace-level concerns live here: the gadget registry, code sync (one Yjs doc for
- * the whole workspace), chats, actions/hooks, sharing, and blueprint listing. Per-gadget
+ * the whole workspace), chats, actions/hooks, sharing, and template listing. Per-gadget
  * operations live on the GadgetClient sub-capability (see createGadget()/getGadget()).
  */
 export interface Overseer extends RpcTarget {
@@ -1786,7 +1786,7 @@ export interface Overseer extends RpcTarget {
    * List information about bound hooks (which could wake up a gadget asynchronously).
    *
    * The list spans the whole workspace; each entry names the gadget it wakes (see
-   * BoundHookInfo.gadgetId), so a per-gadget view must filter on that.
+   * BoundHookInfo.templateId), so a per-gadget view must filter on that.
    */
   listHooks(): Promise<BoundHookInfo[]>;
 
@@ -2007,42 +2007,42 @@ export interface Overseer extends RpcTarget {
    */
   subscribeToConsoleLogs(subscriber: RpcStub<ConsoleLogSubscriber>): Promise<RpcStub<{}>>;
 
-  // --- Blueprint management ---
+  // --- Template management ---
   //
-  // Blueprint listing and maintenance are workspace-level (each blueprint record remembers which
-  // gadget it exports). Creating a blueprint is per-gadget: see GadgetClient.createBlueprint().
+  // Template listing and maintenance are workspace-level (each template record remembers which
+  // gadget it exports). Creating a template is per-gadget: see GadgetClient.createTemplate().
 
-  /** List blueprints created from this workspace's gadgets. */
-  listBlueprints(): Promise<BlueprintGadgetSummary[]>;
+  /** List templates created from this workspace's gadgets. */
+  listTemplates(): Promise<TemplateGadgetSummary[]>;
 
   /**
-   * Update an existing blueprint. Any combination of metadata and code can be updated
+   * Update an existing template. Any combination of metadata and code can be updated
    * atomically in a single call with one propagation pass.
    *
    * - `title` / `description`: if provided, update the respective field.
    * - `updateCode`: if true, snapshot the source gadget's current committed code into the
-   *   blueprint and increment the blueprint version.
-   * - `updateBindings`: if true, refresh the blueprint's connection annotations from
+   *   template and increment the template version.
+   * - `updateBindings`: if true, refresh the template's connection annotations from
    *   the source gadget's current bindings without changing the code snapshot.
    *
    * At least one option must be provided.
    */
-  updateBlueprint(blueprintId: string, options: {
+  updateTemplate(templateId: string, options: {
     title?: string;
     description?: string;
     updateCode?: boolean;
     updateBindings?: boolean;
-    screenshot?: BlueprintScreenshotUpload | null;
+    screenshot?: TemplateScreenshotUpload | null;
   }): Promise<void>;
 
-  /** Delete a blueprint. Cleans up KV, R2, User DO, and local storage. */
-  deleteBlueprint(blueprintId: string): Promise<void>;
+  /** Delete a template. Cleans up KV, R2, User DO, and local storage. */
+  deleteTemplate(templateId: string): Promise<void>;
 
   /**
-   * Retry publishing a blueprint whose `dirty` flag is set (meaning a previous propagation
+   * Retry publishing a template whose `dirty` flag is set (meaning a previous propagation
    * to User DO / KV / R2 failed).
    */
-  retryBlueprintPublish(blueprintId: string): Promise<void>;
+  retryTemplatePublish(templateId: string): Promise<void>;
 
   // --- Collaborator management ---
 
@@ -2610,7 +2610,7 @@ export type AiToolCall = {
     bindingName: string;
   };
 } | {
-  /** Create a new gadget workpiece in the workspace, either empty or instantiated from a blueprint. */
+  /** Create a new gadget workpiece in the workspace, either empty or instantiated from a template. */
   toolName: "createGadget";
   input: {
     /** Human-readable title for the new gadget. Required: the agent always names its creations. */
@@ -2623,10 +2623,10 @@ export type AiToolCall = {
     bindingName: string;
 
     /**
-     * If present, the new gadget starts with the named blueprint's files (copied into the chat's
+     * If present, the new gadget starts with the named template's files (copied into the chat's
      * proposed changes) instead of empty.
      */
-    blueprintId?: string;
+    templateId?: string;
   };
 
   /**
@@ -2638,11 +2638,11 @@ export type AiToolCall = {
    * `createdGadgets` on the "changes" message body), reported like writeFile/editFile report
    * theirs so reverts can be referred to precisely.
    *
-   * `blueprintNotes` is present for blueprint instantiations: formatted text describing the files
-   * copied in and the bindings the blueprint expects the agent to wire up. Recorded so replay
-   * doesn't have to re-fetch the blueprint (whose content may have changed since).
+   * `templateNotes` is present for template instantiations: formatted text describing the files
+   * copied in and the bindings the template expects the agent to wire up. Recorded so replay
+   * doesn't have to re-fetch the template (whose content may have changed since).
    */
-  output?: {gadgetId: WorkpieceId, changeId?: number, blueprintNotes?: string};
+  output?: {gadgetId: WorkpieceId, changeId?: number, templateNotes?: string};
 } | {
   toolName: "executeCode";
   input: {
@@ -2676,11 +2676,11 @@ export type AiToolCall = {
   input: {};
 } | {
   /**
-   * List the blueprints the workspace owner could instantiate (their own blueprints, their
-   * library, and the deployment's featured blueprints), so the agent can pass a blueprintId to
+   * List the templates the workspace owner could instantiate (their own templates, their
+   * library, and the deployment's featured templates), so the agent can pass a templateId to
    * createGadget. The formatted text output is recorded so replay doesn't re-list.
    */
-  toolName: "listBlueprints";
+  toolName: "listTemplates";
   input: {};
   output?: string;
 } | {
@@ -2722,7 +2722,7 @@ export type AiToolCall = {
 /**
  * A standard output format named inline in a chat message, recorded so the message can be redrawn
  * the way it was composed. Display only: the agent reads the noun as ordinary text and resolves it
- * against the deployment's live catalog, so no blueprint id is carried here.
+ * against the deployment's live catalog, so no template id is carried here.
  *
  * Shaped like `CapsuleSpecifier`, but carries no authority: naming a format grants nothing, so
  * there is no workpiece behind it.
@@ -2913,7 +2913,7 @@ export type AiChatStreamEvent = {
    */
   type: "toolCallOutputFormat";
   toolCallId: string;
-  output: BlueprintOutput;
+  output: TemplateOutput;
 } | {
   type: "toolOutputDelta";
   toolCallId: string;
@@ -3010,10 +3010,10 @@ export type WorkpieceSummary = {
   title: string;
 
   /**
-   * The format this workpiece was built as, inherited from the blueprint it was instantiated
+   * The format this workpiece was built as, inherited from the template it was instantiated
    * from. Absent means a generic app. The UI names and draws the workpiece from this.
    */
-  output?: BlueprintOutput;
+  output?: TemplateOutput;
 
   /**
    * The name of the Y.Doc root map that holds this workpiece's files, if it owns files (see
@@ -3087,12 +3087,12 @@ export type PreApprovableAction = {
 };
 
 // =======================================================================================
-// Blueprint types
+// Template types
 // =======================================================================================
 
 /**
  * Describes how a gatekeeper was originally created. Stored on each GatekeeperRecord so that
- * bindings can be recreated and blueprint metadata can be derived.
+ * bindings can be recreated and template metadata can be derived.
  */
 export type GatekeeperCreationSpec = {
   type: "gatekeeper";
@@ -3110,7 +3110,7 @@ export type GatekeeperCreationSpec = {
 
   /**
    * Denormalized from the creating user's model config at binding creation time.
-   * Absent when config.modelId is null. Used to populate blueprint suggestedModel
+   * Absent when config.modelId is null. Used to populate template suggestedModel
    * without requiring a live lookup.
    */
   modelProvider?: string;
@@ -3119,7 +3119,7 @@ export type GatekeeperCreationSpec = {
   /**
    * A singleton gatekeeper account (e.g. the Context Library) auto-provided to every gadget as an
    * unnamed capsule so the agent can read/search it in code. Not user-configured, so excluded from
-   * blueprints; re-added automatically if missing.
+   * templates; re-added automatically if missing.
    */
   type: "ambient";
   vendorId: string;        // the singleton gatekeeper's id (GATEKEEPER_<ID> suffix, lowercased)
@@ -3127,52 +3127,52 @@ export type GatekeeperCreationSpec = {
 };
 
 /**
- * User-provided metadata controlling how a gatekeeper binding should appear in blueprints.
+ * User-provided metadata controlling how a gatekeeper binding should appear in templates.
  * Stored on the binding edge (a gadget's binding-name -> gatekeeper mapping), not on the
  * gatekeeper itself: two gadgets binding the same gatekeeper can annotate it differently for
- * their respective blueprints. Optional: when absent, the binding is included in the blueprint
+ * their respective templates. Optional: when absent, the binding is included in the template
  * with a generated title, empty description, and no resource suggestion.
  *
  * Legacy field `included` may still be present on records written by older versions of
  * the workshop. The backend still honors `included: false`, but new writes omit it.
  */
-export type BlueprintBindingAnnotation = {
-  title: string;           // friendly name shown to people using the blueprint
+export type TemplateBindingAnnotation = {
+  title: string;           // friendly name shown to people using the template
   description: string;     // explains what resource to connect (may be empty)
   suggestValue?: boolean;  // include the specific URL/model as a suggestion
 };
 
 /**
- * Symbolic target of one agent-spawner env entry in a blueprint. Workpiece IDs are
+ * Symbolic target of one agent-spawner env entry in a template. Workpiece IDs are
  * workspace-local, so a spawner's `env` (see AgentSpawnerConfig.env) can't transfer into a
- * blueprint as-is; instead each entry references either one of the blueprint's own bindings by
+ * template as-is; instead each entry references either one of the template's own bindings by
  * name -- the user fills it at instantiation time like any other binding, and the spawner env
- * entry resolves to the gatekeeper created for it -- or the blueprint's gadget itself, resolving
+ * entry resolves to the gatekeeper created for it -- or the template's gadget itself, resolving
  * to the newly instantiated gadget.
  */
 export type SpawnerEnvTarget = {
   type: "binding";
 
   /**
-   * Key into BlueprintMetadata.bindings. May reference a binding that is also bound into the
-   * gadget, or one synthesized purely to feed this spawner (see BlueprintBinding.spawnerOnly).
+   * Key into TemplateMetadata.bindings. May reference a binding that is also bound into the
+   * gadget, or one synthesized purely to feed this spawner (see TemplateBinding.spawnerOnly).
    */
   name: string;
 } | {
   /**
    * This spawner binding refers back to the gadget itself (the one instantiated from the
-   * blueprint).
+   * template).
    */
   type: "gadget";
 };
 
 /**
- * Describes one binding required by a blueprint. Stored in BlueprintMetadata.bindings as a
+ * Describes one binding required by a template. Stored in TemplateMetadata.bindings as a
  * Record keyed by binding name. Consumers identify bindings by their key (the binding name)
  * while `title` and `description` provide user-facing text.
  */
-export type BlueprintBinding = {
-  title: string;        // friendly name shown to people using the blueprint
+export type TemplateBinding = {
+  title: string;        // friendly name shown to people using the template
   description: string;  // explains what resource to connect here (may be empty)
 
   /**
@@ -3199,13 +3199,13 @@ export type BlueprintBinding = {
   resourceUrl?: string;
 } | {
   /**
-   * An AI model binding. The user instantiating the blueprint picks one of their own
+   * An AI model binding. The user instantiating the template picks one of their own
    * configured models.
    */
   type: "aiModel";
 
   /**
-   * The blueprint creator may suggest a particular model to use, or omit this to leave
+   * The template creator may suggest a particular model to use, or omit this to leave
    * it up to the recipient.
    */
   suggestedModel?: {provider: string, modelName: string};
@@ -3214,7 +3214,7 @@ export type BlueprintBinding = {
   type: "agentSpawner";
 
   /**
-   * The blueprint creator may suggest a particular model to use, or omit this. (The
+   * The template creator may suggest a particular model to use, or omit this. (The
    * value is `null` if the suggestion is that AgentSpawnerConfig.modelId should be
    * configured as `null`. This is different from `undefined`, which means no suggestion.)
    */
@@ -3227,30 +3227,30 @@ export type BlueprintBinding = {
   env: Record<string, SpawnerEnvTarget>;
 });
 
-export type BlueprintScreenshotUpload = {
+export type TemplateScreenshotUpload = {
   mimeType: "image/jpeg" | "image/png";
   content: Uint8Array;
 };
 
-export const BLUEPRINT_SCREENSHOT_R2_PREFIX = 'screenshots/';
-export const BLUEPRINT_SCREENSHOT_PATH_PREFIX = '/blueprint-screenshot/';
+export const TEMPLATE_SCREENSHOT_R2_PREFIX = 'screenshots/';
+export const TEMPLATE_SCREENSHOT_PATH_PREFIX = '/template-screenshot/';
 
-export function blueprintScreenshotUrl(id: string, metadata: { screenshot?: true, lastUpdated: Date }): string | undefined {
+export function templateScreenshotUrl(id: string, metadata: { screenshot?: true, lastUpdated: Date }): string | undefined {
   return metadata.screenshot ?
-      `${BLUEPRINT_SCREENSHOT_PATH_PREFIX}${id}?v=${metadata.lastUpdated.valueOf()}` : undefined;
+      `${TEMPLATE_SCREENSHOT_PATH_PREFIX}${id}?v=${metadata.lastUpdated.valueOf()}` : undefined;
 }
 
 /**
- * General metadata about a blueprint. Stored (in slightly different wrapper records) in
+ * General metadata about a template. Stored (in slightly different wrapper records) in
  * three locations: Gadget DO, User DO, and KV.
  */
-export type BlueprintMetadata = {
+export type TemplateMetadata = {
   title: string;
-  description: string;  // longer-form description of what the blueprint does
+  description: string;  // longer-form description of what the template does
   author: AiChatAuthorInfo;
   created: Date;
 
-  version: number;       // increments every time the blueprint is updated
+  version: number;       // increments every time the template is updated
   lastUpdated: Date;
 
   /**
@@ -3260,26 +3260,26 @@ export type BlueprintMetadata = {
   screenshot?: true;
 
   /**
-   * What instantiating this blueprint produces. Absent means a generic app. Inherited by gadgets
-   * created from this blueprint, and preserved when such a gadget is republished as a blueprint.
+   * What instantiating this template produces. Absent means a generic app. Inherited by gadgets
+   * created from this template, and preserved when such a gadget is republished as a template.
    */
-  output?: BlueprintOutput;
+  output?: TemplateOutput;
 
   /** Key = binding name. */
-  bindings: Record<string, BlueprintBinding>;
+  bindings: Record<string, TemplateBinding>;
 };
 
-/** Public view (returned by PublicApi.getBlueprint). */
-export type BlueprintPublicInfo = {
+/** Public view (returned by PublicApi.getTemplate). */
+export type TemplatePublicInfo = {
   id: string;
-  metadata: BlueprintMetadata;
+  metadata: TemplateMetadata;
 
   /** If present, browser-loadable URL for the public screenshot. */
   screenshotUrl?: string;
 };
 
-/** Gadget-side summary (returned by Overseer.listBlueprints). */
-export type BlueprintGadgetSummary = {
+/** Gadget-side summary (returned by Overseer.listTemplates). */
+export type TemplateGadgetSummary = {
   id: string;
   title: string;
   description: string;
@@ -3290,12 +3290,12 @@ export type BlueprintGadgetSummary = {
 };
 
 /**
- * Where a blueprint the user owns came from. This distinguishes the case the UI cares about — the
- * source workspace still exists, so it can be opened and it owns deletion of the blueprint — from
+ * Where a template the user owns came from. This distinguishes the case the UI cares about — the
+ * source workspace still exists, so it can be opened and it owns deletion of the template — from
  * the two cases where it does not, so no caller has to infer that from display text. `workspaceId`
  * is reachable only in the case where opening it is meaningful.
  */
-export type BlueprintSource =
+export type TemplateSource =
     // Published from a workspace that still exists. `workspaceTitle` is its current title.
     { type: "workspace"; workspaceId: string; workspaceTitle: string }
     // Published from a workspace that has since been deleted.
@@ -3303,33 +3303,33 @@ export type BlueprintSource =
     // Added to the user's library rather than published from one of their workspaces.
   | { type: "imported" };
 
-/** User-side summary (returned by AuthenticatedApi.listOwnBlueprints and getOwnBlueprint). */
-export type BlueprintUserSummary = {
+/** User-side summary (returned by AuthenticatedApi.listOwnTemplates and getOwnTemplate). */
+export type TemplateUserSummary = {
   id: string;
   title: string;
   description: string;
-  /** Where this blueprint came from, and whether that origin is still openable. */
-  source: BlueprintSource;
+  /** Where this template came from, and whether that origin is still openable. */
+  source: TemplateSource;
   version: number;
   lastUpdated: Date;
   pinned?: boolean;
 };
 
-/** User-side library summary (returned by AuthenticatedApi.listLibraryBlueprints). */
-export type BlueprintLibrarySummary = {
+/** User-side library summary (returned by AuthenticatedApi.listLibraryTemplates). */
+export type TemplateLibrarySummary = {
   id: string;
-  metadata: BlueprintMetadata;
+  metadata: TemplateMetadata;
   addedAt: Date;
   uploaded: boolean;
   pinned?: boolean;
 };
 
 /**
- * Binding assignment (input to newGadgetFromBlueprint).
- * When instantiating a blueprint, the user provides a Record mapping binding name ->
- * assignment. Every required binding in the blueprint must have a corresponding entry.
+ * Binding assignment (input to newGadgetFromTemplate).
+ * When instantiating a template, the user provides a Record mapping binding name ->
+ * assignment. Every required binding in the template must have a corresponding entry.
  */
-export type BlueprintBindingAssignment = {
+export type TemplateBindingAssignment = {
   type: "gatekeeper";
   accountId: number;      // user's connected account ID
   resourceUrl: string;
@@ -3379,7 +3379,7 @@ export interface WorkpieceClient extends RpcTarget {
 /**
  * Capability representing one gadget workpiece within a workspace. Obtained from
  * Overseer.createGadget() or Overseer.getGadget(). Workspace-level concerns (code sync, chats,
- * sharing, actions, blueprint listing) stay on Overseer; this covers the per-gadget surface.
+ * sharing, actions, template listing) stay on Overseer; this covers the per-gadget surface.
  */
 export interface GadgetClient extends WorkpieceClient {
   /**
@@ -3449,36 +3449,36 @@ export interface GadgetClient extends WorkpieceClient {
   unbind(name: string): Promise<void>;
 
   /**
-   * Rename a binding while preserving its target and blueprint annotation. Throws if `oldName`
+   * Rename a binding while preserving its target and template annotation. Throws if `oldName`
    * does not exist or `newName` is reserved or already bound in this gadget.
    */
   renameBinding(oldName: string, newName: string): Promise<void>;
 
   /**
-   * Get the blueprint annotation for the named binding, if one has been set. Annotations live on
-   * the binding edge, not on the target gatekeeper (see BlueprintBindingAnnotation).
+   * Get the template annotation for the named binding, if one has been set. Annotations live on
+   * the binding edge, not on the target gatekeeper (see TemplateBindingAnnotation).
    */
-  getBlueprintAnnotation(name: string): Promise<BlueprintBindingAnnotation | null>;
+  getTemplateAnnotation(name: string): Promise<TemplateBindingAnnotation | null>;
 
-  /** Set the blueprint annotation for the named binding. */
-  setBlueprintAnnotation(name: string, annotation: BlueprintBindingAnnotation): Promise<void>;
+  /** Set the template annotation for the named binding. */
+  setTemplateAnnotation(name: string, annotation: TemplateBindingAnnotation): Promise<void>;
 
   /**
-   * Create a new blueprint from this gadget's current committed code.
+   * Create a new template from this gadget's current committed code.
    * `title` defaults to the gadget's title if omitted.
    *
-   * The blueprint is always owned by the workspace owner, regardless of who calls this method.
+   * The template is always owned by the workspace owner, regardless of who calls this method.
    *
    * Steps: generate ID, snapshot code, collect binding metadata, store locally, propagate
-   * to User DO + KV + R2. Maintenance of existing blueprints stays on Overseer (see
-   * Overseer.updateBlueprint() etc.).
+   * to User DO + KV + R2. Maintenance of existing templates stays on Overseer (see
+   * Overseer.updateTemplate() etc.).
    */
-  createBlueprint(title?: string, description?: string, screenshot?: BlueprintScreenshotUpload): Promise<BlueprintGadgetSummary>;
+  createTemplate(title?: string, description?: string, screenshot?: TemplateScreenshotUpload): Promise<TemplateGadgetSummary>;
 }
 
 /**
  * Capability representing one gatekeeper (connection) workpiece. Note that binding-edge
- * operations -- binding names and blueprint annotations -- live on GadgetClient, since a
+ * operations -- binding names and template annotations -- live on GadgetClient, since a
  * gatekeeper may be bound by several gadgets under different names.
  */
 export interface GatekeeperClient<Session extends RpcCompatible<Session>> extends WorkpieceClient {

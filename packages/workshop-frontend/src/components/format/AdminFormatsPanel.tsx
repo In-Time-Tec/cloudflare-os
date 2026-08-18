@@ -1,10 +1,10 @@
 // Admin panel for the deployment's standard output formats.
 //
-// A format is an ordinary blueprint the deployment has *promoted*: offered as "New Slides" and
+// A format is an ordinary template the deployment has *promoted*: offered as "New Slides" and
 // listed first for the agent. Promoting changes four surfaces the admin can't see from here, so
 // the panel previews the buttons users will get and the literal line the model will read.
 //
-// Presentation is never authored from scratch: a promoted blueprint arrives with its own noun,
+// Presentation is never authored from scratch: a promoted template arrives with its own noun,
 // plural and icon, and clearing an override falls back to it.
 
 import { useEffect, useMemo, useState } from 'react'
@@ -13,7 +13,7 @@ import { ArrowDown, ArrowUp, CaretDown, CaretRight, Plus, Sparkle, Trash, Warnin
 import type {
   AdminApi,
   AdminFormat,
-  BlueprintOutput,
+  TemplateOutput,
   OutputIcon,
 } from '@gadgets/workshop-shared/api'
 import { OUTPUT_ICONS } from '@gadgets/workshop-shared/api'
@@ -23,9 +23,9 @@ import { MENU_CONTENT } from '../menuStyles'
 import { FORMAT_ICONS, GENERIC_OUTPUT } from './formats'
 import { FormatGlyph, FormatPreview } from './FormatVisuals'
 
-// A blueprint the admin could promote. `declared` is what it says it produces, when we know --
-// known for the deployment's featured blueprints, unknown for the admin's own published ones.
-type Promotable = { id: string; title: string; declared?: BlueprintOutput }
+// A template the admin could promote. `declared` is what it says it produces, when we know --
+// known for the deployment's featured templates, unknown for the admin's own published ones.
+type Promotable = { id: string; title: string; declared?: TemplateOutput }
 
 export default function AdminFormatsPanel({
   admin,
@@ -48,7 +48,7 @@ export default function AdminFormatsPanel({
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([authenticatedApi.listFeaturedBlueprints(), authenticatedApi.listOwnBlueprints()])
+    Promise.all([authenticatedApi.listFeaturedTemplates(), authenticatedApi.listOwnTemplates()])
       .then(([featured, own]) => {
         if (cancelled) return
         const byId = new Map<string, Promotable>()
@@ -60,13 +60,13 @@ export default function AdminFormatsPanel({
         }
         setCandidates([...byId.values()])
       })
-      .catch((err) => console.error('Failed to list promotable blueprints:', err))
+      .catch((err) => console.error('Failed to list promotable templates:', err))
     return () => {
       cancelled = true
     }
   }, [authenticatedApi])
 
-  const promoted = useMemo(() => new Set(formats.map((f) => f.blueprintId)), [formats])
+  const promoted = useMemo(() => new Set(formats.map((f) => f.templateId)), [formats])
   const available = candidates.filter((c) => !promoted.has(c.id))
   const offered = formats.filter((f) => f.enabled && f.output && !f.missing)
 
@@ -87,7 +87,7 @@ export default function AdminFormatsPanel({
   }
 
   const move = (index: number, delta: number) => {
-    const order = formats.map((f) => f.blueprintId)
+    const order = formats.map((f) => f.templateId)
     const target = index + delta
     if (target < 0 || target >= order.length) return
     ;[order[index], order[target]] = [order[target], order[index]]
@@ -98,7 +98,7 @@ export default function AdminFormatsPanel({
     <div className="rounded-xl border border-kumo-line bg-kumo-elevated p-6">
       <h2 className="mb-1 text-lg font-semibold text-kumo-strong">Standard formats</h2>
       <p className="mb-5 text-sm text-kumo-subtle">
-        A promoted blueprint is offered by name (“New Doc”, “New Slides”) wherever people start
+        A promoted template is offered by name (“New Doc”, “New Slides”) wherever people start
         something, and the agent is told to prefer it over building the same thing from scratch.
       </p>
 
@@ -110,18 +110,18 @@ export default function AdminFormatsPanel({
         <div className="mb-5 flex flex-col gap-2">
           {formats.map((format, i) => (
             <FormatRow
-              key={format.blueprintId}
+              key={format.templateId}
               format={format}
               busy={busy}
-              open={expanded === format.blueprintId}
+              open={expanded === format.templateId}
               onToggle={() =>
-                setExpanded((id) => (id === format.blueprintId ? null : format.blueprintId))
+                setExpanded((id) => (id === format.templateId ? null : format.templateId))
               }
               isFirst={i === 0}
               isLast={i === formats.length - 1}
               onMove={(delta) => move(i, delta)}
-              onPatch={(patch) => mutate(() => admin.updateFormat(format.blueprintId, patch))}
-              onRemove={() => mutate(() => admin.removeFormat(format.blueprintId))}
+              onPatch={(patch) => mutate(() => admin.updateFormat(format.templateId, patch))}
+              onRemove={() => mutate(() => admin.removeFormat(format.templateId))}
             />
           ))}
         </div>
@@ -132,7 +132,7 @@ export default function AdminFormatsPanel({
           render={
             <Button variant="secondary" disabled={busy || available.length === 0}>
               <Plus size={14} className="mr-1.5" />
-              Promote a blueprint
+              Promote a template
             </Button>
           }
         />
@@ -149,7 +149,7 @@ export default function AdminFormatsPanel({
               <FormatGlyph output={candidate.declared} size="lg" className="shrink-0 text-kumo-subtle" />
               <span className="min-w-0">
                 <span className="block truncate text-[13px] text-kumo-default">
-                  {candidate.title || 'Untitled blueprint'}
+                  {candidate.title || 'Untitled template'}
                 </span>
                 <span className="block truncate text-[11px] text-kumo-inactive">
                   {candidate.declared
@@ -180,7 +180,7 @@ function PreviewStrip({ formats }: { formats: AdminFormat[] }) {
         <div className="flex flex-wrap items-center gap-2">
           {formats.map((format) => (
             <span
-              key={format.blueprintId}
+              key={format.templateId}
               className="flex items-center gap-2 rounded-full border border-kumo-line bg-kumo-base px-3.5 py-2 text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-default"
             >
               <FormatGlyph output={format.output} size="md" className="text-kumo-subtle" />
@@ -201,7 +201,7 @@ function EmptyState() {
     <div className="mb-5 rounded-lg border border-kumo-line bg-kumo-base px-4 py-5 text-center">
       <p className="text-sm font-medium text-kumo-default">No standard formats yet</p>
       <p className="mx-auto mt-1 max-w-md text-[13px] leading-[18px] text-kumo-subtle">
-        Promote a blueprint to offer it by name wherever people start something, and to have the
+        Promote a template to offer it by name wherever people start something, and to have the
         agent prefer it over building the same thing from scratch.
       </p>
     </div>
@@ -243,7 +243,7 @@ function FormatRow({
           {format.missing ? (
             <span
               className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-kumo-tint text-kumo-danger"
-              title="This blueprint no longer exists"
+              title="This template no longer exists"
             >
               <Warning size={16} />
             </span>
@@ -256,7 +256,7 @@ function FormatRow({
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2">
               <span className="truncate text-sm font-medium text-kumo-default">
-                {format.output ? `New ${format.output.noun}` : format.blueprintTitle || format.blueprintId}
+                {format.output ? `New ${format.output.noun}` : format.templateTitle || format.templateId}
               </span>
               {format.bundled && <Badge>Bundled</Badge>}
               {!format.enabled && !format.missing && <Badge>Off</Badge>}
@@ -264,10 +264,10 @@ function FormatRow({
             </span>
             <span className="mt-0.5 block truncate text-xs text-kumo-subtle">
               {format.missing
-                ? 'Blueprint deleted. Remove this entry.'
+                ? 'Template deleted. Remove this entry.'
                 : needsNaming
-                ? 'This blueprint doesn’t declare what it produces. Give it a name to offer it.'
-                : `${format.blueprintTitle} · shown under ${format.output!.plural} on Outputs`}
+                ? 'This template doesn’t declare what it produces. Give it a name to offer it.'
+                : `${format.templateTitle} · shown under ${format.output!.plural} on Outputs`}
             </span>
           </span>
 
@@ -302,7 +302,7 @@ function FormatRow({
         <div className="flex flex-col gap-4 border-t border-kumo-line px-3 py-4">
           {format.missing ? (
             <p className="text-[13px] text-kumo-subtle">
-              The blueprint behind this format was deleted, so nobody is offered it. Remove the
+              The template behind this format was deleted, so nobody is offered it. Remove the
               entry.
             </p>
           ) : (
@@ -310,9 +310,9 @@ function FormatRow({
               <Fieldset
                 title="How it’s presented"
                 detail={
-                  'Leave a field empty to use the name the blueprint declares. ' +
+                  'Leave a field empty to use the name the template declares. ' +
                   (format.bundled
-                    ? 'A bundled blueprint can change its declared names when this deployment ' +
+                    ? 'A bundled template can change its declared names when this deployment ' +
                       'updates; a value you type here stays as you set it. '
                     : '') +
                   'Applies to outputs made from now on — existing ones keep the name they were ' +
@@ -324,7 +324,7 @@ function FormatRow({
                     {/* Fields read from `output` when the presentation resolves, and otherwise
                         from whatever has been filled in so far. `output` is all-or-nothing -- it
                         is undefined until noun, plural and icon are all present -- so reading only
-                        from it made an admin naming an undeclared blueprint watch each value they
+                        from it made an admin naming an undeclared template watch each value they
                         saved vanish from the form. */}
                     <IconPicker
                       icon={format.output?.icon ?? format.overrides?.icon}
@@ -362,7 +362,7 @@ function FormatRow({
 
               <Fieldset
                 title="How the agent picks it"
-                detail="Standard formats are listed first in the agent’s catalog, as the entry below — the blueprint’s own description does most of the work. Add a hint only if the agent needs to know when to prefer this format over another one."
+                detail="Standard formats are listed first in the agent’s catalog, as the entry below — the template’s own description does most of the work. Add a hint only if the agent needs to know when to prefer this format over another one."
               >
                 <OverrideField
                   label="Hint"
@@ -371,7 +371,7 @@ function FormatRow({
                   disabled={busy}
                   onCommit={(agentHint) => onPatch({ agentHint: agentHint ?? '' })}
                 />
-                {/* The literal catalog entry, including the blueprint's own description: the hint is
+                {/* The literal catalog entry, including the template's own description: the hint is
                     only its last line, and showing the label alone made an empty hint look like the
                     agent had been told nothing. Mirrors #listStandardFormats in overseer.ts. */}
                 {format.output && (
@@ -382,9 +382,9 @@ function FormatRow({
                         “{format.output.noun}” — a standard format on this deployment
                         {format.agentHint ? ` -- ${format.agentHint}` : ''}
                       </span>
-                      {format.blueprintDescription && (
+                      {format.templateDescription && (
                         <span className="mt-0.5 block text-kumo-inactive">
-                          {format.blueprintDescription}
+                          {format.templateDescription}
                         </span>
                       )}
                     </span>
@@ -459,9 +459,9 @@ function Badge({ children, tone = 'neutral' }: { children: React.ReactNode; tone
   )
 }
 
-// A field that either overrides the blueprint or defers to it. Committing an empty value, or one
-// equal to the blueprint's, sends null to clear the override rather than freezing today's
-// blueprint text into the config.
+// A field that either overrides the template or defers to it. Committing an empty value, or one
+// equal to the template's, sends null to clear the override rather than freezing today's
+// template text into the config.
 function OverrideField({
   label,
   value,

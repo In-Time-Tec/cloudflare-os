@@ -1,6 +1,6 @@
 import { RpcCompatible, RpcStub, RpcTarget } from "capnweb";
 import { validateRpc } from "capnweb-validate";
-import { Overseer, GadgetMetadata, UiBundle, WorkpieceId, WorkpieceSummary, WorkpiecesSubscriber, GadgetClient, GadgetBindingInfo, GatekeeperClient, ActionState, ActionLogEntry, ActionsSubscriber, CodeUpdate, CodeSubscriber, AiChatMetadata, AiChatMessage, AiChatHistoryPage, AiChatSubscriber, AiChatAuthorInfo, AiModelConfig, AiChatMessageBody, AgentSpawnerConfig, ConsoleLogSubscriber, ConsoleLogEvent, CapsuleSpecifier, CollaboratorInfo, CollaboratorRole, AffectedCollaborator, ShareLinkInfo, GatekeeperCreationSpec, ObserverConfigCallback, ObserverBindingNeed, ObserverBindingFailure, BlueprintBindingAnnotation, BlueprintBinding, BlueprintMetadata, BlueprintOutput, MessageFormatRef, isOutputIcon, SpawnerEnvTarget, BlueprintGadgetSummary, AiChatStreamEvent, BlueprintScreenshotUpload, BLUEPRINT_SCREENSHOT_R2_PREFIX, blueprintScreenshotUrl, ChatAttachmentUpload, ChatAttachmentHandle, ChatAttachmentRef, BoundHookInfo, PreApprovableAction, PresenceParticipant, PresenceSubscriber, SlashCommandChoice, SlashCommandRequest, validateBindingName, createOpenGadgetError, OPEN_GADGET_ERROR_CODES, resolveSiteName } from '@gadgets/workshop-shared/api';
+import { Overseer, GadgetMetadata, UiBundle, WorkpieceId, WorkpieceSummary, WorkpiecesSubscriber, GadgetClient, GadgetBindingInfo, GatekeeperClient, ActionState, ActionLogEntry, ActionsSubscriber, CodeUpdate, CodeSubscriber, AiChatMetadata, AiChatMessage, AiChatHistoryPage, AiChatSubscriber, AiChatAuthorInfo, AiModelConfig, AiChatMessageBody, AgentSpawnerConfig, ConsoleLogSubscriber, ConsoleLogEvent, CapsuleSpecifier, CollaboratorInfo, CollaboratorRole, AffectedCollaborator, ShareLinkInfo, GatekeeperCreationSpec, ObserverConfigCallback, ObserverBindingNeed, ObserverBindingFailure, TemplateBindingAnnotation, TemplateBinding, TemplateMetadata, TemplateOutput, MessageFormatRef, isOutputIcon, SpawnerEnvTarget, TemplateGadgetSummary, AiChatStreamEvent, TemplateScreenshotUpload, TEMPLATE_SCREENSHOT_R2_PREFIX, templateScreenshotUrl, ChatAttachmentUpload, ChatAttachmentHandle, ChatAttachmentRef, BoundHookInfo, PreApprovableAction, PresenceParticipant, PresenceSubscriber, SlashCommandChoice, SlashCommandRequest, validateBindingName, createOpenGadgetError, OPEN_GADGET_ERROR_CODES, resolveSiteName } from '@gadgets/workshop-shared/api';
 import { Gatekeeper, HookInitiator, ResourceDescription, ApprovalQueue, ActionDescription, ObservationAuthorizer, ObservationDescription, VendorDescription, SupportedResource, resolveRequestedResource, HookController, HookDescription, AGENT_CATALOG_MAX_ENTRIES, ActionKind } from "@gadgets/workshop-shared/gatekeeper";
 import {
   DurableObject, WorkerEntrypoint, RpcStub as NativeRpcStub,
@@ -21,10 +21,10 @@ import {
   type AiGatewayLogRoute,
 } from "./ai-gateway";
 import { AgentGadgetInfo, AgentHooks, AiChatAgentContext, ChatBindingEntry, SeedBindingInfo, runAgent, makeStorableArgs, summarizeArgs, type AiChatMessageBodyWithModelData, type CompactionCheckpoint, type StoredAssistantMessage } from "./agent";
-import { deploymentOutputForBlueprint, FormatOffer, listFormatOffers, readAdminConfig } from "./admin-config";
+import { deploymentOutputForTemplate, FormatOffer, listFormatOffers, readAdminConfig } from "./admin-config";
 import { foldProposedChanges, isCompactionTurn, type ChangeBatch } from "./agent-compaction";
 import { ambientGatekeeperMode } from "./provisioning-policy";
-import { listFeaturedBlueprintsFromKv, readBlueprintContent, readBlueprintKvRecord, sanitizeBlueprintOutput } from "./blueprint-archive";
+import { listFeaturedTemplatesFromKv, readTemplateContent, readTemplateKvRecord, sanitizeTemplateOutput } from "./template-archive";
 import { WebFetchEnv } from "./web-fetch";
 import { UserDurableObject, UserAiModelRecord, type UserChatContext, type WorkspaceOutputEntry } from "./user";
 import { AgentSpawnerBinding } from "./agent-spawner-binding";
@@ -240,11 +240,11 @@ type GatekeeperClass = DurableObjectClass<Gatekeeper<any>>;
 type CatalogGatekeeperFacet =
     Fetcher<Gatekeeper<any> & Required<Pick<Gatekeeper<any>, "getAgentCatalog">>>;
 
-type LegacyBlueprintBindingAnnotation = BlueprintBindingAnnotation & {
+type LegacyTemplateBindingAnnotation = TemplateBindingAnnotation & {
   included?: boolean;
 };
 
-function defaultBlueprintBindingTitle(record: GatekeeperRecord, bindingName?: string): string {
+function defaultTemplateBindingTitle(record: GatekeeperRecord, bindingName?: string): string {
   return record.resourceTitle || bindingName || "Connection";
 }
 
@@ -263,16 +263,16 @@ type GatekeeperRecord = {
   class: GatekeeperClass,
   hook?: string,  // export name to which the gatekeeper's hook is connected
 
-  // Records how this gatekeeper was originally created, enabling blueprint metadata derivation.
+  // Records how this gatekeeper was originally created, enabling template metadata derivation.
   creationSpec?: GatekeeperCreationSpec;
 
   // OBSOLETE: Before we had support for multiple gadgets per workspace, the binding name and
-  // blueprint annotation information lived on the GatekeeperRecord. These properties continue
+  // template annotation information lived on the GatekeeperRecord. These properties continue
   // to be declared only to support migrating them away. The version 0 -> 1 migration copies
   // these into `GadgetRecord.bindings` for the default gadget. (A later migration may delete the
   // originals, or they may just be left around, but if so they are stale.)
   bindingName?: string;
-  blueprintAnnotation?: BlueprintBindingAnnotation;
+  templateAnnotation?: TemplateBindingAnnotation;
 };
 
 function gatekeeperVendorId(record: GatekeeperRecord | undefined): string | undefined {
@@ -285,17 +285,17 @@ function gatekeeperVendorId(record: GatekeeperRecord | undefined): string | unde
 type BindingRecord = {
   target: WorkpieceId;
 
-  // User-provided metadata for how this binding should appear in blueprints. Absence means not
+  // User-provided metadata for how this binding should appear in templates. Absence means not
   // yet configured. This lives on the edge, not on the gatekeeper: two gadgets binding the same
-  // gatekeeper can annotate it differently for their respective blueprints.
-  blueprintAnnotation?: BlueprintBindingAnnotation;
+  // gatekeeper can annotate it differently for their respective templates.
+  templateAnnotation?: TemplateBindingAnnotation;
 
   // Present while the binding edge is provisional: it was added within the given chat and
   // follows that chat's accept/reject lifecycle exactly like code changes and gadget creations
   // (see GadgetRecord.pending, whose stamping and crash-recovery mechanics this mirrors
   // edge-for-edge via the "changes" message's `addedBindings`). A pending edge is real in the
   // registry so the originating chat's own preview/test runs see it, but for *reads* everything
-  // else (mainline loads, other chats, blueprints, "use"-role sharing) treats it as nonexistent.
+  // else (mainline loads, other chats, templates, "use"-role sharing) treats it as nonexistent.
   // For *writes* it still occupies its name: another chat attempting to add the same name on
   // this gadget fails with an explicit error until this chat's changes are accepted or reverted.
   pending?: {chatId: number, sequence?: number};
@@ -309,10 +309,10 @@ type GadgetRecord = {
   title: string;
   created: Date;
 
-  // The output format this gadget was built as, copied from the blueprint it was instantiated
-  // from (see BlueprintMetadata.output). Absent for a gadget built from scratch, which displays as
+  // The output format this gadget was built as, copied from the template it was instantiated
+  // from (see TemplateMetadata.output). Absent for a gadget built from scratch, which displays as
   // a generic app. Purely descriptive: it names and draws the gadget, and confers nothing.
-  output?: BlueprintOutput;
+  output?: TemplateOutput;
 
   // Name of the gadget to use in the workspace's default binding list for new chats. That is, when
   // a new (normal, non-spawner) chat is started, this gadget will be available in its `env` under
@@ -422,16 +422,16 @@ function connectionTypeFromCreationSpec(
   }
 }
 
-// Blueprint record stored in the Overseer DO's `blueprints` collection.
-type BlueprintGadgetRecord = {
+// Template record stored in the Overseer DO's `templates` collection.
+type TemplateGadgetRecord = {
   id: string;
-  metadata: BlueprintMetadata;
+  metadata: TemplateMetadata;
 
-  // Which gadget this blueprint exports. If omitted, use `defaultGadgetId`.
+  // Which gadget this template exports. If omitted, use `defaultGadgetId`.
   gadgetId?: WorkpieceId;
 
   // Version of the workspace code (from the code collection) that was exported into this
-  // blueprint. (The blueprint's snapshot itself contains only this gadget's files.)
+  // template. (The template's snapshot itself contains only this gadget's files.)
   codeVersion: number;
 
   // Set true before propagating to User DO / KV; cleared on success.
@@ -439,15 +439,15 @@ type BlueprintGadgetRecord = {
   dirty?: boolean;
 };
 
-// KV record type for the BLUEPRINTS namespace.
-type BlueprintKvRecord = {
-  metadata: BlueprintMetadata;
+// KV record type for the TEMPLATES namespace.
+type TemplateKvRecord = {
+  metadata: TemplateMetadata;
   ownerId: string;
   gadgetId: string;
 };
 
-// Compact kind label for a blueprint binding, used in agent-facing blueprint listings.
-function describeBindingKind(binding: BlueprintBinding): string {
+// Compact kind label for a template binding, used in agent-facing template listings.
+function describeBindingKind(binding: TemplateBinding): string {
   switch (binding.type) {
     case "gatekeeper": return `external resource: ${binding.gatekeeperName}`;
     case "aiModel": return `AI model`;
@@ -456,13 +456,13 @@ function describeBindingKind(binding: BlueprintBinding): string {
   }
 }
 
-const MAX_BLUEPRINT_SCREENSHOT_BYTES = 1024 * 1024;
-function validateBlueprintScreenshotUpload(screenshot: BlueprintScreenshotUpload): BlueprintScreenshotUpload {
+const MAX_TEMPLATE_SCREENSHOT_BYTES = 1024 * 1024;
+function validateTemplateScreenshotUpload(screenshot: TemplateScreenshotUpload): TemplateScreenshotUpload {
   if (screenshot.mimeType !== "image/jpeg" && screenshot.mimeType !== "image/png") {
-    throw new Error("Blueprint screenshot must be a JPEG or PNG image.");
+    throw new Error("Template screenshot must be a JPEG or PNG image.");
   }
-  if (screenshot.content.byteLength > MAX_BLUEPRINT_SCREENSHOT_BYTES) {
-    throw new Error("Blueprint screenshot must be under 1 MB.");
+  if (screenshot.content.byteLength > MAX_TEMPLATE_SCREENSHOT_BYTES) {
+    throw new Error("Template screenshot must be under 1 MB.");
   }
   return screenshot;
 }
@@ -763,7 +763,7 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
       //       which becomes `defaultGadgetId`. (If the workspace has no code or named bindings,
       //       treat as having zero gadgets.)
       //   1 = multi-gadget: the `gadgets` registry is the source of truth; binding names and
-      //       blueprint annotations live on binding edges; boundHooks/blueprints records carry a
+      //       template annotations live on binding edges; boundHooks/templates records carry a
       //       gadgetId. Additionally (added before the 0 -> 1 migration was ever deployed, so no
       //       new version was minted): gadget records carry a `bindingName` (from which chat
       //       binding-map seeds are derived), and agent-spawner configs hold the new
@@ -788,7 +788,7 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
       // time of upgrade.
       //
       // Aside from when it is set while auto-creating a workspace's first (only) gadget -- during
-      // migration from version 0, or when instantiating a blueprint into a fresh workspace (see
+      // migration from version 0, or when instantiating a template into a fresh workspace (see
       // ensureDefaultGadget) -- `defaultGadgetId` must NEVER be changed. Even if the gadget is
       // deleted, `defaultGadgetId` remains so that old records can be correctly interpreted (as
       // referring to a deleted gadget). Since it can't change after workspace initialization,
@@ -988,7 +988,7 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
         }
       }),
 
-      blueprints: collection<BlueprintGadgetRecord>()({
+      templates: collection<TemplateGadgetRecord>()({
         primaryKey: "id"
       }),
 
@@ -1472,7 +1472,7 @@ class OverseerImpl implements AgentHooks {
     this.ctx.storage.transactionSync(() => {
       // Version 0 -> 1: the workspace predates multi-gadget support. If it has any gadget content
       // (code beyond the initial empty snapshot, or named bindings), register that content as the
-      // workspace's single gadget and record it as the default gadget; binding names and blueprint
+      // workspace's single gadget and record it as the default gadget; binding names and template
       // annotations move from the gatekeeper records onto the gadget's binding edges. (The stale
       // originals are left on the gatekeeper records; see GatekeeperRecord.) A workspace with no
       // gadget content migrates to zero gadgets.
@@ -1500,7 +1500,7 @@ class OverseerImpl implements AgentHooks {
         for (let gk of namedGatekeepers) {
           bindings[gk.bindingName!] = {
             target: gk.id,
-            ...(gk.blueprintAnnotation ? {blueprintAnnotation: gk.blueprintAnnotation} : {}),
+            ...(gk.templateAnnotation ? {templateAnnotation: gk.templateAnnotation} : {}),
           };
         }
         this.storage.gadgets.put({
@@ -1637,10 +1637,10 @@ class OverseerImpl implements AgentHooks {
   // whose records are real and so reserve their name from creation. If `chatId` is given, the
   // gadget is provisional to that chat (see GadgetRecord.pending); the caller is responsible for
   // getting its creation recorded in the chat log so the pending record gets sequence-stamped
-  // (see addChatMessages()). `output` is the format declared by the blueprint being instantiated,
+  // (see addChatMessages()). `output` is the format declared by the template being instantiated,
   // if any.
   createGadget(title: string, bindingName: string, chatId?: number,
-               output?: BlueprintOutput): GadgetRecord {
+               output?: TemplateOutput): GadgetRecord {
     title = title.trim();
     if (!title) {
       throw new Error("A gadget requires a non-empty title.");
@@ -1760,9 +1760,9 @@ class OverseerImpl implements AgentHooks {
 
   // Auto-create the workspace's single gadget and record it as the default gadget. New workspaces
   // normally start with zero gadgets and the agent creates gadgets explicitly (never assigning
-  // `defaultGadgetId`); the exception is blueprint instantiation, which still creates a fresh
+  // `defaultGadgetId`); the exception is template instantiation, which still creates a fresh
   // workspace containing one gadget and is the only remaining caller.
-  // TODO(multi-gadget): Remove once blueprint instantiation is reworked (plan phase 5).
+  // TODO(multi-gadget): Remove once template instantiation is reworked (plan phase 5).
   ensureDefaultGadget(): void {
     if (this.defaultGadgetId !== undefined) return;
     let id = this.allocateWorkpieceId();
@@ -1796,7 +1796,7 @@ class OverseerImpl implements AgentHooks {
   // The gadget's binding edges visible to the given chat: an edge still provisional to some
   // *other* chat belongs to that chat's proposed changes and is treated as nonexistent here.
   // With `forChatId` undefined, only permanent (non-pending) edges are visible (mainline loads,
-  // blueprints, sharing, the Connections UI).
+  // templates, sharing, the Connections UI).
   visibleBindings(gadget: GadgetRecord, forChatId?: number): [string, BindingRecord][] {
     return Object.entries(gadget.bindings).filter(
         ([, edge]) => !edge.pending || edge.pending.chatId === forChatId);
@@ -4932,24 +4932,24 @@ class OverseerImpl implements AgentHooks {
   }
 
   // =======================================================================================
-  // Blueprint helpers
+  // Template helpers
   // =======================================================================================
 
-  // Collect binding metadata from the given gadget's binding edges for blueprint creation/update.
-  collectBindingMetadata(gadgetId: WorkpieceId): Record<string, BlueprintBinding> {
-    let bindings: Record<string, BlueprintBinding> = {};
+  // Collect binding metadata from the given gadget's binding edges for template creation/update.
+  collectBindingMetadata(gadgetId: WorkpieceId): Record<string, TemplateBinding> {
+    let bindings: Record<string, TemplateBinding> = {};
 
     let gadget = this.getGadgetRecord(gadgetId);
     // Only permanent edges: a pending edge belongs to some chat's unaccepted proposal.
     let edges = this.visibleBindings(gadget);
 
-    // For symbolic spawner env references: target workpiece -> the blueprint binding name that
+    // For symbolic spawner env references: target workpiece -> the template binding name that
     // will map to it -- the (first) edge name bound to it, or a spawner-only binding once one is
-    // synthesized below -- so spawner env entries sharing a target share one blueprint binding
-    // (and thus one gatekeeper after instantiation). Only edges that the blueprint actually
+    // synthesized below -- so spawner env entries sharing a target share one template binding
+    // (and thus one gatekeeper after instantiation). Only edges that the template actually
     // exports are registered (see the loop below), so an env entry never names a binding missing
     // from `bindings`. Plus the set of all names claimed so far (every edge name up front, even
-    // ones the blueprint drops, so a synthesized spawner-only binding can never collide with an
+    // ones the template drops, so a synthesized spawner-only binding can never collide with an
     // edge processed later).
     let edgeNameByTarget = new Map<WorkpieceId, string>();
     let takenNames = new Set(edges.map(([name]) => name));
@@ -4968,7 +4968,7 @@ class OverseerImpl implements AgentHooks {
       if (!gk) continue;  // dangling edge (gatekeeper destroyed)
 
       // Singleton gatekeepers (e.g. the Context Library) are auto-provided to every gadget, not
-      // user-configured, so they're excluded from blueprints (re-added automatically on open). This
+      // user-configured, so they're excluded from templates (re-added automatically on open). This
       // also covers an ambient capsule the agent promoted to a named binding via setGadgetBinding.
       if (gk.creationSpec?.type === "ambient") continue;
 
@@ -4976,24 +4976,24 @@ class OverseerImpl implements AgentHooks {
       // description and no resource suggestion. Legacy records may carry an `included:
       // false` flag; honor it for backwards compatibility, but the current UI no longer
       // surfaces an exclusion control.
-      let annotation = edge.blueprintAnnotation as LegacyBlueprintBindingAnnotation | undefined;
+      let annotation = edge.templateAnnotation as LegacyTemplateBindingAnnotation | undefined;
       if (annotation?.included === false) continue;
 
       let spec = gk.creationSpec;
 
       if (!spec) {
         throw new Error(
-          `Binding "${bindingName}" has no creation spec (created before blueprint support).`
+          `Binding "${bindingName}" has no creation spec (created before template support).`
         );
       }
 
-      // This edge is exported, so it can serve as the blueprint binding for its target in spawner
+      // This edge is exported, so it can serve as the template binding for its target in spawner
       // env references. Registered here rather than in a pass over all edges, so that a dropped
       // edge (dangling, ambient, or legacy `included: false`) never lends its name to an env entry.
       if (!edgeNameByTarget.has(edge.target)) edgeNameByTarget.set(edge.target, bindingName);
 
       let base = {
-        title: annotation?.title || defaultBlueprintBindingTitle(gk, bindingName),
+        title: annotation?.title || defaultTemplateBindingTitle(gk, bindingName),
         description: annotation?.description ?? "",
       };
       let suggestValue = annotation?.suggestValue ?? false;
@@ -5039,13 +5039,13 @@ class OverseerImpl implements AgentHooks {
           continue;
         }
         if (this.storage.gadgets.get(target)) {
-          throw new Error(`Cannot create a blueprint: agent spawner binding "${bindingName}" ` +
-              `gives its agents access to another gadget ("${envName}"), which blueprints ` +
+          throw new Error(`Cannot create a template: agent spawner binding "${bindingName}" ` +
+              `gives its agents access to another gadget ("${envName}"), which templates ` +
               `cannot express yet.`);
         }
         let targetGk = this.storage.gatekeepers.get(target);
         if (!targetGk) {
-          throw new Error(`Cannot create a blueprint: agent spawner binding "${bindingName}" ` +
+          throw new Error(`Cannot create a template: agent spawner binding "${bindingName}" ` +
               `gives its agents access to a resource ("${envName}") that no longer exists. ` +
               `Remove it from the spawner's configuration first.`);
         }
@@ -5057,7 +5057,7 @@ class OverseerImpl implements AgentHooks {
           for (let i = 2; takenNames.has(synthName); i++) synthName = `${envName}_${i}`;
           takenNames.add(synthName);
           let synthBase = {
-            title: defaultBlueprintBindingTitle(targetGk, synthName),
+            title: defaultTemplateBindingTitle(targetGk, synthName),
             description: "",
             spawnerOnly: true as const,
           };
@@ -5074,13 +5074,13 @@ class OverseerImpl implements AgentHooks {
           edgeNameByTarget.set(target, synthName);
           env[envName] = {type: "binding", name: synthName};
         } else {
-          throw new Error(`Cannot create a blueprint: agent spawner binding "${bindingName}" ` +
-              `gives its agents access to a resource ("${envName}") of a kind that blueprints ` +
+          throw new Error(`Cannot create a template: agent spawner binding "${bindingName}" ` +
+              `gives its agents access to a resource ("${envName}") of a kind that templates ` +
               `cannot express.`);
         }
       }
 
-      let binding: BlueprintBinding = {
+      let binding: TemplateBinding = {
         ...base,
         type: "agentSpawner",
         env,
@@ -5126,23 +5126,23 @@ class OverseerImpl implements AgentHooks {
     return new Uint8Array(await new Response(cs.readable).arrayBuffer());
   }
 
-  // Propagate a blueprint to User DO, KV, and R2.
+  // Propagate a template to User DO, KV, and R2.
   // If codeSnapshot is provided, it is uploaded to R2. If omitted (metadata-only update),
   // the R2 content is left unchanged.
-  async propagateBlueprint(
-      record: BlueprintGadgetRecord,
+  async propagateTemplate(
+      record: TemplateGadgetRecord,
       codeSnapshot?: Uint8Array,
-      screenshot?: BlueprintScreenshotUpload | null,
+      screenshot?: TemplateScreenshotUpload | null,
   ): Promise<void> {
     if (!this.ownerId) throw new Error("Workspace not initialized.");
 
     // Mark dirty.
     record.dirty = true;
-    this.storage.blueprints.put(record);
+    this.storage.templates.put(record);
 
     // Upload code snapshot to R2 (only when code is being created/updated).
     if (codeSnapshot) {
-      await this.env.BLUEPRINT_CONTENT.put(
+      await this.env.TEMPLATE_CONTENT.put(
         `${record.id}/${record.metadata.version}`,
         codeSnapshot
       );
@@ -5151,11 +5151,11 @@ class OverseerImpl implements AgentHooks {
     if (screenshot !== undefined) {
       if (screenshot === null) {
         delete record.metadata.screenshot;
-        await this.env.BLUEPRINT_CONTENT.delete(`${BLUEPRINT_SCREENSHOT_R2_PREFIX}${record.id}`);
+        await this.env.TEMPLATE_CONTENT.delete(`${TEMPLATE_SCREENSHOT_R2_PREFIX}${record.id}`);
       } else {
         record.metadata.screenshot = true;
-        await this.env.BLUEPRINT_CONTENT.put(
-          `${BLUEPRINT_SCREENSHOT_R2_PREFIX}${record.id}`,
+        await this.env.TEMPLATE_CONTENT.put(
+          `${TEMPLATE_SCREENSHOT_R2_PREFIX}${record.id}`,
           screenshot.content,
           { httpMetadata: { contentType: screenshot.mimeType } },
         );
@@ -5164,50 +5164,50 @@ class OverseerImpl implements AgentHooks {
 
     // Propagate to User DO.
     let owner = this.users.get(this.users.idFromString(this.ownerId));
-    let isFeatured = await owner.updateBlueprint(
+    let isFeatured = await owner.updateTemplate(
       record.id, record.metadata, this.ctx.id.toString()
     );
 
     if (isFeatured) {
-      await this.ctx.exports.AdminSettings.getByName("").syncFeaturedBlueprint({
+      await this.ctx.exports.AdminSettings.getByName("").syncFeaturedTemplate({
         id: record.id,
         metadata: record.metadata,
       });
     }
 
     // Write to KV.
-    let kvRecord: BlueprintKvRecord = {
+    let kvRecord: TemplateKvRecord = {
       metadata: record.metadata,
       ownerId: this.ownerId,
       gadgetId: this.ctx.id.toString(),
     };
-    await this.env.BLUEPRINTS.put(record.id, JSON.stringify(kvRecord));
+    await this.env.TEMPLATES.put(record.id, JSON.stringify(kvRecord));
 
     // Clear dirty flag.
     record.dirty = false;
-    this.storage.blueprints.put(record);
+    this.storage.templates.put(record);
   }
 
-  // Delete a blueprint's propagated data (KV, R2, User DO, local).
-  async deleteBlueprintPropagation(record: BlueprintGadgetRecord): Promise<void> {
+  // Delete a template's propagated data (KV, R2, User DO, local).
+  async deleteTemplatePropagation(record: TemplateGadgetRecord): Promise<void> {
     if (!this.ownerId) throw new Error("Workspace not initialized.");
 
     // Delete from KV first (stops public access).
-    await this.env.BLUEPRINTS.delete(record.id);
+    await this.env.TEMPLATES.delete(record.id);
 
     // Delete all historical versions from R2.
     for (let v = 1; v <= record.metadata.version; v++) {
-      await this.env.BLUEPRINT_CONTENT.delete(`${record.id}/${v}`);
+      await this.env.TEMPLATE_CONTENT.delete(`${record.id}/${v}`);
     }
-    await this.env.BLUEPRINT_CONTENT.delete(`${BLUEPRINT_SCREENSHOT_R2_PREFIX}${record.id}`);
+    await this.env.TEMPLATE_CONTENT.delete(`${TEMPLATE_SCREENSHOT_R2_PREFIX}${record.id}`);
 
     // Delete from User DO.
     let owner = this.users.get(this.users.idFromString(this.ownerId));
-    await this.ctx.exports.AdminSettings.getByName("").deleteFeaturedBlueprint(record.id);
-    await owner.deleteBlueprint(record.id);
+    await this.ctx.exports.AdminSettings.getByName("").deleteFeaturedTemplate(record.id);
+    await owner.deleteTemplate(record.id);
 
     // Delete from local collection.
-    this.storage.blueprints.delete(record.id);
+    this.storage.templates.delete(record.id);
   }
 
   postAgentChatMessage(chatId: number, author: AiChatAuthorInfo, message: string) {
@@ -5745,35 +5745,35 @@ class OverseerImpl implements AgentHooks {
     return result;
   }
 
-  // --- Blueprint hooks for the agent ---
+  // --- Template hooks for the agent ---
 
-  // List the blueprints the turn's initiator could instantiate with createGadget: their own
-  // published blueprints, their blueprint library, and the deployment's featured set. Blueprint
+  // List the templates the turn's initiator could instantiate with createGadget: their own
+  // published templates, their template library, and the deployment's featured set. Template
   // libraries are per-user, so this lists the initiator's -- a collaborator driving the agent gets
   // their own library, not the workspace owner's. There is no search index; these corpora are
   // small, so the formatted text is handed to the model to scan directly.
-  async listAvailableBlueprints(initiator: AiChatAuthorInfo): Promise<string> {
+  async listAvailableTemplates(initiator: AiChatAuthorInfo): Promise<string> {
     // `initiator.id` is an opaque user DO id: the initiating user for "user" turns, the spawning
     // gadget's owner for "gadget" turns (see AiChatAuthorInfo) -- the same resolution
     // executeCodeMode uses for its self-loopback props.
     let userStub = this.users.get(this.users.idFromString(initiator.id));
     let [own, library, featured, formats] = await Promise.all([
-      userStub.listBlueprints(),
-      userStub.listLibraryBlueprints(),
-      listFeaturedBlueprintsFromKv(this.env),
+      userStub.listTemplates(),
+      userStub.listLibraryTemplates(),
+      listFeaturedTemplatesFromKv(this.env),
       this.#listStandardFormats(),
     ]);
 
-    // A blueprint can appear in several lists at once (e.g. in the library and featured); the
+    // A template can appear in several lists at once (e.g. in the library and featured); the
     // first source to claim an id wins.
     let seen = new Set<string>();
     let sections: string[] = [];
     let add = (id: string, title: string, source: string, description: string,
-               bindings?: Record<string, BlueprintBinding>) => {
+               bindings?: Record<string, TemplateBinding>) => {
       if (seen.has(id)) return;
       seen.add(id);
       let lines = [
-        `* blueprintId: ${id}`,
+        `* templateId: ${id}`,
         `  ${JSON.stringify(title)} — ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
@@ -5791,27 +5791,27 @@ class OverseerImpl implements AgentHooks {
     for (let format of formats) {
       let source = `a standard format on this deployment` +
           (format.agentHint ? ` -- ${format.agentHint}` : ``);
-      add(format.blueprintId, format.output.noun, source, format.description, format.bindings);
+      add(format.templateId, format.output.noun, source, format.description, format.bindings);
     }
 
-    for (let blueprint of own) {
-      // BlueprintUserSummary carries no binding metadata; createGadget's output describes the
+    for (let template of own) {
+      // TemplateUserSummary carries no binding metadata; createGadget's output describes the
       // bindings after instantiation.
-      add(blueprint.id, blueprint.title, `published by you`, blueprint.description);
+      add(template.id, template.title, `published by you`, template.description);
     }
-    for (let blueprint of library) {
-      add(blueprint.id, blueprint.metadata.title, `in your library`,
-          blueprint.metadata.description, blueprint.metadata.bindings);
+    for (let template of library) {
+      add(template.id, template.metadata.title, `in your library`,
+          template.metadata.description, template.metadata.bindings);
     }
-    for (let blueprint of featured) {
-      add(blueprint.id, blueprint.metadata.title, `featured on this deployment`,
-          blueprint.metadata.description, blueprint.metadata.bindings);
+    for (let template of featured) {
+      add(template.id, template.metadata.title, `featured on this deployment`,
+          template.metadata.description, template.metadata.bindings);
     }
 
     if (sections.length === 0) {
-      return "No blueprints are available to this user.";
+      return "No templates are available to this user.";
     }
-    let preamble = `Blueprints available to instantiate (pass the blueprintId to createGadget)`;
+    let preamble = `Templates available to instantiate (pass the templateId to createGadget)`;
     if (formats.length > 0) {
       preamble += `. The standard formats are listed first: when the user asks for something one ` +
           `of them produces, instantiate it rather than building an equivalent from scratch`;
@@ -5820,7 +5820,7 @@ class OverseerImpl implements AgentHooks {
   }
 
   // A short standing note about the deployment's standard formats, for the system prompt. Carried
-  // on every turn because "make me a quick doc" doesn't prompt an agent to call `listBlueprints`.
+  // on every turn because "make me a quick doc" doesn't prompt an agent to call `listTemplates`.
   async describeStandardFormats(): Promise<string> {
     let formats = await this.#listStandardFormats();
     if (formats.length === 0) return "";
@@ -5828,15 +5828,15 @@ class OverseerImpl implements AgentHooks {
     // No worked examples: the nouns are the deployment's, listed below, and may be plural.
     return `# Standard output formats\n\n` +
         `This deployment offers these as ready-made outputs, and users ask for them by name. When ` +
-        `the user asks for something one of them produces, instantiate that blueprint with ` +
+        `the user asks for something one of them produces, instantiate that template with ` +
         `\`createGadget\` rather than writing an equivalent from scratch -- including when the ` +
         `workspace already contains Gadgets, since the user is asking for a new output alongside ` +
         `them rather than for an existing one to be repurposed. If the Gadget they are talking ` +
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) — blueprintId: ` +
-            `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
+            `* ${format.output.noun} (plural: ${format.output.plural}) — templateId: ` +
+            `${format.templateId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
   // The deployment's standard output formats, as offered to the user (see listFormatOffers) plus
@@ -5852,20 +5852,20 @@ class OverseerImpl implements AgentHooks {
     }
   }
 
-  // Fetch a blueprint's decoded files, plus formatted notes describing what was copied and which
-  // bindings the blueprint's code expects the agent to wire up, for instantiation as a new gadget
-  // by the agent's createGadget tool. Blueprint ids are bearer capabilities (like blueprint share
+  // Fetch a template's decoded files, plus formatted notes describing what was copied and which
+  // bindings the template's code expects the agent to wire up, for instantiation as a new gadget
+  // by the agent's createGadget tool. Template ids are bearer capabilities (like template share
   // links), so possession of the id is sufficient to read it. Throws agent-readable errors.
-  async fetchBlueprint(blueprintId: string)
-      : Promise<{files: Record<string, string>, notes: string, output?: BlueprintOutput}> {
-    let kvRecord = await readBlueprintKvRecord(this.env, blueprintId);
+  async fetchTemplate(templateId: string)
+      : Promise<{files: Record<string, string>, notes: string, output?: TemplateOutput}> {
+    let kvRecord = await readTemplateKvRecord(this.env, templateId);
     if (!kvRecord) {
-      throw new Error(`No such blueprint: ${blueprintId}. Use listBlueprints to see available ` +
-          `blueprints.`);
+      throw new Error(`No such template: ${templateId}. Use listTemplates to see available ` +
+          `templates.`);
     }
-    let code = await readBlueprintContent(this.env, blueprintId, kvRecord.metadata.version);
+    let code = await readTemplateContent(this.env, templateId, kvRecord.metadata.version);
     if (!code) {
-      throw new Error(`The content of blueprint ${blueprintId} is missing; it cannot be ` +
+      throw new Error(`The content of template ${templateId} is missing; it cannot be ` +
           `instantiated.`);
     }
 
@@ -5879,12 +5879,12 @@ class OverseerImpl implements AgentHooks {
     }
 
     // Apply the deployment's overrides, so a gadget the agent builds is labelled the same as one
-    // the user makes from the New menu (see newGadgetFromBlueprint, which does the same).
-    let output = deploymentOutputForBlueprint(await readAdminConfig(this.env), blueprintId,
-        sanitizeBlueprintOutput(kvRecord.metadata.output));
+    // the user makes from the New menu (see newGadgetFromTemplate, which does the same).
+    let output = deploymentOutputForTemplate(await readAdminConfig(this.env), templateId,
+        sanitizeTemplateOutput(kvRecord.metadata.output));
 
-    let lines = [`Created the new gadget from blueprint ` +
-        `${JSON.stringify(kvRecord.metadata.title)} (blueprintId ${blueprintId}).`];
+    let lines = [`Created the new gadget from template ` +
+        `${JSON.stringify(kvRecord.metadata.title)} (templateId ${templateId}).`];
     if (output) {
       lines.push(`It produces a ${output.noun}; the new gadget is labelled as one throughout the ` +
           `UI.`);
@@ -5894,14 +5894,14 @@ class OverseerImpl implements AgentHooks {
     lines.push("", filenames.length > 0
         ? `Files copied into the new gadget: ${filenames.join(", ")}. Use readFile to inspect ` +
           `them before editing.`
-        : `The blueprint contained no files, so the new gadget is empty.`);
+        : `The template contained no files, so the new gadget is empty.`);
 
     let bindings = Object.entries(kvRecord.metadata.bindings);
     if (bindings.length === 0) {
-      lines.push("", `The blueprint requires no bindings.`);
+      lines.push("", `The template requires no bindings.`);
     } else {
       lines.push("",
-          `The blueprint's code expects the following bindings, which the new gadget does not ` +
+          `The template's code expects the following bindings, which the new gadget does not ` +
           `have yet. Wire up each one under the exact binding name given. For external ` +
           `resources, use setGadgetBinding on the new gadget (first requesting a connection via ` +
           `requestConnection if your env doesn't already hold a suitable resource). AI-model ` +
@@ -5914,7 +5914,7 @@ class OverseerImpl implements AgentHooks {
             details = `external resource via the "${binding.gatekeeperName}" gatekeeper; ` +
                 `resource URL pattern ${JSON.stringify(binding.typeUrlPattern)}` +
                 (binding.resourceUrl
-                    ? `; the blueprint author suggests ${JSON.stringify(binding.resourceUrl)}`
+                    ? `; the template author suggests ${JSON.stringify(binding.resourceUrl)}`
                     : ``);
             break;
           case "aiModel":
@@ -6756,20 +6756,20 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Initialize this workspace's default gadget from a blueprint's code snapshot. Called by
-   * AuthenticatedApi.newGadgetFromBlueprint() after creating (and opening) the DO.
+   * Initialize this workspace's default gadget from a template's code snapshot. Called by
+   * AuthenticatedApi.newGadgetFromTemplate() after creating (and opening) the DO.
    */
-  async initializeFromBlueprint(code: Uint8Array, title: string, output?: BlueprintOutput)
+  async initializeFromTemplate(code: Uint8Array, title: string, output?: TemplateOutput)
       : Promise<void> {
     // Set the title. The default gadget (created just below) inherits it.
     this.impl.storage.title.put(title);
 
-    // Blueprint instantiation still creates a fresh workspace containing one auto-created gadget,
+    // Template instantiation still creates a fresh workspace containing one auto-created gadget,
     // recorded as the default gadget (see ensureDefaultGadget).
     this.impl.ensureDefaultGadget();
     let gadgetId = this.impl.resolveGadgetId(undefined);
 
-    // The gadget inherits the blueprint's declared format, so it is named and drawn as a Document
+    // The gadget inherits the template's declared format, so it is named and drawn as a Document
     // (or whatever it produces) rather than a generic app.
     if (output) {
       let record = this.impl.getGadgetRecord(gadgetId);
@@ -6777,7 +6777,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
       this.impl.storage.gadgets.put(record);
     }
 
-    // Copy the blueprint's files into the gadget's files root. Root names don't transfer via Yjs
+    // Copy the template's files into the gadget's files root. Root names don't transfer via Yjs
     // updates -- the archive always uses the unnamed root "" while the destination gadget may own
     // any root -- so we copy file-by-file rather than applying the archive update directly.
     let archiveDoc = new Y.Doc();
@@ -7702,7 +7702,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       creatorUserId: this.#clientUser.id.toString(),
     };
 
-    // Resolve model provider/name for blueprint metadata.
+    // Resolve model provider/name for template metadata.
     let creationSpec: GatekeeperCreationSpec = {
       type: "agentSpawner",
       config,
@@ -8705,11 +8705,11 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     return this.impl.subscribeToConsoleLogs(subscriber);
   }
 
-  // --- Blueprint management ---
+  // --- Template management ---
 
-  async listBlueprints(): Promise<BlueprintGadgetSummary[]> {
-    let result: BlueprintGadgetSummary[] = [];
-    for (let record of this.impl.storage.blueprints.list()) {
+  async listTemplates(): Promise<TemplateGadgetSummary[]> {
+    let result: TemplateGadgetSummary[] = [];
+    for (let record of this.impl.storage.templates.list()) {
       // Look up the timestamp of the exported code version.
       let codeUpdate = this.impl.storage.code.get(record.codeVersion);
       result.push({
@@ -8718,22 +8718,22 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
         description: record.metadata.description,
         version: record.metadata.version,
         codeVersionDate: codeUpdate?.timestamp ?? record.metadata.lastUpdated,
-        screenshotUrl: blueprintScreenshotUrl(record.id, record.metadata),
+        screenshotUrl: templateScreenshotUrl(record.id, record.metadata),
         dirty: record.dirty,
       });
     }
     return result;
   }
 
-  async updateBlueprint(blueprintId: string, options: {
+  async updateTemplate(templateId: string, options: {
     title?: string;
     description?: string;
     updateCode?: boolean;
     updateBindings?: boolean;
-    screenshot?: BlueprintScreenshotUpload | null;
+    screenshot?: TemplateScreenshotUpload | null;
   }): Promise<void> {
-    let record = this.impl.storage.blueprints.get(blueprintId);
-    if (!record) throw new Error("No such blueprint.");
+    let record = this.impl.storage.templates.get(templateId);
+    if (!record) throw new Error("No such template.");
 
     if (options.title === undefined && options.description === undefined && !options.updateCode && !options.updateBindings && options.screenshot === undefined) {
       throw new Error("At least one update option must be provided.");
@@ -8761,36 +8761,36 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
 
     let screenshot = options.screenshot === undefined
       ? undefined
-      : options.screenshot === null ? null : validateBlueprintScreenshotUpload(options.screenshot);
+      : options.screenshot === null ? null : validateTemplateScreenshotUpload(options.screenshot);
 
     record.metadata.lastUpdated = new Date();
 
-    await this.impl.propagateBlueprint(record, codeSnapshot, screenshot);
+    await this.impl.propagateTemplate(record, codeSnapshot, screenshot);
   }
 
-  async deleteBlueprint(blueprintId: string): Promise<void> {
-    let record = this.impl.storage.blueprints.get(blueprintId);
-    if (!record) throw new Error("No such blueprint.");
+  async deleteTemplate(templateId: string): Promise<void> {
+    let record = this.impl.storage.templates.get(templateId);
+    if (!record) throw new Error("No such template.");
 
     try {
-      await this.impl.deleteBlueprintPropagation(record);
+      await this.impl.deleteTemplatePropagation(record);
     } catch (err) {
       // If deletion fails partway through, mark as dirty so the user can retry.
       record.dirty = true;
-      this.impl.storage.blueprints.put(record);
+      this.impl.storage.templates.put(record);
       throw err;
     }
   }
 
-  async retryBlueprintPublish(blueprintId: string): Promise<void> {
-    let record = this.impl.storage.blueprints.get(blueprintId);
-    if (!record) throw new Error("No such blueprint.");
+  async retryTemplatePublish(templateId: string): Promise<void> {
+    let record = this.impl.storage.templates.get(templateId);
+    if (!record) throw new Error("No such template.");
     if (!record.dirty) return;  // nothing to retry
 
     // Reconstruct the code snapshot at the original codeVersion, not the current code.
     let codeSnapshot = await this.impl.snapshotCode(
         this.impl.resolveGadgetId(record.gadgetId), record.codeVersion);
-    await this.impl.propagateBlueprint(record, codeSnapshot);
+    await this.impl.propagateTemplate(record, codeSnapshot);
   }
 
   // --- Collaborator management ---
@@ -9168,16 +9168,16 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
       [Symbol.dispose]() {}
     });
   }
-  async listBlueprints(): Promise<BlueprintGadgetSummary[]> { this.#deny(); }
-  async updateBlueprint(_blueprintId: string, _options: {
+  async listTemplates(): Promise<TemplateGadgetSummary[]> { this.#deny(); }
+  async updateTemplate(_templateId: string, _options: {
     title?: string;
     description?: string;
     updateCode?: boolean;
     updateBindings?: boolean;
-    screenshot?: BlueprintScreenshotUpload | null;
+    screenshot?: TemplateScreenshotUpload | null;
   }): Promise<void> { this.#deny(); }
-  async deleteBlueprint(_blueprintId: string): Promise<void> { this.#deny(); }
-  async retryBlueprintPublish(_blueprintId: string): Promise<void> { this.#deny(); }
+  async deleteTemplate(_templateId: string): Promise<void> { this.#deny(); }
+  async retryTemplatePublish(_templateId: string): Promise<void> { this.#deny(); }
   async listObserverRequirements(
       _role: CollaboratorRole): Promise<ObserverBindingNeed[]> { this.#deny(); }
   async listCollaborators(): Promise<CollaboratorInfo[]> { this.#deny(); }
@@ -9364,47 +9364,47 @@ class GadgetClientImpl extends RpcTarget implements GadgetClient {
     return {record, edge};
   }
 
-  async getBlueprintAnnotation(name: string): Promise<BlueprintBindingAnnotation | null> {
+  async getTemplateAnnotation(name: string): Promise<TemplateBindingAnnotation | null> {
     let {edge} = this.#getBindingEdge(name);
-    let annotation = edge.blueprintAnnotation;
+    let annotation = edge.templateAnnotation;
     if (!annotation) return null;
     let gatekeeper = this.impl.storage.gatekeepers.get(edge.target);
     return {
       title: annotation.title ||
-          (gatekeeper ? defaultBlueprintBindingTitle(gatekeeper, name) : name),
+          (gatekeeper ? defaultTemplateBindingTitle(gatekeeper, name) : name),
       description: annotation.description ?? "",
       suggestValue: annotation.suggestValue,
     };
   }
 
-  async setBlueprintAnnotation(name: string, annotation: BlueprintBindingAnnotation)
+  async setTemplateAnnotation(name: string, annotation: TemplateBindingAnnotation)
       : Promise<void> {
     let {record, edge} = this.#getBindingEdge(name);
     let gatekeeper = this.impl.storage.gatekeepers.get(edge.target);
-    edge.blueprintAnnotation = {
+    edge.templateAnnotation = {
       title: annotation.title.trim() ||
-          (gatekeeper ? defaultBlueprintBindingTitle(gatekeeper, name) : name),
+          (gatekeeper ? defaultTemplateBindingTitle(gatekeeper, name) : name),
       description: annotation.description,
       suggestValue: annotation.suggestValue,
     };
     this.impl.storage.gadgets.put(record);
   }
 
-  async createBlueprint(title?: string, description?: string,
-                        screenshotUpload?: BlueprintScreenshotUpload)
-      : Promise<BlueprintGadgetSummary> {
+  async createTemplate(title?: string, description?: string,
+                        screenshotUpload?: TemplateScreenshotUpload)
+      : Promise<TemplateGadgetSummary> {
     if (!this.impl.ownerId) throw new Error("Workspace not initialized.");
 
-    // NOTE: It is INTENTIONAL that collaborators can publish blueprints on behalf of the owner.
+    // NOTE: It is INTENTIONAL that collaborators can publish templates on behalf of the owner.
     //   We may in the future create different collaborator permission levels, in which case we'd
     //   need an auth check here and the following methods.
 
     let gadget = this.impl.getGadgetRecord(this.id);
     if (gadget.pending) {
       // A provisional gadget's files live only in its chat's proposed changes; snapshotting its
-      // (empty) mainline code would produce a useless blueprint.
+      // (empty) mainline code would produce a useless template.
       throw new Error("This gadget is a provisional creation in a chat. Accept the chat's " +
-          "changes before creating a blueprint from it.");
+          "changes before creating a template from it.");
     }
 
     // Generate 128-bit random ID as hex.
@@ -9422,7 +9422,7 @@ class GadgetClientImpl extends RpcTarget implements GadgetClient {
     let codeVersion = this.impl.storage.codeVersion.get();
     let now = new Date();
 
-    let metadata: BlueprintMetadata = {
+    let metadata: TemplateMetadata = {
       title: title || gadget.title,
       description: description || "",
       author: ownerProfile,
@@ -9432,29 +9432,29 @@ class GadgetClientImpl extends RpcTarget implements GadgetClient {
       bindings,
     };
 
-    // Republishing preserves the format: a blueprint made from a Document still produces
+    // Republishing preserves the format: a template made from a Document still produces
     // Documents.
     if (gadget.output) {
       metadata.output = gadget.output;
     }
 
-    let record: BlueprintGadgetRecord = {
+    let record: TemplateGadgetRecord = {
       id,
       metadata,
       gadgetId: this.id,
       codeVersion,
     };
 
-    let screenshot = screenshotUpload ? validateBlueprintScreenshotUpload(screenshotUpload) : undefined;
+    let screenshot = screenshotUpload ? validateTemplateScreenshotUpload(screenshotUpload) : undefined;
 
     // Snapshot current code and propagate to User DO, KV, R2.
     let codeSnapshot = await this.impl.snapshotCode(this.id);
-    await this.impl.propagateBlueprint(record, codeSnapshot, screenshot);
+    await this.impl.propagateTemplate(record, codeSnapshot, screenshot);
 
     this.impl.recordGadgetAnalytics({
-      event_name: "blueprint_created",
+      event_name: "template_created",
       user_id: this.#clientUser.id.toString(),
-      blueprint_id: id,
+      template_id: id,
     });
 
     // Derive codeVersionDate from the code collection.
@@ -9466,7 +9466,7 @@ class GadgetClientImpl extends RpcTarget implements GadgetClient {
       description: metadata.description,
       version: metadata.version,
       codeVersionDate: codeUpdate?.timestamp ?? now,
-      screenshotUrl: blueprintScreenshotUrl(id, metadata),
+      screenshotUrl: templateScreenshotUrl(id, metadata),
       dirty: record.dirty,
     };
   }
@@ -9549,13 +9549,13 @@ class UseGadgetClientInterface extends RpcTarget implements GadgetClient {
   async bindWithSuggestedName(_target: WorkpieceId): Promise<string> { this.#deny(); }
   async unbind(_name: string): Promise<void> { this.#deny(); }
   async renameBinding(_oldName: string, _newName: string): Promise<void> { this.#deny(); }
-  async getBlueprintAnnotation(_name: string): Promise<BlueprintBindingAnnotation | null> {
+  async getTemplateAnnotation(_name: string): Promise<TemplateBindingAnnotation | null> {
     this.#deny();
   }
-  async setBlueprintAnnotation(_name: string, _annotation: BlueprintBindingAnnotation)
+  async setTemplateAnnotation(_name: string, _annotation: TemplateBindingAnnotation)
       : Promise<void> { this.#deny(); }
-  async createBlueprint(_title?: string, _description?: string,
-                        _screenshot?: BlueprintScreenshotUpload): Promise<BlueprintGadgetSummary> {
+  async createTemplate(_title?: string, _description?: string,
+                        _screenshot?: TemplateScreenshotUpload): Promise<TemplateGadgetSummary> {
     this.#deny();
   }
 }
@@ -9614,7 +9614,7 @@ class GatekeeperClientImpl<Session extends RpcCompatible<Session>>
   async getCreationSpec(): Promise<GatekeeperCreationSpec> {
     let record = this.#getRecord();
     if (!record.creationSpec) {
-      throw new Error("This gatekeeper has no creation spec (created before blueprint support).");
+      throw new Error("This gatekeeper has no creation spec (created before template support).");
     }
     return record.creationSpec;
   }

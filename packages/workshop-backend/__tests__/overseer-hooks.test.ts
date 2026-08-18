@@ -13,7 +13,7 @@ function makeOverseer(
 ): OverseerDurableObject {
   let overseer = Object.create(OverseerDurableObject.prototype) as OverseerDurableObject;
   Object.assign(overseer, {
-    env: { BLUEPRINTS: { get: getConfig } },
+    env: { TEMPLATES: { get: getConfig } },
     impl: {
       storage: {
         boundHooks: { get: () => hook && ({ ...hook, gatekeeperId: 1 }) },

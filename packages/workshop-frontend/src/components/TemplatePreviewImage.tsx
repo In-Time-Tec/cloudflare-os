@@ -1,13 +1,13 @@
 import { Hexagon } from '@phosphor-icons/react'
-import { getGradient } from './BlueprintCard'
+import { getGradient } from './TemplateCard'
 
-export function BlueprintPreviewImage({
-  blueprintId,
+export function TemplatePreviewImage({
+  templateId,
   title,
   screenshotUrl,
   className,
 }: {
-  blueprintId: string
+  templateId: string
   title: string
   screenshotUrl?: string
   className?: string
@@ -22,13 +22,13 @@ export function BlueprintPreviewImage({
           loading="lazy"
         />
       ) : (
-        <BlueprintPreviewPlaceholder id={blueprintId} />
+        <TemplatePreviewPlaceholder id={templateId} />
       )}
     </div>
   )
 }
 
-export function BlueprintPreviewPlaceholder({ id }: { id: string }) {
+export function TemplatePreviewPlaceholder({ id }: { id: string }) {
   return (
     <div className="relative aspect-[16/9] overflow-hidden bg-kumo-base">
       <div className={`absolute inset-0 bg-gradient-to-br ${getGradient(id)} opacity-[0.08]`} />

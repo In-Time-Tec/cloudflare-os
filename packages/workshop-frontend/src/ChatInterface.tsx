@@ -51,7 +51,7 @@ import {
   MagnifyingGlass,
   Question,
   ArrowUpRight,
-  Blueprint,
+  Blueprint as BlueprintIcon,
 } from "@phosphor-icons/react";
 import { RpcStub, RpcTarget } from "capnweb";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -80,7 +80,7 @@ import {
   ChatAttachmentHandle,
   ChatAttachmentRef,
   WorkpieceId,
-  BlueprintOutput,
+  TemplateOutput,
   MessageFormatRef,
   OutputIcon,
   OutputFormatOffer,
@@ -143,9 +143,9 @@ type CreatedGadgetCardInfo = {
   title: string;
   isPending: boolean;
 
-  // The output format this gadget was built as, inherited from the blueprint it came from.
+  // The output format this gadget was built as, inherited from the template it came from.
   // Absent for a gadget built from scratch, which reads as a generic app.
-  output?: BlueprintOutput;
+  output?: TemplateOutput;
 };
 
 function CreatedGadgetChatCard({
@@ -640,14 +640,14 @@ function formatGadgetBindingTarget(
 
 // Convert raw tool calls into user-facing transcript labels.
 // What a `createGadget` call produced. Read from the gadget's own stamped output rather than
-// re-derived from the blueprint, so any blueprint declaring a format counts, not just promoted
+// re-derived from the template, so any template declaring a format counts, not just promoted
 // ones. Undefined for a plain gadget, a still-streaming call, or a log predating formats.
-type ToolOutputResolver = (tc: AiToolCall) => BlueprintOutput | undefined;
+type ToolOutputResolver = (tc: AiToolCall) => TemplateOutput | undefined;
 
 export function resolveToolCallOutput(
   tc: AiToolCall,
-  outputOfWorkpiece: (gadgetId: WorkpieceId) => BlueprintOutput | undefined,
-): BlueprintOutput | undefined {
+  outputOfWorkpiece: (gadgetId: WorkpieceId) => TemplateOutput | undefined,
+): TemplateOutput | undefined {
   if (tc.toolName !== "createGadget") return undefined;
   const gadgetId = (tc.output as { gadgetId?: unknown } | undefined)?.gadgetId;
   return typeof gadgetId === "number" ? outputOfWorkpiece(gadgetId) : undefined;
@@ -715,8 +715,8 @@ function getToolCallSummary(
     }
     case "observeUserChanges":
       return { verb: "Observed user changes" };
-    case "listBlueprints":
-      return { verb: "Listed blueprints" };
+    case "listTemplates":
+      return { verb: "Listed templates" };
     case "listConnectableResources":
       return { verb: "Listed connectable resources", target: tc.input.vendorId };
     case "requestConnection":
@@ -794,8 +794,8 @@ function describeToolCallCount(toolName: AiToolCall["toolName"], count: number):
       return `Observed ${pluralize(count, "change set")}`;
     case "giveUp":
       return count === 1 ? "Stopped" : `Stopped ${count} times`;
-    case "listBlueprints":
-      return `Listed blueprints`;
+    case "listTemplates":
+      return `Listed templates`;
     case "listConnectableResources":
       return `Listed connectable resources`;
     case "requestConnection":
@@ -808,7 +808,7 @@ function describeToolCallCount(toolName: AiToolCall["toolName"], count: number):
 // `output` names a format when the call is known to be producing one, so the row can use its icon.
 function getToolIcon(
   toolName: AiToolCall["toolName"] | null | undefined,
-  output?: BlueprintOutput,
+  output?: TemplateOutput,
 ): PhosphorIcon {
   if (output) return FORMAT_ICONS[output.icon];
   switch (toolName) {
@@ -829,8 +829,8 @@ function getToolIcon(
       return LinkSimple;
     case "createGadget":
       return Plus;
-    case "listBlueprints":
-      return Blueprint;
+    case "listTemplates":
+      return BlueprintIcon;
     case "observeUserChanges":
       return MagnifyingGlass;
     case "giveUp":
@@ -890,7 +890,7 @@ function getProvisionalToolVerb(toolName: AiToolCall["toolName"]): string {
     case "webFetch": return "Fetching";
     case "observeUserChanges": return "Observing user changes";
     case "giveUp": return "Stopping";
-    case "listBlueprints": return "Listing blueprints";
+    case "listTemplates": return "Listing templates";
     case "listConnectableResources": return "Listing connectable resources";
     case "requestConnection": return "Requesting a connection";
   }
@@ -914,7 +914,7 @@ function describeProvisionalToolCount(toolName: AiToolCall["toolName"], count: n
     case "createGadget": return `Creating ${pluralize(count, "gadget")}`;
     case "observeUserChanges": return `Observing ${pluralize(count, "change set")}`;
     case "giveUp": return "Stopping";
-    case "listBlueprints": return "Listing blueprints";
+    case "listTemplates": return "Listing templates";
     case "listConnectableResources": return "Listing connectable resources";
     case "requestConnection": return `Requesting ${pluralize(count, "connection")}`;
   }
@@ -4339,7 +4339,7 @@ interface ChatInterfaceProps {
 
   // The output format a workpiece was built as, so a created-app card can name and draw it as the
   // Document (or whatever) it is rather than a generic app.
-  outputOfWorkpiece: (gadgetId: WorkpieceId) => BlueprintOutput | undefined;
+  outputOfWorkpiece: (gadgetId: WorkpieceId) => TemplateOutput | undefined;
   initialChats?: AiChatMetadata[];
   initialModels?: AiChatAuthorInfo[];
   initialHistory?: { chatId: number; page: AiChatHistoryPage };
@@ -4417,9 +4417,9 @@ type ProvisionalToolCallState = {
   toolName: AiToolCall["toolName"] | null;
   // Human-readable target (e.g. filename) once known from the streaming input.
   target?: string;
-  // For createGadget: what it is producing, once the server has resolved the blueprint. Tool inputs
+  // For createGadget: what it is producing, once the server has resolved the template. Tool inputs
   // aren't streamed, so this is the only way the row can name a Doc while it is still being made.
-  outputFormat?: BlueprintOutput;
+  outputFormat?: TemplateOutput;
   code: string;
   output: string;
   finished: boolean;

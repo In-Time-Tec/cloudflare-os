@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
-  Blueprint,
+  Blueprint as BlueprintIcon,
   MagnifyingGlass,
   Plus,
   SquaresFour,
@@ -11,7 +11,7 @@ import { useAuthenticatedApi } from '../../AuthContext'
 import type { OutputFormatOffer } from '@gadgets/workshop-shared/api'
 import { FormatGlyph } from '../format/FormatVisuals'
 import { createFromFormat } from '../format/useOutputFormats'
-import { useGadgets, useLibraryBlueprints, useOutputFormatsQuery, useOwnBlueprints } from '../../query/hooks'
+import { useGadgets, useLibraryTemplates, useOutputFormatsQuery, useOwnTemplates } from '../../query/hooks'
 import { asTime } from '../../query/time'
 
 // A ⌘K command palette: jump to a workspace or a primary destination. Because it's keyboard-driven
@@ -27,19 +27,19 @@ type Command = {
   run: () => void
 }
 
-type BlueprintEntry = { id: string; title: string; recency: number }
+type TemplateEntry = { id: string; title: string; recency: number }
 
-// Merge the user's published blueprints and their library into a single de-duplicated list, keyed
+// Merge the user's published templates and their library into a single de-duplicated list, keyed
 // by id and keeping the most-recent timestamp from either source.
-function mergeBlueprints(
+function mergeTemplates(
   own: { id: string; title: string; lastUpdated: Date }[],
   library: { id: string; metadata: { title: string }; addedAt: Date }[],
-): BlueprintEntry[] {
-  const map = new Map<string, BlueprintEntry>()
+): TemplateEntry[] {
+  const map = new Map<string, TemplateEntry>()
   for (const b of library) {
     map.set(b.id, {
       id: b.id,
-      title: b.metadata.title || 'Untitled blueprint',
+      title: b.metadata.title || 'Untitled template',
       recency: b.addedAt.getTime(),
     })
   }
@@ -47,7 +47,7 @@ function mergeBlueprints(
     const prev = map.get(b.id)
     map.set(b.id, {
       id: b.id,
-      title: b.title || prev?.title || 'Untitled blueprint',
+      title: b.title || prev?.title || 'Untitled template',
       recency: Math.max(prev?.recency ?? 0, b.lastUpdated.getTime()),
     })
   }
@@ -135,12 +135,12 @@ export default function CommandPalette({
   const navigate = useNavigate()
   const toasts = useKumoToastManager()
   const { data: gadgets = [] } = useGadgets()
-  const { data: ownBlueprints = [] } = useOwnBlueprints()
-  const { data: libraryBlueprints = [] } = useLibraryBlueprints()
+  const { data: ownTemplates = [] } = useOwnTemplates()
+  const { data: libraryTemplates = [] } = useLibraryTemplates()
   const { data: formats = [] } = useOutputFormatsQuery()
-  const blueprints = useMemo(
-    () => mergeBlueprints(ownBlueprints, libraryBlueprints),
-    [ownBlueprints, libraryBlueprints],
+  const templates = useMemo(
+    () => mergeTemplates(ownTemplates, libraryTemplates),
+    [ownTemplates, libraryTemplates],
   )
 
   const [query, setQuery] = useState('')
@@ -181,7 +181,7 @@ export default function CommandPalette({
     // One entry per standard format. "New workspace" remains the first action because it is the
     // general starting point; the format shortcuts follow it in the admin's configured order.
     const formatCommands: Command[] = formats.map((format) => ({
-      id: `format-${format.blueprintId}`,
+      id: `format-${format.templateId}`,
       label: `New ${format.output.noun}`,
       hint: 'Format',
       icon: <FormatGlyph output={format.output} size="md" />,
@@ -203,9 +203,9 @@ export default function CommandPalette({
         run: () => navigate({ to: '/workspaces' }),
       },
       {
-        id: 'nav-blueprints',
-        label: 'Blueprints',
-        icon: <Blueprint size={15} />,
+        id: 'nav-templates',
+        label: 'Templates',
+        icon: <BlueprintIcon size={15} />,
         run: () => navigate({ to: '/explore' }),
       },
     ]
@@ -220,14 +220,14 @@ export default function CommandPalette({
         run: () => navigate({ to: '/workspace/$id', params: { id: g.id } }),
       }))
 
-    const bpBase: Command[] = blueprints
+    const bpBase: Command[] = templates
       .toSorted((a, b) => b.recency - a.recency)
       .map((b) => ({
         id: `bp-${b.id}`,
         label: b.title,
-        hint: 'Blueprint',
-        icon: <Blueprint size={15} className="text-kumo-inactive" />,
-        run: () => navigate({ to: '/blueprint/$id', params: { id: b.id } }),
+        hint: 'Template',
+        icon: <BlueprintIcon size={15} className="text-kumo-inactive" />,
+        run: () => navigate({ to: '/template/$id', params: { id: b.id } }),
       }))
 
     // Empty state shows a short, curated list (actions + a few recent workspaces). Once the user
@@ -247,7 +247,7 @@ export default function CommandPalette({
       ? [
           { heading: 'Actions', items: refine(nav, nav.length) },
           { heading: 'Workspaces', items: refine(wsBase, 8) },
-          { heading: 'Blueprints', items: refine(bpBase, 8) },
+          { heading: 'Templates', items: refine(bpBase, 8) },
         ]
       : [
           { heading: 'Actions', items: refine(nav, nav.length) },
@@ -257,7 +257,7 @@ export default function CommandPalette({
     const groups = built.filter((g) => g.items.length > 0)
     const flat = groups.flatMap((g) => g.items)
     return { groups, flat }
-  }, [query, gadgets, blueprints, formats, navigate, createFormat])
+  }, [query, gadgets, templates, formats, navigate, createFormat])
 
   // Keep the active index in range as the result set changes.
   useEffect(() => {

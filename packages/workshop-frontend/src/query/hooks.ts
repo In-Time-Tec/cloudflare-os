@@ -85,26 +85,26 @@ export function gatekeeperVendorsOptions(session: WorkshopSession, filter?: Gate
   })
 }
 
-export function featuredBlueprintsOptions(session: WorkshopSession) {
+export function featuredTemplatesOptions(session: WorkshopSession) {
   return queryOptions({
-    queryKey: accountKey(session.cacheScope, 'featuredBlueprints'),
-    queryFn: async () => [...await api(session).listFeaturedBlueprints()],
+    queryKey: accountKey(session.cacheScope, 'featuredTemplates'),
+    queryFn: async () => [...await api(session).listFeaturedTemplates()],
     meta: persistedQueryMeta,
   })
 }
 
-export function ownBlueprintsOptions(session: WorkshopSession) {
+export function ownTemplatesOptions(session: WorkshopSession) {
   return queryOptions({
-    queryKey: accountKey(session.cacheScope, 'ownBlueprints'),
-    queryFn: async () => [...await api(session).listOwnBlueprints()],
+    queryKey: accountKey(session.cacheScope, 'ownTemplates'),
+    queryFn: async () => [...await api(session).listOwnTemplates()],
     meta: persistedQueryMeta,
   })
 }
 
-export function libraryBlueprintsOptions(session: WorkshopSession) {
+export function libraryTemplatesOptions(session: WorkshopSession) {
   return queryOptions({
-    queryKey: accountKey(session.cacheScope, 'libraryBlueprints'),
-    queryFn: async () => [...await api(session).listLibraryBlueprints()],
+    queryKey: accountKey(session.cacheScope, 'libraryTemplates'),
+    queryFn: async () => [...await api(session).listLibraryTemplates()],
     meta: persistedQueryMeta,
   })
 }
@@ -173,9 +173,9 @@ export const quickModelKey = (session: WorkshopSession = workshopSession) => qui
 export const aiConfigKey = (session: WorkshopSession = workshopSession) => aiConfigOptions(session).queryKey
 export const addableGatekeepersKey = (session: WorkshopSession = workshopSession) => addableGatekeepersOptions(session).queryKey
 export const gatekeeperVendorsKey = (session: WorkshopSession = workshopSession) => gatekeeperVendorsOptions(session).queryKey
-export const featuredBlueprintsKey = (session: WorkshopSession = workshopSession) => featuredBlueprintsOptions(session).queryKey
-export const ownBlueprintsKey = (session: WorkshopSession = workshopSession) => ownBlueprintsOptions(session).queryKey
-export const libraryBlueprintsKey = (session: WorkshopSession = workshopSession) => libraryBlueprintsOptions(session).queryKey
+export const featuredTemplatesKey = (session: WorkshopSession = workshopSession) => featuredTemplatesOptions(session).queryKey
+export const ownTemplatesKey = (session: WorkshopSession = workshopSession) => ownTemplatesOptions(session).queryKey
+export const libraryTemplatesKey = (session: WorkshopSession = workshopSession) => libraryTemplatesOptions(session).queryKey
 export const outputsKey = (session: WorkshopSession = workshopSession) => outputsOptions(session).queryKey
 export const adminSettingsKey = (session: WorkshopSession = workshopSession) => adminSettingsOptions(session).queryKey
 
@@ -215,16 +215,16 @@ export function useGatekeeperVendors() {
   return useQuery(gatekeeperVendorsOptions(workshopSession))
 }
 
-export function useFeaturedBlueprints() {
-  return useQuery(featuredBlueprintsOptions(workshopSession))
+export function useFeaturedTemplates() {
+  return useQuery(featuredTemplatesOptions(workshopSession))
 }
 
-export function useOwnBlueprints() {
-  return useQuery(ownBlueprintsOptions(workshopSession))
+export function useOwnTemplates() {
+  return useQuery(ownTemplatesOptions(workshopSession))
 }
 
-export function useLibraryBlueprints() {
-  return useQuery(libraryBlueprintsOptions(workshopSession))
+export function useLibraryTemplates() {
+  return useQuery(libraryTemplatesOptions(workshopSession))
 }
 
 export function useOutputs() {

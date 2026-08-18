@@ -1,5 +1,5 @@
 {
-  "blueprintId": "intimetec.fixed-bid-pricing",
+  "templateId": "intimetec.fixed-bid-pricing",
   "title": "Fixed-Bid SOW Pricing",
   "description": "Use to build a defensible fixed-bid estimate with P50/P80/P90 pricing, six-pillar evidence, explicit risk reserves, contract guardrails, and human-reviewed AI proposals.",
   "output": {

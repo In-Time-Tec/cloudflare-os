@@ -18,10 +18,10 @@ export function serverConfigOptions(session: WorkshopSession) {
   })
 }
 
-export function publicBlueprintOptions(session: WorkshopSession, id: string) {
+export function publicTemplateOptions(session: WorkshopSession, id: string) {
   return queryOptions({
-    queryKey: ['public', 'blueprint', id] as const,
-    queryFn: async () => session.publicApi.getBlueprint(id),
+    queryKey: ['public', 'template', id] as const,
+    queryFn: async () => session.publicApi.getTemplate(id),
     meta: persistedQueryMeta,
   })
 }
@@ -30,9 +30,9 @@ export function useServerConfigQuery() {
   return useQuery(serverConfigOptions(workshopSession))
 }
 
-export function usePublicBlueprintQuery(id: string) {
+export function usePublicTemplateQuery(id: string) {
   return useQuery({
-    ...publicBlueprintOptions(workshopSession, id),
+    ...publicTemplateOptions(workshopSession, id),
     enabled: id.length > 0,
   })
 }

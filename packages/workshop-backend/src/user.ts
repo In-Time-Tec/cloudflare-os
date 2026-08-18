@@ -1,5 +1,5 @@
 import { RpcStub } from "capnweb";
-import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, BlueprintMetadata, BlueprintLibrarySummary, BlueprintSource, BlueprintUserSummary, BLUEPRINT_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, BlueprintOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
+import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, TemplateMetadata, TemplateLibrarySummary, TemplateSource, TemplateUserSummary, TEMPLATE_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, TemplateOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
 import { AuthenticatedIdentity, ConversationsApi, Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
 import { shouldAutoProvisionAccount, ambientGatekeeperMode } from "./provisioning-policy.js";
 import { CloudflareGatekeeperUser } from "@gadgets/workshop-shared/cloudflare-gatekeeper";
@@ -9,7 +9,7 @@ import { createWorkshopLogger } from "./observability";
 import { getManagedAiConfig } from "./ai-gateway.js";
 import { utcDayKey, nextUtcMidnightIso, DailyQuotaResult } from "./ai-gateway-billing/limits/config.js";
 import type { AdminSettings } from "./admin-settings.js";
-import { isReservedBlueprintKey, readBlueprintKvRecord } from "./blueprint-archive.js";
+import { isReservedTemplateKey, readTemplateKvRecord } from "./template-archive.js";
 import { filterEnabledResources, isResourceDisabled, readAdminConfig } from "./admin-config.js";
 import { buildGatekeeperVendorMap } from "./auth/auth-vendors.js";
 import { SessionPrincipal } from "./auth/identity-directory.js";
@@ -93,18 +93,18 @@ type LoginSessionRecord = {
 /** How long a session token stays valid. Expired sessions require a fresh sign-in. */
 export const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
-// Blueprint record stored in the user's `blueprints` collection.
-type BlueprintUserRecord = {
+// Template record stored in the user's `templates` collection.
+type TemplateUserRecord = {
   id: string;
-  metadata: BlueprintMetadata;
+  metadata: TemplateMetadata;
   gadgetId?: string;
-  // Source of truth for whether the blueprint is featured deployment-wide.
+  // Source of truth for whether the template is featured deployment-wide.
   featured?: boolean;
 };
 
-type LibraryBlueprintRecord = {
+type LibraryTemplateRecord = {
   id: string;
-  metadata: BlueprintMetadata;
+  metadata: TemplateMetadata;
   addedAt: Date;
   uploaded: boolean;
 };
@@ -131,8 +131,8 @@ export type WorkspaceOutputEntry = {
   title: string;
   created: Date;
 
-  /** The format the gadget was built as, if it was instantiated from a blueprint declaring one. */
-  output?: BlueprintOutput;
+  /** The format the gadget was built as, if it was instantiated from a template declaring one. */
+  output?: TemplateOutput;
 };
 
 type OutputRecord = WorkspaceOutputEntry & {
@@ -180,10 +180,10 @@ function makeUserStorage(storage: DurableObjectStorage) {
       sessions: collection<LoginSessionRecord>()({
         primaryKey: "tokenId",
       }),
-      blueprints: collection<BlueprintUserRecord>()({
+      templates: collection<TemplateUserRecord>()({
         primaryKey: "id",
       }),
-      libraryBlueprints: collection<LibraryBlueprintRecord>()({
+      libraryTemplates: collection<LibraryTemplateRecord>()({
         primaryKey: "id",
       }),
       // Outputs of every workspace in `gadgets`, mirrored here by each workspace's Overseer so the
@@ -224,7 +224,7 @@ function makeUserStorage(storage: DurableObjectStorage) {
       outputsBackfillCursor: "",
 
       nextAccountId: 0,
-      pinnedBlueprints: <string[]>[],
+      pinnedTemplates: <string[]>[],
 
       // Per-user free-tier daily LLM-call counter (only used when ENABLE_CLOUDFLARE_LIMITS is on).
       // Stores the current UTC day and the calls made that day; a stale `day` implicitly resets the
@@ -940,18 +940,18 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return result;
   }
 
-  // --- Blueprint methods (called by Overseer during propagation) ---
+  // --- Template methods (called by Overseer during propagation) ---
 
-  async updateBlueprint(id: string, metadata: BlueprintMetadata, gadgetId: string): Promise<boolean> {
-    let existing = this.storage.blueprints.get(id);
+  async updateTemplate(id: string, metadata: TemplateMetadata, gadgetId: string): Promise<boolean> {
+    let existing = this.storage.templates.get(id);
     // Preserve the featured bit across metadata-only/code updates.
     let featured = existing?.featured === true;
-    this.storage.blueprints.put({id, metadata, gadgetId, featured});
+    this.storage.templates.put({id, metadata, gadgetId, featured});
     return featured;
   }
 
-  async importBlueprint(id: string, metadata: BlueprintMetadata): Promise<void> {
-    this.storage.libraryBlueprints.put({
+  async importTemplate(id: string, metadata: TemplateMetadata): Promise<void> {
+    this.storage.libraryTemplates.put({
       id,
       metadata,
       addedAt: new Date(),
@@ -959,43 +959,43 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     });
   }
 
-  async deleteBlueprint(id: string): Promise<void> {
-    this.storage.blueprints.delete(id);
-    this.storage.pinnedBlueprints.put(
-      this.storage.pinnedBlueprints.get().filter(existing => existing !== id));
+  async deleteTemplate(id: string): Promise<void> {
+    this.storage.templates.delete(id);
+    this.storage.pinnedTemplates.put(
+      this.storage.pinnedTemplates.get().filter(existing => existing !== id));
   }
 
-  isBlueprintPinned(id: string): boolean {
-    return this.storage.pinnedBlueprints.get().includes(id);
+  isTemplatePinned(id: string): boolean {
+    return this.storage.pinnedTemplates.get().includes(id);
   }
 
-  async setBlueprintPinned(id: string, pinned: boolean): Promise<void> {
-    let pinnedBlueprints = this.storage.pinnedBlueprints.get().filter(existing => existing !== id);
+  async setTemplatePinned(id: string, pinned: boolean): Promise<void> {
+    let pinnedTemplates = this.storage.pinnedTemplates.get().filter(existing => existing !== id);
 
     if (pinned) {
-      if (!this.storage.blueprints.get(id) && !this.storage.libraryBlueprints.get(id)) {
-        await this.addBlueprintToLibrary(id);
+      if (!this.storage.templates.get(id) && !this.storage.libraryTemplates.get(id)) {
+        await this.addTemplateToLibrary(id);
       }
-      pinnedBlueprints.unshift(id);
+      pinnedTemplates.unshift(id);
     }
 
-    this.storage.pinnedBlueprints.put(pinnedBlueprints);
+    this.storage.pinnedTemplates.put(pinnedTemplates);
   }
 
-  async addBlueprintToLibrary(id: string): Promise<void> {
-    let kvRecord = await readBlueprintKvRecord(this.env, id);
+  async addTemplateToLibrary(id: string): Promise<void> {
+    let kvRecord = await readTemplateKvRecord(this.env, id);
     if (!kvRecord) {
-      throw new Error("Blueprint not found.");
+      throw new Error("Template not found.");
     }
 
-    let existing = this.storage.libraryBlueprints.get(id);
+    let existing = this.storage.libraryTemplates.get(id);
     if (existing) {
       existing.metadata = kvRecord.metadata;
-      this.storage.libraryBlueprints.put(existing);
+      this.storage.libraryTemplates.put(existing);
       return;
     }
 
-    this.storage.libraryBlueprints.put({
+    this.storage.libraryTemplates.put({
       id,
       metadata: kvRecord.metadata,
       addedAt: new Date(),
@@ -1003,70 +1003,70 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     });
   }
 
-  async removeBlueprintFromLibrary(id: string): Promise<void> {
-    let record = this.storage.libraryBlueprints.get(id);
+  async removeTemplateFromLibrary(id: string): Promise<void> {
+    let record = this.storage.libraryTemplates.get(id);
     if (!record) {
       return;
     }
 
     if (record.uploaded) {
-      await this.deleteOwnedBlueprint(id);
+      await this.deleteOwnedTemplate(id);
     } else {
-      this.storage.libraryBlueprints.delete(id);
-      await this.setBlueprintPinned(id, false);
+      this.storage.libraryTemplates.delete(id);
+      await this.setTemplatePinned(id, false);
     }
   }
 
-  async isBlueprintInLibrary(id: string): Promise<{ uploaded: boolean } | null> {
-    const record = this.storage.libraryBlueprints.get(id);
+  async isTemplateInLibrary(id: string): Promise<{ uploaded: boolean } | null> {
+    const record = this.storage.libraryTemplates.get(id);
     if (!record) return null;
     return { uploaded: record.uploaded };
   }
 
-  async deleteOwnedBlueprint(id: string): Promise<void> {
-    if (isReservedBlueprintKey(id)) {
-      throw new Error("Blueprint not found.");
+  async deleteOwnedTemplate(id: string): Promise<void> {
+    if (isReservedTemplateKey(id)) {
+      throw new Error("Template not found.");
     }
 
-    let publishedRecord = this.storage.blueprints.get(id);
-    let libraryRecord = this.storage.libraryBlueprints.get(id);
+    let publishedRecord = this.storage.templates.get(id);
+    let libraryRecord = this.storage.libraryTemplates.get(id);
     let uploadedRecord = libraryRecord?.uploaded ? libraryRecord : undefined;
-    let kvRecord = await readBlueprintKvRecord(this.env, id);
+    let kvRecord = await readTemplateKvRecord(this.env, id);
 
     if (!publishedRecord && !uploadedRecord && !kvRecord) {
-      throw new Error("Blueprint not found.");
+      throw new Error("Template not found.");
     }
 
     if (kvRecord) {
       if (kvRecord.ownerId !== this.ctx.id.toString()) {
-        throw new Error("You don't own this blueprint.");
+        throw new Error("You don't own this template.");
       }
 
-      // Delete all R2 objects with the blueprint ID prefix.
+      // Delete all R2 objects with the template ID prefix.
       for (let v = 1; v <= kvRecord.metadata.version; v++) {
-        await this.env.BLUEPRINT_CONTENT.delete(`${id}/${v}`);
+        await this.env.TEMPLATE_CONTENT.delete(`${id}/${v}`);
       }
-      await this.env.BLUEPRINT_CONTENT.delete(`${BLUEPRINT_SCREENSHOT_R2_PREFIX}${id}`);
+      await this.env.TEMPLATE_CONTENT.delete(`${TEMPLATE_SCREENSHOT_R2_PREFIX}${id}`);
 
       // Delete from KV.
-      await this.env.BLUEPRINTS.delete(id);
+      await this.env.TEMPLATES.delete(id);
     }
 
     if (publishedRecord?.featured === true) {
-      await this.adminSettings.getByName("").deleteFeaturedBlueprint(id);
+      await this.adminSettings.getByName("").deleteFeaturedTemplate(id);
     }
 
     if (publishedRecord) {
-      this.storage.blueprints.delete(id);
+      this.storage.templates.delete(id);
     }
     if (uploadedRecord) {
-      this.storage.libraryBlueprints.delete(id);
+      this.storage.libraryTemplates.delete(id);
     }
-    await this.setBlueprintPinned(id, false);
+    await this.setTemplatePinned(id, false);
   }
 
-  async isBlueprintFeatured(id: string): Promise<boolean | null> {
-    let record = this.storage.blueprints.get(id);
+  async isTemplateFeatured(id: string): Promise<boolean | null> {
+    let record = this.storage.templates.get(id);
     if (!record) {
       return null;
     }
@@ -1074,63 +1074,63 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return record.featured === true;
   }
 
-  async setBlueprintFeatured(id: string, featured: boolean): Promise<void> {
-    let record = this.storage.blueprints.get(id);
+  async setTemplateFeatured(id: string, featured: boolean): Promise<void> {
+    let record = this.storage.templates.get(id);
     if (!record) {
-      throw new Error("No such blueprint.");
+      throw new Error("No such template.");
     }
 
     record.featured = featured;
-    this.storage.blueprints.put(record);
+    this.storage.templates.put(record);
   }
 
-  getBlueprint(id: string): BlueprintUserSummary | null {
-    let record = this.storage.blueprints.get(id);
-    return record ? this.blueprintSummary(record, new Set(this.storage.pinnedBlueprints.get())) : null;
+  getTemplate(id: string): TemplateUserSummary | null {
+    let record = this.storage.templates.get(id);
+    return record ? this.templateSummary(record, new Set(this.storage.pinnedTemplates.get())) : null;
   }
 
-  async listBlueprints(): Promise<BlueprintUserSummary[]> {
-    let result: BlueprintUserSummary[] = [];
-    let pinnedBlueprintIds = new Set(this.storage.pinnedBlueprints.get());
-    for (let record of this.storage.blueprints.list()) {
-      result.push(this.blueprintSummary(record, pinnedBlueprintIds));
+  async listTemplates(): Promise<TemplateUserSummary[]> {
+    let result: TemplateUserSummary[] = [];
+    let pinnedTemplateIds = new Set(this.storage.pinnedTemplates.get());
+    for (let record of this.storage.templates.list()) {
+      result.push(this.templateSummary(record, pinnedTemplateIds));
     }
     result.sort((a, b) => b.lastUpdated.valueOf() - a.lastUpdated.valueOf());
     return result;
   }
 
-  private blueprintSummary(record: BlueprintUserRecord, pinnedBlueprintIds: Set<string>): BlueprintUserSummary {
+  private templateSummary(record: TemplateUserRecord, pinnedTemplateIds: Set<string>): TemplateUserSummary {
     return {
       id: record.id,
       title: record.metadata.title,
       description: record.metadata.description,
-      source: this.blueprintSource(record),
+      source: this.templateSource(record),
       version: record.metadata.version,
       lastUpdated: record.metadata.lastUpdated,
-      pinned: pinnedBlueprintIds.has(record.id) || undefined,
+      pinned: pinnedTemplateIds.has(record.id) || undefined,
     };
   }
 
-  // A blueprint with no `gadgetId` was added to the library rather than published from one of this
+  // A template with no `gadgetId` was added to the library rather than published from one of this
   // user's workspaces; one whose workspace is no longer registered here was published from a
   // workspace that has since been deleted.
-  private blueprintSource(record: BlueprintUserRecord): BlueprintSource {
+  private templateSource(record: TemplateUserRecord): TemplateSource {
     if (!record.gadgetId) return { type: "imported" };
     let workspace = this.storage.gadgets.get(record.gadgetId);
     if (!workspace) return { type: "deletedWorkspace" };
     return { type: "workspace", workspaceId: record.gadgetId, workspaceTitle: workspace.title };
   }
 
-  async listLibraryBlueprints(): Promise<BlueprintLibrarySummary[]> {
-    let result: BlueprintLibrarySummary[] = [];
-    let pinnedBlueprintIds = new Set(this.storage.pinnedBlueprints.get());
-    for (let record of this.storage.libraryBlueprints.list()) {
+  async listLibraryTemplates(): Promise<TemplateLibrarySummary[]> {
+    let result: TemplateLibrarySummary[] = [];
+    let pinnedTemplateIds = new Set(this.storage.pinnedTemplates.get());
+    for (let record of this.storage.libraryTemplates.list()) {
       result.push({
         id: record.id,
         metadata: record.metadata,
         addedAt: record.addedAt,
         uploaded: record.uploaded,
-        pinned: pinnedBlueprintIds.has(record.id) || undefined,
+        pinned: pinnedTemplateIds.has(record.id) || undefined,
       });
     }
     result.sort((a, b) => b.addedAt.valueOf() - a.addedAt.valueOf());
@@ -1741,7 +1741,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
     // Block whole gatekeepers + disabled resources at this single core-side chokepoint where a
     // resourceUrl becomes a capability (reached only via the user/UI-facing Overseer.newGatekeeper
-    // and blueprint instantiation — never from gadget or agent code).
+    // and template instantiation — never from gadget or agent code).
     let config = await readAdminConfig(this.env);
     let vendorId = account.vendorId.toLowerCase();
     if (config.disabledGatekeepers.includes(vendorId)) {

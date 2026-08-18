@@ -1,4 +1,4 @@
-import { AiChatMessage, AiChatAuthorInfo, AiToolCall, AiChatMessageBody, AgentSpawnerConfig, AiChatStreamEvent, BlueprintOutput, WorkpieceId, type AiModelConfig, isTextLikeAttachmentMimeType, validateBindingName } from '@gadgets/workshop-shared/api';
+import { AiChatMessage, AiChatAuthorInfo, AiToolCall, AiChatMessageBody, AgentSpawnerConfig, AiChatStreamEvent, TemplateOutput, WorkpieceId, type AiModelConfig, isTextLikeAttachmentMimeType, validateBindingName } from '@gadgets/workshop-shared/api';
 import { PDF_MIME_TYPE, modelApiSupportsPdfAttachments } from './chat-attachment-pdf';
 import { AgentCatalog, ObservationDescription } from '@gadgets/workshop-shared/gatekeeper';
 import { createWorkshopLogger } from "./observability";
@@ -177,12 +177,12 @@ export type AgentGadgetInfo = {
   /**
    * Whether this is the workspace's default gadget: the gadget that tools operate on when their
    * gadget-name parameter is omitted. Only workspaces migrated from single-gadget days
-   * (or created from a blueprint) have one.
+   * (or created from a template) have one.
    */
   isDefault: boolean;
   bindings: {name: string, title: string, target: WorkpieceId}[];
-  /** What instantiating this gadget's blueprint produces, when it came from one that declares it. */
-  output?: BlueprintOutput;
+  /** What instantiating this gadget's template produces, when it came from one that declares it. */
+  output?: TemplateOutput;
 };
 
 // Resolves a `describeBinding` tool argument (a name in the chat's env) to its human-readable
@@ -291,9 +291,9 @@ export interface AgentHooks {
    * the "changes" message that records the creation (see GadgetRecord.pending in overseer.ts).
    * Throws if the binding name is invalid or already claimed by another gadget (including one
    * still pending in another chat). Returns the id and the (trimmed) title as created. `output`
-   * is the format declared by the blueprint being instantiated, if any (see fetchBlueprint).
+   * is the format declared by the template being instantiated, if any (see fetchTemplate).
    */
-  createGadget(title: string, bindingName: string, chatId: number, output?: BlueprintOutput)
+  createGadget(title: string, bindingName: string, chatId: number, output?: TemplateOutput)
       : {id: WorkpieceId, title: string};
 
   /**
@@ -415,32 +415,32 @@ export interface AgentHooks {
   consumeCapturedConnectionRequests(chatId: number): AiChatMessageBody[];
 
   /**
-   * Blueprint hooks for the agent.
+   * Template hooks for the agent.
    *
-   * List the blueprints available to the turn's initiator (their own published blueprints, their
+   * List the templates available to the turn's initiator (their own published templates, their
    * library, and the deployment's featured set) as formatted text. The initiator -- not the
-   * workspace owner -- because blueprint libraries are per-user: a collaborator driving the agent
+   * workspace owner -- because template libraries are per-user: a collaborator driving the agent
    * should see their own. There is no search index; the corpora are small enough for the model to
    * scan directly.
    */
-  listAvailableBlueprints(initiator: AiChatAuthorInfo): Promise<string>;
+  listAvailableTemplates(initiator: AiChatAuthorInfo): Promise<string>;
 
   /**
    * A short standing note naming the deployment's standard output formats, or "" if it has none.
-   * Carried in the system prompt rather than left to `listBlueprints`, because a request phrased as
-   * "make me a doc" may not prompt an agent to go looking for blueprints at all.
+   * Carried in the system prompt rather than left to `listTemplates`, because a request phrased as
+   * "make me a doc" may not prompt an agent to go looking for templates at all.
    */
   describeStandardFormats(): Promise<string>;
 
   /**
-   * Fetch a blueprint's decoded files, plus formatted notes describing the copied files and the
-   * bindings the blueprint's code expects the agent to wire up. Used by the createGadget tool to
-   * instantiate the blueprint as a new gadget, along with the output format the blueprint declares
-   * (if any), which the created gadget inherits. Throws an agent-readable error if the blueprint
+   * Fetch a template's decoded files, plus formatted notes describing the copied files and the
+   * bindings the template's code expects the agent to wire up. Used by the createGadget tool to
+   * instantiate the template as a new gadget, along with the output format the template declares
+   * (if any), which the created gadget inherits. Throws an agent-readable error if the template
    * doesn't exist.
    */
-  fetchBlueprint(blueprintId: string)
-      : Promise<{files: Record<string, string>, notes: string, output?: BlueprintOutput}>;
+  fetchTemplate(templateId: string)
+      : Promise<{files: Record<string, string>, notes: string, output?: TemplateOutput}>;
 }
 
 // =======================================================================================
@@ -455,9 +455,9 @@ You are working within a "workspace". A workspace contains any number of Gadgets
 
 A new workspace contains no Gadgets: use the \`createGadget\` tool to create one before writing any code. Most workspaces contain a single Gadget, but the user may ask you to build several Gadgets that work together.
 
-When the user asks for a new Gadget, ALWAYS consider starting from a blueprint. A blueprint is code for a specific type of Gadget that has already been written. The \`listBlueprints\` tool returns a list of available blueprints. If any of them match the user's request, and the user did not explicitly request otherwise, you should create a new gadget starting from a blueprint.
+When the user asks for a new Gadget, ALWAYS consider starting from a template. A template is code for a specific type of Gadget that has already been written. The \`listTemplates\` tool returns a list of available templates. If any of them match the user's request, and the user did not explicitly request otherwise, you should create a new gadget starting from a template.
 
-Note that users rarely ask for "a Gadget" in those words. They ask for a thing: a doc, a deck, a tracker, a tool that does X. Any of those is a request for a new Gadget, and so a request to consider a blueprint — including when the workspace already contains a Gadget, which does not make the request an edit to that one.
+Note that users rarely ask for "a Gadget" in those words. They ask for a thing: a doc, a deck, a tracker, a tool that does X. Any of those is a request for a new Gadget, and so a request to consider a template — including when the workspace already contains a Gadget, which does not make the request an edit to that one.
 
 Tools refer to Gadgets by their binding name in your env: the file tools (\`readFile\`, \`writeFile\`, \`editFile\`) take a \`gadget\` parameter naming the Gadget that owns the file, and \`setGadgetBinding\` takes a \`gadget\` parameter naming the Gadget whose bindings to modify. Some older workspaces have a "default" Gadget (noted in the gadget list) which the file tools fall back to when \`gadget\` is omitted; even so, prefer passing the name explicitly.
 
@@ -625,11 +625,11 @@ Create a new Gadget in this workspace. The new gadget immediately becomes availa
 
 Use this when the workspace has no gadgets yet, or when the user asks for an additional gadget. Always choose a short, descriptive title — the user will see it.
 
-By default the new gadget is empty. Pass \`blueprintId\` (discovered with the \`listBlueprints\` tool, or given by the user) to instead start the gadget from a blueprint's code; the result then also describes the bindings the blueprint expects you to wire up.
+By default the new gadget is empty. Pass \`templateId\` (discovered with the \`listTemplates\` tool, or given by the user) to instead start the gadget from a template's code; the result then also describes the bindings the template expects you to wire up.
 `.trim();
 
-let LIST_BLUEPRINTS_TOOL_DESCRIPTION = `
-List the blueprints available to the user: their own published blueprints, their blueprint library, and this deployment's featured blueprints. A blueprint is a shareable snapshot of a Gadget's code; instantiate one as a new Gadget by passing its \`blueprintId\` to \`createGadget\`. There is no search — read the list and pick the best match yourself.
+let LIST_TEMPLATES_TOOL_DESCRIPTION = `
+List the templates available to the user: their own published templates, their template library, and this deployment's featured templates. A template is a shareable snapshot of a Gadget's code; instantiate one as a new Gadget by passing its \`templateId\` to \`createGadget\`. There is no search — read the list and pick the best match yourself.
 `.trim();
 
 let WRITE_FILE_TOOL_DESCRIPTION = `
@@ -1737,7 +1737,7 @@ export async function runAgent(
                   // the tool's recorded result, so replay returns it without creating anything.
                   // (The recorded changeId needs no counter bookkeeping here: it names the
                   // "changes" message that recorded the creation, which is numbered by the
-                  // normal "changes" replay below. Likewise a blueprint instantiation needs no
+                  // normal "changes" replay below. Likewise a template instantiation needs no
                   // re-fetch: its files ride that same "changes" message, which the live tool
                   // flushes before its own step's message can land in the log.)
                   if (toolCall.output === undefined) {
@@ -1771,7 +1771,7 @@ export async function runAgent(
                   // if it did, replay the same brush-off the live tool returns.
                   toolOutput = {text: OBSERVE_USER_CHANGES_NOOP_RESULT};
                   break;
-                case "listBlueprints":
+                case "listTemplates":
                 case "listConnectableResources":
                 case "requestConnection":
                   toolOutput = {text: toolCall.output ?? ""};
@@ -2254,7 +2254,7 @@ export async function runAgent(
     }
 
     // Named in the prompt because the request that should trigger them ("make me a doc") may
-    // not look trigger the agent to browse blueprints.
+    // not look trigger the agent to browse templates.
     let standardFormats = await hooks.describeStandardFormats();
 
     // Build connectable-vendors section. We only list vendor names here; the agent fetches a
@@ -2654,13 +2654,13 @@ export async function runAgent(
               "to it (e.g. the file tools' `workpiece` parameter). Must be a JavaScript " +
               "identifier not already in use; style: ALL_CAPS_WITH_UNDERSCORES.",
         }),
-        blueprintId: Type.Optional(Type.String({
+        templateId: Type.Optional(Type.String({
           description:
-              "If given, initialize the new gadget from this blueprint's code instead of empty. " +
-              "Use the listBlueprints tool to discover available blueprint IDs.",
+              "If given, initialize the new gadget from this template's code instead of empty. " +
+              "Use the listTemplates tool to discover available template IDs.",
         })),
       }),
-      execute: async (toolCallId, {title, bindingName, blueprintId}) => {
+      execute: async (toolCallId, {title, bindingName, templateId}) => {
         try {
           validateBindingName(bindingName);
           if (isNameInScope(bindingName)) {
@@ -2668,10 +2668,10 @@ export async function runAgent(
                 `Choose a different name.`);
           }
 
-          // Fetch the blueprint (if any) before creating anything, so a bad blueprintId fails
+          // Fetch the template (if any) before creating anything, so a bad templateId fails
           // cleanly without leaving an empty gadget behind.
-          let blueprint = blueprintId !== undefined
-              ? await hooks.fetchBlueprint(blueprintId) : undefined;
+          let template = templateId !== undefined
+              ? await hooks.fetchTemplate(templateId) : undefined;
 
           // Flush edits captured so far into their own "changes" message before creating the
           // gadget, so the creation cleanly separates change batches: a revert from this creation
@@ -2690,11 +2690,11 @@ export async function runAgent(
 
           // Let the transcript name the format while the call runs, as writes do with their target
           // file.
-          if (blueprint?.output) {
-            emitStreamEvent({type: "toolCallOutputFormat", toolCallId, output: blueprint.output});
+          if (template?.output) {
+            emitStreamEvent({type: "toolCallOutputFormat", toolCallId, output: template.output});
           }
 
-          let created = hooks.createGadget(title, bindingName, chatId, blueprint?.output);
+          let created = hooks.createGadget(title, bindingName, chatId, template?.output);
           pendingCreatedGadgets.push({gadgetId: created.id, title: created.title, bindingName});
           chatBindings.set(bindingName, {type: "workpiece", id: created.id});
 
@@ -2702,18 +2702,18 @@ export async function runAgent(
           // (exactly as writeFile/editFile do) so reverts can be referred to precisely.
           let changeId = nextChangeId;
 
-          let output: {gadgetId: WorkpieceId, changeId: number, blueprintNotes?: string} =
+          let output: {gadgetId: WorkpieceId, changeId: number, templateNotes?: string} =
               {gadgetId: created.id, changeId};
 
-          if (blueprint) {
-            // Copy the blueprint's files into the new gadget's root in the session doc: like
+          if (template) {
+            // Copy the template's files into the new gadget's root in the session doc: like
             // writeFile edits, they ride the chat's proposed changes and revert together with the
             // creation.
             let resolved = hooks.resolveWorkpieceRoot(created.id, true, chatId);
             let ydoc = getSessionYDoc();
             ydoc.transact(() => {
               let root = ydoc.getMap<Y.Text>(resolved.rootName);
-              for (let [filename, content] of Object.entries(blueprint.files)) {
+              for (let [filename, content] of Object.entries(template.files)) {
                 let text = new Y.Text();
                 text.insert(0, content);
                 root.set(filename, text);
@@ -2723,21 +2723,21 @@ export async function runAgent(
             // hasn't seen their contents, so it must read before editing.)
 
             // Flush the creation + files immediately rather than waiting for the next barrier.
-            // The blueprint's contents aren't reconstructible from this tool call's input the way
+            // The template's contents aren't reconstructible from this tool call's input the way
             // writeFile edits are, so they must be durable before the step's message lands: the
             // "changes" message then precedes the tool call in the log, which replay already
             // tolerates (see recordedCreations) -- and which makes replay of a later readFile of
-            // a blueprint file work with no special cases. The residual crash window (changes
+            // a template file work with no special cases. The residual crash window (changes
             // persisted, step's message lost) leaves a stamped pending gadget the resumed model
             // doesn't remember; it is visible in the chat's proposed changes and reverts
             // normally.
             flushCapturedYdocChanges();
 
-            output.blueprintNotes = blueprint.notes;
+            output.templateNotes = template.notes;
           }
 
           // Persist the result as the tool's recorded output: history replay can't re-run a
-          // creation tool (nor re-fetch a blueprint, whose content may have changed since), so
+          // creation tool (nor re-fetch a template, whose content may have changed since), so
           // it returns this recorded value instead (see the replay path above).
           return toolResult(jsonToolResultText(output), {output} as Partial<AiToolCall>);
         } catch (error) {
@@ -2749,14 +2749,14 @@ export async function runAgent(
       }
     }),
 
-    listBlueprints: defineTool({
-      name: "listBlueprints",
-      label: "List blueprints",
-      description: LIST_BLUEPRINTS_TOOL_DESCRIPTION,
+    listTemplates: defineTool({
+      name: "listTemplates",
+      label: "List templates",
+      description: LIST_TEMPLATES_TOOL_DESCRIPTION,
       parameters: Type.Object({}),
       execute: async (toolCallId) => {
         try {
-          let output = await hooks.listAvailableBlueprints(initiator);
+          let output = await hooks.listAvailableTemplates(initiator);
           return toolResult(output, { output });
         } catch (error) {
           toolCallNotes.set(toolCallId, { error: toolErrorText(error) });

@@ -46,9 +46,9 @@ configuration:
 | Context sharing domain | `intimetec-workers-dev` |
 | Managed AI provider | OpenRouter |
 | Default model | GPT 5.6 Luna (`openai/gpt-5.6-luna`) |
-| Blueprint metadata KV | `intimetec-cloudflare-os-backend-blueprints` |
+| Template metadata KV | `intimetec-cloudflare-os-backend-templates` |
 | Avatar KV | `intimetec-cloudflare-os-backend-avatars` |
-| Blueprint content R2 | `intimetec-cloudflare-os-backend-blueprint-content` |
+| Template content R2 | `intimetec-cloudflare-os-backend-template-content` |
 | Context collections KV | `intimetec-cloudflare-os-context-context-collections` |
 
 The deploy command looks up each resource by its stable name, creates only what is missing, and

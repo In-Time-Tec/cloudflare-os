@@ -1,5 +1,5 @@
 // How an output format is drawn: which glyph, which nouns, which wireframe. The server sends a
-// blueprint's `BlueprintOutput` declaration; this module is the only place that maps it to pixels.
+// template's `TemplateOutput` declaration; this module is the only place that maps it to pixels.
 //
 // Icons are a closed set (`OUTPUT_ICONS` in the shared API) so a free-form name can't make a
 // deployment look wrong. Only the key crosses the wire; the glyphs live here.
@@ -17,7 +17,7 @@ import {
   ListChecks,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react'
-import type { BlueprintOutput, OutputIcon } from '@gadgets/workshop-shared/api'
+import type { TemplateOutput, OutputIcon } from '@gadgets/workshop-shared/api'
 
 /** The glyph for each key in the shared `OUTPUT_ICONS` vocabulary. */
 export const FORMAT_ICONS = {
@@ -56,7 +56,7 @@ const WIREFRAME_FOR_ICON: Record<OutputIcon, FormatWireframe> = {
  * How a gadget with no declared format is shown. Also the fallback for an icon this build doesn't
  * know, which is normal: a deployment can serve a format newer than the browser's cached bundle.
  */
-export const GENERIC_OUTPUT: BlueprintOutput = {
+export const GENERIC_OUTPUT: TemplateOutput = {
   id: 'app',
   noun: 'App',
   plural: 'Apps',
@@ -64,11 +64,11 @@ export const GENERIC_OUTPUT: BlueprintOutput = {
 }
 
 /** Resolve what to draw for a (possibly absent, possibly unrecognized) declared format. */
-export function formatOf(output?: BlueprintOutput): BlueprintOutput {
+export function formatOf(output?: TemplateOutput): TemplateOutput {
   if (!output || !Object.hasOwn(FORMAT_ICONS, output.icon)) return GENERIC_OUTPUT
   return output
 }
 
-export function wireframeOf(output?: BlueprintOutput): FormatWireframe {
+export function wireframeOf(output?: TemplateOutput): FormatWireframe {
   return WIREFRAME_FOR_ICON[formatOf(output).icon]
 }

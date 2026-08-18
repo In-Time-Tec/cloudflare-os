@@ -18,14 +18,14 @@ const generatedPaths = Object.fromEntries(
     Object.entries(packageDirs).map(([name, directory]) => [name, join(directory, generatedName)]),
 );
 const resourceNames = [
-  "blueprintsKvNamespace",
+  "templatesKvNamespace",
   "avatarsKvNamespace",
-  "blueprintContentBucket",
+  "templateContentBucket",
   "contextKvNamespace",
 ];
 const managedAiProviders = new Set(["openrouter"]);
 const checkResources = {
-  blueprintsKvNamespaceId: "00000000000000000000000000000001",
+  templatesKvNamespaceId: "00000000000000000000000000000001",
   avatarsKvNamespaceId: "00000000000000000000000000000002",
   contextKvNamespaceId: "00000000000000000000000000000003",
   workersSubdomain: "example",
@@ -101,7 +101,7 @@ export function generateConfigs(config, accountId, bases, resources) {
     throw new Error("CLOUDFLARE_ACCOUNT_ID must be a 32-character hexadecimal account ID.");
   }
   for (const key of [
-    "blueprintsKvNamespaceId",
+    "templatesKvNamespaceId",
     "avatarsKvNamespaceId",
     "contextKvNamespaceId",
   ]) {
@@ -160,8 +160,8 @@ export function generateConfigs(config, accountId, bases, resources) {
   ];
   backend.kv_namespaces = [
     {
-      binding: "BLUEPRINTS",
-      id: resources.blueprintsKvNamespaceId,
+      binding: "TEMPLATES",
+      id: resources.templatesKvNamespaceId,
     },
     {
       binding: "AVATARS",
@@ -169,8 +169,8 @@ export function generateConfigs(config, accountId, bases, resources) {
     },
   ];
   backend.r2_buckets = [{
-    binding: "BLUEPRINT_CONTENT",
-    bucket_name: config.resources.blueprintContentBucket,
+    binding: "TEMPLATE_CONTENT",
+    bucket_name: config.resources.templateContentBucket,
   }];
 
   const router = setCommon(bases.router, accountId, config.workers.router, true);
@@ -308,7 +308,7 @@ export async function ensureRemoteResources(config, accountId, apiToken, fetchIm
   }
 
   const kvNames = {
-    blueprintsKvNamespaceId: config.resources.blueprintsKvNamespace,
+    templatesKvNamespaceId: config.resources.templatesKvNamespace,
     avatarsKvNamespaceId: config.resources.avatarsKvNamespace,
     contextKvNamespaceId: config.resources.contextKvNamespace,
   };
@@ -339,7 +339,7 @@ export async function ensureRemoteResources(config, accountId, apiToken, fetchIm
       `/accounts/${accountId}/workers/subdomain`, apiToken, {}, fetchImpl);
   resolved.workersSubdomain = subdomainPayload.result.subdomain;
 
-  const bucketName = config.resources.blueprintContentBucket;
+  const bucketName = config.resources.templateContentBucket;
   const bucketPath = `/accounts/${accountId}/r2/buckets/${encodeURIComponent(bucketName)}`;
   try {
     await cloudflareRequest(bucketPath, apiToken, {}, fetchImpl);

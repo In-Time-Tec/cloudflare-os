@@ -1,7 +1,7 @@
 import { RpcStub, RpcTarget, newHttpBatchRpcResponse, newWebSocketRpcSession, RpcSessionOptions } from "capnweb";
 import { validateRpc } from "capnweb-validate";
 import type { JWTPayload } from "jose";
-import { PublicApi, AuthenticatedApi, Overseer, GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, AiGatewayInfo, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ObserverConfigCallback, BlueprintLibrarySummary, BlueprintPublicInfo, BlueprintUserSummary, BlueprintBindingAssignment, AgentSpawnerConfig, WorkpieceId, BLUEPRINT_SCREENSHOT_PATH_PREFIX, BLUEPRINT_SCREENSHOT_R2_PREFIX, blueprintScreenshotUrl, ServerConfig, CloudflareUsageInfo, CloudflareAccountOption, LoginAttempt, GatekeeperAppInfo, AdminApi, GatekeeperVendorInfo, OutputFormatOffer, ListOutputsResult, createOpenGadgetError, getOpenGadgetErrorCode, OPEN_GADGET_ERROR_CODES, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
+import { PublicApi, AuthenticatedApi, Overseer, GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, AiGatewayInfo, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ObserverConfigCallback, TemplateLibrarySummary, TemplatePublicInfo, TemplateUserSummary, TemplateBindingAssignment, AgentSpawnerConfig, WorkpieceId, TEMPLATE_SCREENSHOT_PATH_PREFIX, TEMPLATE_SCREENSHOT_R2_PREFIX, templateScreenshotUrl, ServerConfig, CloudflareUsageInfo, CloudflareAccountOption, LoginAttempt, GatekeeperAppInfo, AdminApi, GatekeeperVendorInfo, OutputFormatOffer, ListOutputsResult, createOpenGadgetError, getOpenGadgetErrorCode, OPEN_GADGET_ERROR_CODES, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
 import type { UiFeatureFlags } from "@gadgets/workshop-shared/feature-flags";
 import { getServerConfig } from "./deployment-config.js";
 import { isPasswordAuthEnabled, getAuthGatekeeperAllowlist } from "./auth/config.js";
@@ -10,7 +10,7 @@ import { getUsageInfo } from "./ai-gateway-billing/limits/usage-checker.js";
 import { listConnectedAccounts, selectAccount } from "./ai-gateway-billing/cloudflare/connection-service.js";
 import { PendingLogin, LoginConnectCallbackImpl } from "./auth/login-flow.js";
 import { IdentityDirectory, identityDirectoryId, PASSWORD_ISSUER, SessionPrincipal } from "./auth/identity-directory.js";
-import { deploymentOutputForBlueprint, listFormatOffers, readAdminConfig } from "./admin-config.js";
+import { deploymentOutputForTemplate, listFormatOffers, readAdminConfig } from "./admin-config.js";
 
 // Re-export the optional-feature Durable Objects + entrypoints so they can be bound in wrangler.
 export { PendingLogin, LoginConnectCallbackImpl };
@@ -19,7 +19,7 @@ import { ConversationsApi, GatekeeperUiFrame } from "@gadgets/workshop-shared/ga
 import { LanguageModelGatekeeper } from "./ai-models";
 import { getManagedAiConfig } from "./ai-gateway.js";
 import { AdminSettings, AdminApiImpl } from "./admin-settings.js";
-import { BlueprintKvRecord, buildBlueprintArchiveStream, sanitizeBlueprintOutput, listFeaturedBlueprintsFromKv, parseBlueprintArchive, randomBlueprintId, readBlueprintContent, readBlueprintKvRecord } from "./blueprint-archive.js";
+import { TemplateKvRecord, buildTemplateArchiveStream, sanitizeTemplateOutput, listFeaturedTemplatesFromKv, parseTemplateArchive, randomTemplateId, readTemplateContent, readTemplateKvRecord } from "./template-archive.js";
 import { GatekeeperConnectCallbackImpl, normalizeUsername, UserDurableObject, CLOUDFLARE_VENDOR_ID } from "./user";
 import { OverseerDurableObject, GatekeeperLoopback, CodeModeTailLoopback, AgentSpawnerGatekeeper, GatekeeperHookLoopback, GadgetTailLoopback, AgentSelfLoopback, TransientStubLoopback } from "./overseer";
 import { ExternalMessageGateway } from "./external-message-gateway";
@@ -34,15 +34,15 @@ import { wrapDoStubForTelemetry } from "./do-telemetry";
 
 const logger = createWorkshopLogger("workshop.server");
 
-// Set once we've asked the AdminSettings DO to install the bundled format blueprints (see the
+// Set once we've asked the AdminSettings DO to install the bundled format templates (see the
 // fetch handler), so later requests skip the call. The DO holds the real answer.
-let formatBlueprintInstallStarted = false;
+let formatTemplateInstallStarted = false;
 
-function publicBlueprintInfo(id: string, metadata: BlueprintPublicInfo['metadata']): BlueprintPublicInfo {
+function publicTemplateInfo(id: string, metadata: TemplatePublicInfo['metadata']): TemplatePublicInfo {
   return {
     id,
     metadata,
-    screenshotUrl: blueprintScreenshotUrl(id, metadata),
+    screenshotUrl: templateScreenshotUrl(id, metadata),
   };
 }
 
@@ -379,112 +379,112 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     return this.#user.forgetSharedGadget(gadgetId);
   }
 
-  async listOwnBlueprints(): Promise<BlueprintUserSummary[]> {
-    return this.#user.listBlueprints();
+  async listOwnTemplates(): Promise<TemplateUserSummary[]> {
+    return this.#user.listTemplates();
   }
 
-  async getOwnBlueprint(blueprintId: string): Promise<BlueprintUserSummary | null> {
-    return this.#user.getBlueprint(blueprintId);
+  async getOwnTemplate(templateId: string): Promise<TemplateUserSummary | null> {
+    return this.#user.getTemplate(templateId);
   }
 
-  async listLibraryBlueprints(): Promise<BlueprintLibrarySummary[]> {
-    return this.#user.listLibraryBlueprints();
+  async listLibraryTemplates(): Promise<TemplateLibrarySummary[]> {
+    return this.#user.listLibraryTemplates();
   }
 
-  async setBlueprintPinned(blueprintId: string, pinned: boolean): Promise<void> {
-    return this.#user.setBlueprintPinned(blueprintId, pinned);
+  async setTemplatePinned(templateId: string, pinned: boolean): Promise<void> {
+    return this.#user.setTemplatePinned(templateId, pinned);
   }
 
-  async isBlueprintPinned(blueprintId: string): Promise<boolean> {
-    return this.#user.isBlueprintPinned(blueprintId);
+  async isTemplatePinned(templateId: string): Promise<boolean> {
+    return this.#user.isTemplatePinned(templateId);
   }
 
-  async listFeaturedBlueprints(): Promise<BlueprintPublicInfo[]> {
-    return (await listFeaturedBlueprintsFromKv(this.env)).map(
-        blueprint => publicBlueprintInfo(blueprint.id, blueprint.metadata));
+  async listFeaturedTemplates(): Promise<TemplatePublicInfo[]> {
+    return (await listFeaturedTemplatesFromKv(this.env)).map(
+        template => publicTemplateInfo(template.id, template.metadata));
   }
 
-  async addBlueprintToLibrary(blueprintId: string): Promise<void> {
-    return this.#user.addBlueprintToLibrary(blueprintId);
+  async addTemplateToLibrary(templateId: string): Promise<void> {
+    return this.#user.addTemplateToLibrary(templateId);
   }
 
-  async removeBlueprintFromLibrary(blueprintId: string): Promise<void> {
-    return this.#user.removeBlueprintFromLibrary(blueprintId);
+  async removeTemplateFromLibrary(templateId: string): Promise<void> {
+    return this.#user.removeTemplateFromLibrary(templateId);
   }
 
-  isBlueprintInLibrary(blueprintId: string): Promise<{ uploaded: boolean } | null> {
-    return this.#user.isBlueprintInLibrary(blueprintId);
+  isTemplateInLibrary(templateId: string): Promise<{ uploaded: boolean } | null> {
+    return this.#user.isTemplateInLibrary(templateId);
   }
 
-  async importBlueprint(archive: ReadableStream<Uint8Array>): Promise<string> {
-    let { metadata, contentLength, content } = await parseBlueprintArchive(archive);
+  async importTemplate(archive: ReadableStream<Uint8Array>): Promise<string> {
+    let { metadata, contentLength, content } = await parseTemplateArchive(archive);
     delete metadata.screenshot;
-    let blueprintId = randomBlueprintId();
-    let r2Key = `${blueprintId}/${metadata.version}`;
+    let templateId = randomTemplateId();
+    let r2Key = `${templateId}/${metadata.version}`;
 
     try {
       let fixedLengthStream = new FixedLengthStream(contentLength);
 
       await Promise.all([
         content.pipeTo(fixedLengthStream.writable),
-        this.env.BLUEPRINT_CONTENT.put(r2Key, fixedLengthStream.readable),
+        this.env.TEMPLATE_CONTENT.put(r2Key, fixedLengthStream.readable),
       ]);
 
-      let kvRecord: BlueprintKvRecord = {
+      let kvRecord: TemplateKvRecord = {
         metadata,
         ownerId: this.#userId.toString(),
       };
 
-      await this.env.BLUEPRINTS.put(blueprintId, JSON.stringify(kvRecord));
+      await this.env.TEMPLATES.put(templateId, JSON.stringify(kvRecord));
 
-      await this.#user.importBlueprint(blueprintId, metadata);
+      await this.#user.importTemplate(templateId, metadata);
 
       recordAnalytics(this.ctx, this.env, {
-        event_name: "blueprint_imported",
+        event_name: "template_imported",
         user_id: this.#userId.toString(),
-        blueprint_id: blueprintId,
+        template_id: templateId,
       });
 
-      return blueprintId;
+      return templateId;
     } catch (err) {
       // Try to delete what we uploaded, but don't wait for results becasue there's nothing we
       // can do if they fail, and we already have an error to throw.
-      this.env.BLUEPRINTS.delete(blueprintId);
-      this.env.BLUEPRINT_CONTENT.delete(r2Key);
+      this.env.TEMPLATES.delete(templateId);
+      this.env.TEMPLATE_CONTENT.delete(r2Key);
       throw err;
     }
   }
 
-  async newGadgetFromBlueprint(
-    blueprintId: string,
-    bindings: Record<string, BlueprintBindingAssignment>
+  async newGadgetFromTemplate(
+    templateId: string,
+    bindings: Record<string, TemplateBindingAssignment>
   ): Promise<RpcStub<Overseer>> {
-    // 1. Read blueprint from KV.
-    let kvRecord = await readBlueprintKvRecord(this.env, blueprintId);
-    if (!kvRecord) throw new Error("Blueprint not found.");
+    // 1. Read template from KV.
+    let kvRecord = await readTemplateKvRecord(this.env, templateId);
+    if (!kvRecord) throw new Error("Template not found.");
 
     // 2. Read gzip-compressed Yjs doc from R2 and decompress.
-    let codeBytes = await readBlueprintContent(this.env, blueprintId, kvRecord.metadata.version);
-    if (!codeBytes) throw new Error("Blueprint content not found in R2.");
+    let codeBytes = await readTemplateContent(this.env, templateId, kvRecord.metadata.version);
+    if (!codeBytes) throw new Error("Template content not found in R2.");
 
     // 3. Create new Overseer DO (same as newGadget()).
     let id = this.overseers.newUniqueId().toString();
     await this.#user.newGadget(id, kvRecord.metadata.title);
     let overseerResult = await this.#openGadgetInternal(id);
 
-    // 4. Initialize from blueprint code.
+    // 4. Initialize from template code.
     let overseerDo = this.overseers.get(this.overseers.idFromString(id));
-    await overseerDo.initializeFromBlueprint(codeBytes, kvRecord.metadata.title,
-        deploymentOutputForBlueprint(await readAdminConfig(this.env), blueprintId,
-            sanitizeBlueprintOutput(kvRecord.metadata.output)));
+    await overseerDo.initializeFromTemplate(codeBytes, kvRecord.metadata.title,
+        deploymentOutputForTemplate(await readAdminConfig(this.env), templateId,
+            sanitizeTemplateOutput(kvRecord.metadata.output)));
 
     // 5. Create gatekeepers from assignments and bind them into the workspace's (only) gadget.
     let metadata = await overseerResult.getMetadata();
     using gadget = await overseerResult.getGadget(metadata.defaultGadgetId!);
 
-    // Defensively put blueprint bindings into a map (not a raw object) until we've had a chance to
+    // Defensively put template bindings into a map (not a raw object) until we've had a chance to
     // validate the names.
-    let blueprintBindings = new Map(Object.entries(kvRecord.metadata.bindings));
+    let templateBindings = new Map(Object.entries(kvRecord.metadata.bindings));
     let gadgetId = metadata.defaultGadgetId!;
 
     // Create gatekeepers in two phases: first every non-spawner binding (binding the
@@ -495,8 +495,8 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     let gkPromises: Promise<void>[] = [];
 
     for (let [bindingName, assignment] of Object.entries(bindings)) {
-      let blueprintBinding = blueprintBindings.get(bindingName);
-      if (!blueprintBinding) {
+      let templateBinding = templateBindings.get(bindingName);
+      if (!templateBinding) {
         throw new Error(`Unknown binding name: ${bindingName}`);
       }
 
@@ -517,7 +517,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
           createdIds.set(bindingName, id);
           // A spawnerOnly binding exists purely to feed some spawner's env; it is not bound
           // into the gadget itself.
-          if (!blueprintBinding.spawnerOnly) {
+          if (!templateBinding.spawnerOnly) {
             await gadget.bind(bindingName, id);
           }
         } finally {
@@ -533,13 +533,13 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     // phase-one gatekeepers and the new gadget.
     for (let [bindingName, assignment] of Object.entries(bindings)) {
       if (assignment.type !== "agentSpawner") continue;
-      let blueprintBinding = blueprintBindings.get(bindingName);
-      if (blueprintBinding?.type !== "agentSpawner") {
+      let templateBinding = templateBindings.get(bindingName);
+      if (templateBinding?.type !== "agentSpawner") {
         throw new Error(`Binding "${bindingName}" type mismatch.`);
       }
 
       let env: Record<string, WorkpieceId> = {};
-      for (let [envName, target] of Object.entries(blueprintBinding.env)) {
+      for (let [envName, target] of Object.entries(templateBinding.env)) {
         if (target.type === "gadget") {
           env[envName] = gadgetId;
         } else {
@@ -553,7 +553,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
       }
 
       let config: AgentSpawnerConfig = {
-        displayName: blueprintBinding.title,
+        displayName: templateBinding.title,
         modelId: assignment.modelId,
         env,
       };
@@ -565,8 +565,8 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
       event_name: "gadget_created",
       user_id: this.#userId.toString(),
       gadget_id: id,
-      blueprint_id: blueprintId,
-      source: "blueprint",
+      template_id: templateId,
+      source: "template",
     });
 
     // @ts-expect-error Cap'n Web RPC stubs and native RPC stubs are compatible but the type
@@ -574,8 +574,8 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     return overseerResult;
   }
 
-  async deleteOrphanedBlueprint(blueprintId: string): Promise<void> {
-    return this.#user.deleteOwnedBlueprint(blueprintId);
+  async deleteOrphanedTemplate(templateId: string): Promise<void> {
+    return this.#user.deleteOwnedTemplate(templateId);
   }
 
   // --- Gatekeeper management apps ---
@@ -625,8 +625,8 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   }
 }
 
-async function serveBlueprintScreenshot(env: Env, blueprintId: string): Promise<Response> {
-  let object = await env.BLUEPRINT_CONTENT.get(`${BLUEPRINT_SCREENSHOT_R2_PREFIX}${blueprintId}`);
+async function serveTemplateScreenshot(env: Env, templateId: string): Promise<Response> {
+  let object = await env.TEMPLATE_CONTENT.get(`${TEMPLATE_SCREENSHOT_R2_PREFIX}${templateId}`);
   if (!object) return new Response("Not Found", {status: 404});
 
   let contentType = object.httpMetadata?.contentType;
@@ -815,24 +815,24 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
     return `${id.toString()}:${token}`;
   }
 
-  async getBlueprint(id: string): Promise<BlueprintPublicInfo | null> {
-    let kvRecord = await readBlueprintKvRecord(this.env, id);
+  async getTemplate(id: string): Promise<TemplatePublicInfo | null> {
+    let kvRecord = await readTemplateKvRecord(this.env, id);
     if (!kvRecord) return null;
 
-    return publicBlueprintInfo(id, kvRecord.metadata);
+    return publicTemplateInfo(id, kvRecord.metadata);
   }
 
-  async downloadBlueprint(id: string): Promise<ReadableStream<Uint8Array>> {
-    let kvRecord = await readBlueprintKvRecord(this.env, id);
-    if (!kvRecord) throw new Error("Blueprint not found.");
+  async downloadTemplate(id: string): Promise<ReadableStream<Uint8Array>> {
+    let kvRecord = await readTemplateKvRecord(this.env, id);
+    if (!kvRecord) throw new Error("Template not found.");
 
-    let r2Object = await this.env.BLUEPRINT_CONTENT.get(`${id}/${kvRecord.metadata.version}`);
-    if (!r2Object) throw new Error("Blueprint content not found in R2.");
+    let r2Object = await this.env.TEMPLATE_CONTENT.get(`${id}/${kvRecord.metadata.version}`);
+    if (!r2Object) throw new Error("Template content not found in R2.");
 
     let metadata = { ...kvRecord.metadata };
     delete metadata.screenshot;
 
-    return buildBlueprintArchiveStream(metadata, r2Object.body, r2Object.size);
+    return buildTemplateArchiveStream(metadata, r2Object.body, r2Object.size);
   }
 }
 
@@ -841,12 +841,12 @@ export default {
     let url = new URL(req.url);
 
     if (url.pathname === SITE_LOGO_PATH) {
-      return serveSiteLogo(req, env.BLUEPRINT_CONTENT);
+      return serveSiteLogo(req, env.TEMPLATE_CONTENT);
     }
 
-    if (url.pathname.startsWith(BLUEPRINT_SCREENSHOT_PATH_PREFIX)) {
-      let blueprintId = url.pathname.slice(BLUEPRINT_SCREENSHOT_PATH_PREFIX.length);
-      return serveBlueprintScreenshot(env, blueprintId);
+    if (url.pathname.startsWith(TEMPLATE_SCREENSHOT_PATH_PREFIX)) {
+      let templateId = url.pathname.slice(TEMPLATE_SCREENSHOT_PATH_PREFIX.length);
+      return serveTemplateScreenshot(env, templateId);
     }
 
     // Sign-in via authentication gatekeepers happens entirely within each gatekeeper Worker (the
@@ -859,24 +859,24 @@ export default {
     }
 
     if (url.pathname === "/api") {
-      // Make sure the bundled format blueprints are installed. The AdminSettings DO doesn't wake
+      // Make sure the bundled format templates are installed. The AdminSettings DO doesn't wake
       // merely because someone deployed, so the install needs a trigger; hanging it off API
       // traffic means a fresh deployment is provisioned by its first visitor. Fire-and-forget,
       // and the DO is idempotent.
-      if (!formatBlueprintInstallStarted) {
-        formatBlueprintInstallStarted = true;
-        ctx.waitUntil(ctx.exports.AdminSettings.getByName("").ensureFormatBlueprintsInstalled()
+      if (!formatTemplateInstallStarted) {
+        formatTemplateInstallStarted = true;
+        ctx.waitUntil(ctx.exports.AdminSettings.getByName("").ensureFormatTemplatesInstalled()
             .then((complete: boolean) => {
               // A partial install resolves rather than throwing, and nothing else will call the DO
               // from here, so clearing this is the whole retry: one bad archive would otherwise
               // leave the deployment half-provisioned for as long as the isolate lives.
-              if (!complete) formatBlueprintInstallStarted = false;
+              if (!complete) formatTemplateInstallStarted = false;
             })
             .catch((err: unknown) => {
               // Likewise let the next request try again. The DO coalesces concurrent callers, so a
               // retry costs one comparison once it succeeds.
-              formatBlueprintInstallStarted = false;
-              logger.warn("failed to install bundled format blueprints", {
+              formatTemplateInstallStarted = false;
+              logger.warn("failed to install bundled format templates", {
                 event: "formats.install.trigger.failed", error: err,
               });
             }));

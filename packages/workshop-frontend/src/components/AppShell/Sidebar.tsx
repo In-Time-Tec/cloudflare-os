@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import {
-  Blueprint,
+  Blueprint as BlueprintIcon,
   BookOpen,
   CalendarBlank,
   Compass,
@@ -155,9 +155,9 @@ export default function Sidebar({
               collapsed={collapsed}
             />
             <SidebarItem
-              to="/blueprints"
-              label="Blueprints"
-              icon={<Blueprint size={14} weight="regular" />}
+              to="/templates"
+              label="Templates"
+              icon={<BlueprintIcon size={14} weight="regular" />}
               collapsed={collapsed}
             />
             <SidebarItem

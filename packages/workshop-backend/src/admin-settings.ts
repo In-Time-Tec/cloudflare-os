@@ -1,45 +1,45 @@
-import { AdminApi, AdminFormat, AdminFormatPatch, AdminResourceVendor, AdminSettingsView, AmbientGatekeeperMode, BannerColor, BlueprintPublicInfo, MAX_ANNOUNCEMENT_LENGTH, MAX_INSTANCE_INSTRUCTIONS_LENGTH, MAX_SITE_NAME_LENGTH, isAmbientGatekeeperMode, isBannerColor, isHexColor } from '@gadgets/workshop-shared/api';
+import { AdminApi, AdminFormat, AdminFormatPatch, AdminResourceVendor, AdminSettingsView, AmbientGatekeeperMode, BannerColor, TemplatePublicInfo, MAX_ANNOUNCEMENT_LENGTH, MAX_INSTANCE_INSTRUCTIONS_LENGTH, MAX_SITE_NAME_LENGTH, isAmbientGatekeeperMode, isBannerColor, isHexColor } from '@gadgets/workshop-shared/api';
 import { GatekeeperVendor } from '@gadgets/workshop-shared/gatekeeper';
 import { DurableObject } from 'cloudflare:workers';
 import { RpcTarget } from 'capnweb';
 import { validateRpc } from 'capnweb-validate';
 import { collection, createTypedStorage } from '@gadgets/typed-storage';
 import { createWorkshopLogger } from "./observability";
-import { ADMIN_CONFIG_KEY, FEATURED_BLUEPRINTS_KEY, isReservedBlueprintKey, parseBlueprintKvRecord, readBlueprintKvRecord, sanitizeBlueprintOutput, serializeFeaturedBlueprints } from './blueprint-archive.js';
+import { ADMIN_CONFIG_KEY, FEATURED_TEMPLATES_KEY, isReservedTemplateKey, parseTemplateKvRecord, readTemplateKvRecord, sanitizeTemplateOutput, serializeFeaturedTemplates } from './template-archive.js';
 import { AdminConfig, DEFAULT_ADMIN_CONFIG, FormatCuration, MAX_AGENT_HINT, defaultOutputFormatId, listPromotedFormats, reorderFormats, sanitizeOutputOverrides, serializeAdminConfig } from './admin-config.js';
 import { SITE_LOGO_R2_KEY, siteLogoImage, validateSiteLogo } from './site-logo.js';
 import { ambientGatekeeperMode, DEFAULT_AMBIENT_GATEKEEPER_MODE } from './provisioning-policy.js';
 import { buildGatekeeperVendorMap } from './auth/auth-vendors.js';
 import { UserDurableObject } from './user.js';
-import { formatBlueprintsManifestVersion, installFormatBlueprints } from './format-blueprints.js';
-import { FORMAT_BLUEPRINTS } from './generated/format-blueprints.js';
+import { formatTemplatesManifestVersion, installFormatTemplates } from './format-templates.js';
+import { FORMAT_TEMPLATES } from './generated/format-templates.js';
 
 const logger = createWorkshopLogger("workshop.admin.settings");
 
 function makeAdminSettingsStorage(storage: DurableObjectStorage) {
   return createTypedStorage(storage, {
     collections: {
-      // Mirror of the currently-featured blueprint public records. The user DO owns the
+      // Mirror of the currently-featured template public records. The user DO owns the
       // authoritative featured bit; this DO keeps the publishable deployment-wide copy.
-      featuredBlueprints: collection<BlueprintPublicInfo>()({
+      featuredTemplates: collection<TemplatePublicInfo>()({
         primaryKey: 'id',
       }),
     },
     singletons: {
-      // Authoritative deployment admin config. Mirrored to BLUEPRINTS KV (ADMIN_CONFIG_KEY) so the
+      // Authoritative deployment admin config. Mirrored to TEMPLATES KV (ADMIN_CONFIG_KEY) so the
       // connect/login/agent hot paths can read it without touching this singleton DO.
       adminConfig: DEFAULT_ADMIN_CONFIG as AdminConfig,
 
-      // Which set of bundled format blueprints has been installed (see
-      // formatBlueprintsManifestVersion). Empty means none yet; a mismatch means the repo shipped
+      // Which set of bundled format templates has been installed (see
+      // formatTemplatesManifestVersion). Empty means none yet; a mismatch means the repo shipped
       // new or updated ones and they should be reinstalled.
-      installedFormatBlueprints: "",
+      installedFormatTemplates: "",
 
-      // Bundled blueprint ids that have already been offered for promotion into
+      // Bundled template ids that have already been offered for promotion into
       // AdminConfig.formats. Tracked separately from the install stamp so that promotion happens
-      // exactly once per blueprint: an admin who then removes a format keeps it removed, while a
+      // exactly once per template: an admin who then removes a format keeps it removed, while a
       // deployment that installed before curation existed still gets promoted.
-      promotedFormatBlueprints: <string[]>[],
+      promotedFormatTemplates: <string[]>[],
     },
   });
 }
@@ -76,34 +76,34 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Install the format blueprints bundled with this deployment, if that hasn't already happened
+   * Install the format templates bundled with this deployment, if that hasn't already happened
    * for this exact manifest. Idempotent and cheap: an up-to-date deployment does one string
    * comparison and returns.
    *
-   * Written straight into the featured mirror rather than through setBlueprintFeatured(), whose
+   * Written straight into the featured mirror rather than through setTemplateFeatured(), whose
    * authoritative bit lives in the publishing user's DO -- these have no owning user.
    *
    * Callers are coalesced onto one run, or two isolates racing on a fresh deployment both promote
-   * the same blueprints, and a duplicated id makes setFormatOrder() reject every reordering.
+   * the same templates, and a duplicated id makes setFormatOrder() reject every reordering.
    */
-  ensureFormatBlueprintsInstalled(): Promise<boolean> {
-    return this.#installInFlight ??= this.#installFormatBlueprints()
+  ensureFormatTemplatesInstalled(): Promise<boolean> {
+    return this.#installInFlight ??= this.#installFormatTemplates()
         .finally(() => { this.#installInFlight = undefined; });
   }
 
   #installInFlight?: Promise<boolean>;
 
-  // Resolves true once every bundled blueprint is live. A partial install resolves false rather
+  // Resolves true once every bundled template is live. A partial install resolves false rather
   // than throwing: the caller has nothing to handle, but it does need to know to ask again.
-  async #installFormatBlueprints(): Promise<boolean> {
+  async #installFormatTemplates(): Promise<boolean> {
     let complete = true;
-    let manifestVersion = formatBlueprintsManifestVersion();
-    if (this.storage.installedFormatBlueprints.get() !== manifestVersion) {
-      let installed = await installFormatBlueprints(this.env);
+    let manifestVersion = formatTemplatesManifestVersion();
+    if (this.storage.installedFormatTemplates.get() !== manifestVersion) {
+      let installed = await installFormatTemplates(this.env);
 
       if (installed.length > 0) {
         for (let publicInfo of installed) {
-          this.storage.featuredBlueprints.put(publicInfo);
+          this.storage.featuredTemplates.put(publicInfo);
         }
         await this.#writeFeaturedSnapshot();
       }
@@ -111,14 +111,14 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
       // Stamped only once the whole manifest is live, so a crash or a single bad archive retries
       // next time. Recording a partial install as complete would strand the entries that failed
       // until the manifest happened to change again.
-      complete = installed.length === FORMAT_BLUEPRINTS.length;
+      complete = installed.length === FORMAT_TEMPLATES.length;
       if (complete) {
-        this.storage.installedFormatBlueprints.put(manifestVersion);
+        this.storage.installedFormatTemplates.put(manifestVersion);
       }
-      logger.info("installed bundled format blueprints", {
+      logger.info("installed bundled format templates", {
         event: "formats.install.complete",
         size: installed.length,
-        failureCount: FORMAT_BLUEPRINTS.length - installed.length,
+        failureCount: FORMAT_TEMPLATES.length - installed.length,
       });
     }
 
@@ -128,48 +128,48 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
     return complete;
   }
 
-  // Offer each bundled blueprint as a standard format, once ever. A separate one-shot decision per
-  // blueprint: re-deriving the list from the manifest would undo an admin's removal on every
-  // startup, and reinstalling an updated archive must refresh the blueprint without resetting how
+  // Offer each bundled template as a standard format, once ever. A separate one-shot decision per
+  // template: re-deriving the list from the manifest would undo an admin's removal on every
+  // startup, and reinstalling an updated archive must refresh the template without resetting how
   // the deployment has chosen to offer it.
   //
-  // The converse isn't handled: a blueprint dropped from the bundle, or given a new blueprintId,
+  // The converse isn't handled: a template dropped from the bundle, or given a new templateId,
   // leaves its record and its promotion behind for an admin to remove by hand. Withdrawing them
   // would mean tracking which promotions this installer made, which is worth doing before the
   // bundled set ever changes.
   async #promoteBundledFormats(): Promise<void> {
-    let promoted = new Set(this.storage.promotedFormatBlueprints.get());
-    let pending = FORMAT_BLUEPRINTS.filter(entry => !promoted.has(entry.blueprintId));
+    let promoted = new Set(this.storage.promotedFormatTemplates.get());
+    let pending = FORMAT_TEMPLATES.filter(entry => !promoted.has(entry.templateId));
     if (pending.length === 0) return;
 
     let config = this.#config();
-    let known = new Set(config.formats.map(f => f.blueprintId));
+    let known = new Set(config.formats.map(f => f.templateId));
     let added = pending
-        .filter(entry => !known.has(entry.blueprintId))
-        .map(entry => ({blueprintId: entry.blueprintId, enabled: true}));
+        .filter(entry => !known.has(entry.templateId))
+        .map(entry => ({templateId: entry.templateId, enabled: true}));
     // Always write, even when every pending format is already in DO storage. That is the retry
     // state after a prior KV mirror failure; stamping promotion without writing would strand the
     // hot-path mirror on its old config forever.
     await this.updateAdminConfig({formats: [...config.formats, ...added]});
 
-    for (let entry of pending) promoted.add(entry.blueprintId);
-    this.storage.promotedFormatBlueprints.put([...promoted]);
+    for (let entry of pending) promoted.add(entry.templateId);
+    this.storage.promotedFormatTemplates.put([...promoted]);
   }
 
   async #writeFeaturedSnapshot(): Promise<void> {
-    let featured = [...this.storage.featuredBlueprints.list()];
-    await this.env.BLUEPRINTS.put(FEATURED_BLUEPRINTS_KEY, serializeFeaturedBlueprints(featured));
+    let featured = [...this.storage.featuredTemplates.list()];
+    await this.env.TEMPLATES.put(FEATURED_TEMPLATES_KEY, serializeFeaturedTemplates(featured));
   }
 
   // Reconcile the mirrored featured list to match the authoritative bit stored in the owner
   // User DO, while also refreshing stale metadata snapshots for featured entries.
-  async #syncFeaturedMirror(publicInfo: BlueprintPublicInfo, featured: boolean): Promise<void> {
-    let existing = this.storage.featuredBlueprints.get(publicInfo.id);
+  async #syncFeaturedMirror(publicInfo: TemplatePublicInfo, featured: boolean): Promise<void> {
+    let existing = this.storage.featuredTemplates.get(publicInfo.id);
     let changed = false;
 
     if (!featured) {
       if (existing) {
-        this.storage.featuredBlueprints.delete(publicInfo.id);
+        this.storage.featuredTemplates.delete(publicInfo.id);
         changed = true;
       }
     } else if (
@@ -177,7 +177,7 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
       existing.metadata.version !== publicInfo.metadata.version ||
       existing.metadata.lastUpdated.valueOf() !== publicInfo.metadata.lastUpdated.valueOf()
     ) {
-      this.storage.featuredBlueprints.put(publicInfo);
+      this.storage.featuredTemplates.put(publicInfo);
       changed = true;
     }
 
@@ -186,45 +186,45 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
     }
   }
 
-  async #getOwnerBlueprint(blueprintId: string): Promise<{
-    // Absent for a blueprint with no owning user, in which case `featureable` is false.
+  async #getOwnerTemplate(templateId: string): Promise<{
+    // Absent for a template with no owning user, in which case `featureable` is false.
     owner: DurableObjectStub<UserDurableObject> | undefined;
-    publicInfo: BlueprintPublicInfo;
+    publicInfo: TemplatePublicInfo;
     featureable: boolean;
   }> {
-    if (isReservedBlueprintKey(blueprintId)) {
-      throw new Error('Blueprint not found.');
+    if (isReservedTemplateKey(templateId)) {
+      throw new Error('Template not found.');
     }
 
-    let raw = await this.env.BLUEPRINTS.get(blueprintId);
+    let raw = await this.env.TEMPLATES.get(templateId);
     if (!raw) {
-      throw new Error('Blueprint not found.');
+      throw new Error('Template not found.');
     }
 
-    let kvRecord = parseBlueprintKvRecord(raw);
+    let kvRecord = parseTemplateKvRecord(raw);
 
     return {
       owner: kvRecord.ownerId
           ? this.users.get(this.users.idFromString(kvRecord.ownerId))
           : undefined,
       publicInfo: {
-        id: blueprintId,
+        id: templateId,
         metadata: kvRecord.metadata,
       },
-      // A deployment-installed blueprint (see format-blueprints.ts) has no owning User DO to hold
+      // A deployment-installed template (see format-templates.ts) has no owning User DO to hold
       // the authoritative featured bit, so the owner-anchored toggle doesn't apply -- the same
-      // answer as an uploaded blueprint. It reaches users through the deployment's curation.
+      // answer as an uploaded template. It reaches users through the deployment's curation.
       featureable: !!kvRecord.gadgetId && !!kvRecord.ownerId,
     };
   }
 
-  async isBlueprintFeatured(blueprintId: string): Promise<boolean | null> {
-    let { owner, publicInfo, featureable } = await this.#getOwnerBlueprint(blueprintId);
+  async isTemplateFeatured(templateId: string): Promise<boolean | null> {
+    let { owner, publicInfo, featureable } = await this.#getOwnerTemplate(templateId);
     if (!featureable || !owner) {
       return null;
     }
 
-    let featured = await owner.isBlueprintFeatured(blueprintId);
+    let featured = await owner.isTemplateFeatured(templateId);
     if (featured === null) {
       return null;
     }
@@ -234,25 +234,25 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
     return featured;
   }
 
-  async setBlueprintFeatured(blueprintId: string, featured: boolean): Promise<void> {
-    let { owner, publicInfo, featureable } = await this.#getOwnerBlueprint(blueprintId);
+  async setTemplateFeatured(templateId: string, featured: boolean): Promise<void> {
+    let { owner, publicInfo, featureable } = await this.#getOwnerTemplate(templateId);
     if (!featureable || !owner) {
-      throw new Error('Blueprint not featureable.');
+      throw new Error('Template not featureable.');
     }
 
-    await owner.setBlueprintFeatured(blueprintId, featured);
+    await owner.setTemplateFeatured(templateId, featured);
     await this.#syncFeaturedMirror(publicInfo, featured);
   }
 
-  async syncFeaturedBlueprint(publicInfo: BlueprintPublicInfo): Promise<void> {
-    // Overseer propagation calls this after blueprint updates so the mirror keeps up with the
+  async syncFeaturedTemplate(publicInfo: TemplatePublicInfo): Promise<void> {
+    // Overseer propagation calls this after template updates so the mirror keeps up with the
     // latest published metadata, but only while the owner-side featured bit stays enabled.
     await this.#syncFeaturedMirror(publicInfo, true);
   }
 
-  async deleteFeaturedBlueprint(blueprintId: string): Promise<void> {
-    if (this.storage.featuredBlueprints.get(blueprintId)) {
-      this.storage.featuredBlueprints.delete(blueprintId);
+  async deleteFeaturedTemplate(templateId: string): Promise<void> {
+    if (this.storage.featuredTemplates.get(templateId)) {
+      this.storage.featuredTemplates.delete(templateId);
       await this.#writeFeaturedSnapshot();
     }
   }
@@ -280,7 +280,7 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
       let next = mutate(current);
       this.storage.adminConfig.put(next);
       try {
-        await this.env.BLUEPRINTS.put(ADMIN_CONFIG_KEY, serializeAdminConfig(next));
+        await this.env.TEMPLATES.put(ADMIN_CONFIG_KEY, serializeAdminConfig(next));
       } catch (error) {
         this.storage.adminConfig.put(current);
         throw error;
@@ -324,25 +324,25 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
 
   // --- Standard output formats ---
 
-  // Admin view of the promoted formats: the deployment's curation joined with each blueprint, so
-  // the panel can show what is being curated and flag entries whose blueprint has been deleted.
+  // Admin view of the promoted formats: the deployment's curation joined with each template, so
+  // the panel can show what is being curated and flag entries whose template has been deleted.
   async #listFormatConfig(config: AdminConfig): Promise<AdminFormat[]> {
-    let bundled = new Set(FORMAT_BLUEPRINTS.map(entry => entry.blueprintId));
+    let bundled = new Set(FORMAT_TEMPLATES.map(entry => entry.templateId));
 
     // Every entry, not just the offered ones: the panel exists to show what is disabled and what
-    // points at a deleted blueprint.
+    // points at a deleted template.
     return (await listPromotedFormats(this.env, config.formats)).map(
         ({entry, metadata, declared, output}) => ({
-          blueprintId: entry.blueprintId,
-          blueprintTitle: metadata?.title ?? "",
-          blueprintDescription: metadata?.description ?? "",
+          templateId: entry.templateId,
+          templateTitle: metadata?.title ?? "",
+          templateDescription: metadata?.description ?? "",
           output,
           declared,
           overrides: entry.overrides,
           enabled: entry.enabled,
           agentHint: entry.agentHint ?? "",
           missing: !metadata,
-          bundled: bundled.has(entry.blueprintId),
+          bundled: bundled.has(entry.templateId),
         }));
   }
 
@@ -358,43 +358,43 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
     });
   }
 
-  async promoteFormat(blueprintId: string): Promise<void> {
-    let record = await readBlueprintKvRecord(this.env, blueprintId);
+  async promoteFormat(templateId: string): Promise<void> {
+    let record = await readTemplateKvRecord(this.env, templateId);
     if (!record) {
-      throw new Error("Blueprint not found.");
+      throw new Error("Template not found.");
     }
     await this.#mutateFormats(formats => {
       // Idempotent so retrying after a KV mirror failure reaches #mutateFormats()'s repair write.
-      if (formats.some(f => f.blueprintId === blueprintId)) return null;
-      // A blueprint that declares no output still needs a stable grouping key before the admin can
+      if (formats.some(f => f.templateId === templateId)) return null;
+      // A template that declares no output still needs a stable grouping key before the admin can
       // name it. Generate that hidden implementation detail here; the panel only asks the admin for
       // the human-facing noun, plural and icon.
-      let declared = sanitizeBlueprintOutput(record.metadata.output);
+      let declared = sanitizeTemplateOutput(record.metadata.output);
       return [...formats, {
-        blueprintId,
+        templateId,
         enabled: true,
-        ...(declared ? {} : {overrides: {id: defaultOutputFormatId(blueprintId)}}),
+        ...(declared ? {} : {overrides: {id: defaultOutputFormatId(templateId)}}),
       }];
     });
   }
 
-  async removeFormat(blueprintId: string): Promise<void> {
+  async removeFormat(templateId: string): Promise<void> {
     // Enforced here, not just in the panel: this is an RPC an admin session can call directly.
     // Withdrawing a bundled entry is `enabled: false`, which keeps its overrides, hint and
     // position.
-    if (FORMAT_BLUEPRINTS.some(entry => entry.blueprintId === blueprintId)) {
+    if (FORMAT_TEMPLATES.some(entry => entry.templateId === templateId)) {
       throw new Error(
           "This format ships with the deployment, so it can't be removed. Turn it off instead.");
     }
     await this.#mutateFormats(formats => {
-      let next = formats.filter(f => f.blueprintId !== blueprintId);
+      let next = formats.filter(f => f.templateId !== templateId);
       return next.length === formats.length ? null : next;
     });
   }
 
-  async updateFormat(blueprintId: string, patch: AdminFormatPatch): Promise<void> {
+  async updateFormat(templateId: string, patch: AdminFormatPatch): Promise<void> {
     await this.#mutateFormats(formats => formats.map(entry => {
-      if (entry.blueprintId !== blueprintId) return entry;
+      if (entry.templateId !== templateId) return entry;
 
       let next: FormatCuration = {...entry};
       if (patch.enabled !== undefined) next.enabled = patch.enabled;
@@ -405,7 +405,7 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
         if (hint) next.agentHint = hint; else delete next.agentHint;
       }
       if (patch.overrides) {
-        // null reverts a field to the blueprint's own declaration; absent leaves it alone.
+        // null reverts a field to the template's own declaration; absent leaves it alone.
         let merged: Record<string, unknown> = {...entry.overrides};
         for (let [key, value] of Object.entries(patch.overrides)) {
           if (value === null) delete merged[key]; else merged[key] = value;
@@ -417,8 +417,8 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
     }));
   }
 
-  async setFormatOrder(blueprintIds: string[]): Promise<void> {
-    await this.#mutateFormats(formats => reorderFormats(formats, blueprintIds));
+  async setFormatOrder(templateIds: string[]): Promise<void> {
+    await this.#mutateFormats(formats => reorderFormats(formats, templateIds));
   }
 
   /** Enable/disable a single gatekeeper resource type atomically (read-modify-write within the DO). */
@@ -443,7 +443,7 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
       if (data === null) {
         await this.updateAdminConfig({ siteLogoConfigured: false });
         try {
-          await this.env.BLUEPRINT_CONTENT.delete(SITE_LOGO_R2_KEY);
+          await this.env.TEMPLATE_CONTENT.delete(SITE_LOGO_R2_KEY);
         } catch (error) {
           logger.warn("failed to delete disabled site logo", {
             event: "site.logo.delete.failed", error,
@@ -452,7 +452,7 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
         return false;
       }
 
-      await this.env.BLUEPRINT_CONTENT.put(SITE_LOGO_R2_KEY, data, {
+      await this.env.TEMPLATE_CONTENT.put(SITE_LOGO_R2_KEY, data, {
         httpMetadata: { contentType: "image/png" },
       });
       if (!current.siteLogoConfigured) {
@@ -643,27 +643,27 @@ export class AdminApiImpl extends RpcTarget implements AdminApi {
     await this.admin.updateAdminConfig({ accentColor: color });
   }
 
-  isBlueprintFeatured(blueprintId: string): Promise<boolean | null> {
-    return this.admin.isBlueprintFeatured(blueprintId);
+  isTemplateFeatured(templateId: string): Promise<boolean | null> {
+    return this.admin.isTemplateFeatured(templateId);
   }
 
-  setBlueprintFeatured(blueprintId: string, featured: boolean): Promise<void> {
-    return this.admin.setBlueprintFeatured(blueprintId, featured);
+  setTemplateFeatured(templateId: string, featured: boolean): Promise<void> {
+    return this.admin.setTemplateFeatured(templateId, featured);
   }
 
-  promoteFormat(blueprintId: string): Promise<void> {
-    return this.admin.promoteFormat(blueprintId);
+  promoteFormat(templateId: string): Promise<void> {
+    return this.admin.promoteFormat(templateId);
   }
 
-  removeFormat(blueprintId: string): Promise<void> {
-    return this.admin.removeFormat(blueprintId);
+  removeFormat(templateId: string): Promise<void> {
+    return this.admin.removeFormat(templateId);
   }
 
-  updateFormat(blueprintId: string, patch: AdminFormatPatch): Promise<void> {
-    return this.admin.updateFormat(blueprintId, patch);
+  updateFormat(templateId: string, patch: AdminFormatPatch): Promise<void> {
+    return this.admin.updateFormat(templateId, patch);
   }
 
-  setFormatOrder(blueprintIds: string[]): Promise<void> {
-    return this.admin.setFormatOrder(blueprintIds);
+  setFormatOrder(templateIds: string[]): Promise<void> {
+    return this.admin.setFormatOrder(templateIds);
   }
 }

@@ -3,7 +3,7 @@ import { Dialog, Tooltip, useKumoToastManager } from '@cloudflare/kumo'
 import {
   Pencil,
   Trash,
-  Blueprint,
+  Blueprint as BlueprintIcon,
   Warning,
   X,
 } from '@phosphor-icons/react'
@@ -17,9 +17,9 @@ import { WorkshopButton, WorkshopIconButton, WorkshopInput } from './components/
 import { EmptyState } from './components/EmptyState'
 import {
   BindingCardData,
-  BlueprintBindingCard,
+  TemplateBindingCard,
   loadBindingCardData,
-} from './components/BlueprintBindingCard'
+} from './components/TemplateBindingCard'
 import { reportIssue } from './errorReporting'
 
 interface ConnectionsProps {
@@ -237,8 +237,8 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
               {bindings.map((gk, index) => {
                 const isEditing = editingBinding === gk.name
                 const isDeleting = deleteTarget?.name === gk.name
-                // Still provisional to the open chat (see GadgetBindingInfo.chatId). Blueprint
-                // annotations are excluded, since a blueprint only ever exports permanent edges.
+                // Still provisional to the open chat (see GadgetBindingInfo.chatId). BlueprintIcon
+                // annotations are excluded, since a template only ever exports permanent edges.
                 const isPending = gk.chatId !== undefined
 
                 return (
@@ -329,12 +329,12 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
                             </WorkshopIconButton>
                           </Tooltip>
                           {!isPending && (
-                            <Tooltip content="Edit blueprint settings" asChild>
+                            <Tooltip content="Edit template settings" asChild>
                               <WorkshopIconButton
                                 onClick={() => setAnnotationTarget(gk)}
-                                aria-label="Edit blueprint settings"
+                                aria-label="Edit template settings"
                               >
-                                <Blueprint size={14} />
+                                <BlueprintIcon size={14} />
                               </WorkshopIconButton>
                             </Tooltip>
                           )}
@@ -473,12 +473,12 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
         }}
       />
 
-      <BlueprintAnnotationModal
+      <TemplateAnnotationModal
         target={annotationTarget}
         gadget={gadget}
         onClose={() => setAnnotationTarget(null)}
         onSaved={() => {
-          toasts.add({ title: 'Blueprint settings saved.', variant: 'success' })
+          toasts.add({ title: 'Template settings saved.', variant: 'success' })
           setAnnotationTarget(null)
         }}
       />
@@ -487,7 +487,7 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
   )
 }
 
-function BlueprintAnnotationModal({
+function TemplateAnnotationModal({
   target,
   gadget,
   onClose,
@@ -538,7 +538,7 @@ function BlueprintAnnotationModal({
     setSaving(true)
     setSaveError(null)
     try {
-      await gadget.setBlueprintAnnotation(target.name, data.annotation)
+      await gadget.setTemplateAnnotation(target.name, data.annotation)
       onSaved()
     } catch (err: any) {
       reportIssue('connections.binding-save', err)
@@ -557,10 +557,10 @@ function BlueprintAnnotationModal({
           <div className="flex items-start justify-between gap-4 border-b border-kumo-line px-4 py-4 sm:px-5">
             <div className="min-w-0">
               <Dialog.Title className="text-[15px] leading-5 font-medium tracking-[-0.3px] text-kumo-default">
-                Blueprint settings
+                BlueprintIcon settings
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-[12px] leading-4 font-normal tracking-[-0.2px] text-kumo-subtle">
-                How this connection appears in blueprints.
+                How this connection appears in templates.
               </Dialog.Description>
             </div>
             <Dialog.Close
@@ -579,7 +579,7 @@ function BlueprintAnnotationModal({
               null
             ) : (
               <>
-                <BlueprintBindingCard
+                <TemplateBindingCard
                   data={data}
                   onChange={(annotation) => setData({ ...data, annotation })}
                   autoFocusDescription

@@ -7,13 +7,13 @@
     "dev": "echo \"run 'pnpm dev-server' in the root directory instead\" >&2 && exit 1",
     "deploy": "wrangler deploy",
     "build:worker": "node build-browser-runtime.mjs && pnpm exec capnweb-validate build --out .wrangler/validate",
-    "build": "node build-browser-runtime.mjs && node scripts/build-format-blueprints.mjs && tsc",
+    "build": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && tsc",
     "clean": "rm -rf dist",
-    "test": "node build-browser-runtime.mjs && node scripts/build-format-blueprints.mjs && vitest run && vitest run --config vitest.integration.config.ts",
-    "test:integration": "node build-browser-runtime.mjs && node scripts/build-format-blueprints.mjs && vitest run --config vitest.integration.config.ts",
-    "test:watch": "node build-browser-runtime.mjs && node scripts/build-format-blueprints.mjs && vitest",
-    "build:format-blueprints": "node scripts/build-format-blueprints.mjs",
-    "import:format-blueprint": "node --experimental-strip-types --no-warnings scripts/import-format-blueprint.mjs"
+    "test": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && vitest run && vitest run --config vitest.integration.config.ts",
+    "test:integration": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && vitest run --config vitest.integration.config.ts",
+    "test:watch": "node build-browser-runtime.mjs && node scripts/build-format-templates.mjs && vitest",
+    "build:format-templates": "node scripts/build-format-templates.mjs",
+    "import:format-template": "node --experimental-strip-types --no-warnings scripts/import-format-template.mjs"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.3.0",

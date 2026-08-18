@@ -1,21 +1,21 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useRef } from 'react'
 import { Compass, UploadSimple } from '@phosphor-icons/react'
-import BlueprintList from '../../components/BlueprintList'
+import TemplateList from '../../components/TemplateList'
 import PageChrome, { PAGE_ACTION } from '../../components/AppShell/PageChrome'
 import { useDocumentTitle } from '../../useDocumentTitle'
 
-export const Route = createFileRoute('/_authenticated/blueprints')({
-  component: BlueprintsRoutePage,
+export const Route = createFileRoute('/_authenticated/templates')({
+  component: TemplatesRoutePage,
 })
 
-function BlueprintsRoutePage() {
-  useDocumentTitle('Blueprints')
+function TemplatesRoutePage() {
+  useDocumentTitle('Templates')
   const uploadInputRef = useRef<HTMLInputElement>(null)
 
   return (
     <PageChrome
-      title="Blueprints"
+      title="Templates"
       actions={
         <>
           <Link to="/explore" className={PAGE_ACTION}>
@@ -33,7 +33,7 @@ function BlueprintsRoutePage() {
         </>
       }
     >
-      <BlueprintList hideToolbarActions uploadInputRef={uploadInputRef} />
+      <TemplateList hideToolbarActions uploadInputRef={uploadInputRef} />
     </PageChrome>
   )
 }

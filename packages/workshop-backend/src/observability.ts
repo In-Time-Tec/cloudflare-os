@@ -6,7 +6,7 @@ export type WorkshopObservabilityFields = {
   accountId: number;
   actionId: number | string;
   autoProvisioned: boolean;
-  blueprintId: string;
+  templateId: string;
   callbackInitiated: boolean;
   chatId: number;
   durableObjectId: string;

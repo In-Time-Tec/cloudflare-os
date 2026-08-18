@@ -1,28 +1,28 @@
 import { createFileRoute } from '@tanstack/react-router'
-import BlueprintLandingPage from '../BlueprintLandingPage'
+import TemplateLandingPage from '../TemplateLandingPage'
 import Header from '../components/Header'
 import { AuthProvider } from '../AuthContext'
 import AppShell from '../components/AppShell/AppShell'
 import { useWorkshopSession } from '../session'
 import { loadAuthenticatedShell } from '../query/shell'
-import { publicBlueprintOptions } from '../query/public'
+import { publicTemplateOptions } from '../query/public'
 
-export const Route = createFileRoute('/blueprint/$id')({
+export const Route = createFileRoute('/template/$id')({
   loader: async ({ context, params }) => {
     await context.queryClient.ensureQueryData({
-      ...publicBlueprintOptions(context.session, params.id),
+      ...publicTemplateOptions(context.session, params.id),
       revalidateIfStale: true,
     })
     if (context.session.isAuthenticated) {
       await loadAuthenticatedShell(context.session, context.queryClient)
     }
   },
-  component: BlueprintRoute,
+  component: TemplateRoute,
 })
 
-function BlueprintRoute() {
+function TemplateRoute() {
   const session = useWorkshopSession()
-  const page = <BlueprintLandingPage rpcStub={session.publicApi} />
+  const page = <TemplateLandingPage rpcStub={session.publicApi} />
   if (session.isAuthenticated) {
     return (
       <AuthProvider>

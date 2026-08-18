@@ -14,7 +14,6 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
-import { Route as AuthenticatedBlueprintsRouteImport } from './routes/_authenticated/blueprints'
 import { Route as AuthenticatedCalendarRouteImport } from './routes/_authenticated/calendar'
 import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
 import { Route as AuthenticatedContextRouteImport } from './routes/_authenticated/context'
@@ -25,9 +24,10 @@ import { Route as AuthenticatedGatekeepersRouteImport } from './routes/_authenti
 import { Route as AuthenticatedOutputsRouteImport } from './routes/_authenticated/outputs'
 import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
 import { Route as AuthenticatedProvidersRouteImport } from './routes/_authenticated/providers'
+import { Route as AuthenticatedTemplatesRouteImport } from './routes/_authenticated/templates'
 import { Route as AuthenticatedWorkspacesRouteImport } from './routes/_authenticated/workspaces'
-import { Route as BlueprintIdRouteImport } from './routes/blueprint.$id'
 import { Route as GadgetIdRouteImport } from './routes/gadget.$id'
+import { Route as TemplateIdRouteImport } from './routes/template.$id'
 import { Route as AuthenticatedGatekeepersAppIdRouteImport } from './routes/_authenticated/gatekeepers_.$appId'
 import { Route as AuthenticatedWorkspaceIdRouteImport } from './routes/_authenticated/workspace.$id'
 
@@ -53,11 +53,6 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
 const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
-  getParentRoute: () => AuthenticatedRoute,
-} as any)
-const AuthenticatedBlueprintsRoute = AuthenticatedBlueprintsRouteImport.update({
-  id: '/blueprints',
-  path: '/blueprints',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedCalendarRoute = AuthenticatedCalendarRouteImport.update({
@@ -112,19 +107,24 @@ const AuthenticatedProvidersRoute = AuthenticatedProvidersRouteImport.update({
   path: '/providers',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedTemplatesRoute = AuthenticatedTemplatesRouteImport.update({
+  id: '/templates',
+  path: '/templates',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedWorkspacesRoute = AuthenticatedWorkspacesRouteImport.update({
   id: '/workspaces',
   path: '/workspaces',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
-const BlueprintIdRoute = BlueprintIdRouteImport.update({
-  id: '/blueprint/$id',
-  path: '/blueprint/$id',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const GadgetIdRoute = GadgetIdRouteImport.update({
   id: '/gadget/$id',
   path: '/gadget/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TemplateIdRoute = TemplateIdRouteImport.update({
+  id: '/template/$id',
+  path: '/template/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedGatekeepersAppIdRoute =
@@ -145,7 +145,6 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/admin': typeof AuthenticatedAdminRoute
-  '/blueprints': typeof AuthenticatedBlueprintsRoute
   '/calendar': typeof AuthenticatedCalendarRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/context': typeof AuthenticatedContextRoute
@@ -156,9 +155,10 @@ export interface FileRoutesByFullPath {
   '/outputs': typeof AuthenticatedOutputsRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/providers': typeof AuthenticatedProvidersRoute
+  '/templates': typeof AuthenticatedTemplatesRoute
   '/workspaces': typeof AuthenticatedWorkspacesRoute
-  '/blueprint/$id': typeof BlueprintIdRoute
   '/gadget/$id': typeof GadgetIdRoute
+  '/template/$id': typeof TemplateIdRoute
   '/gatekeepers/$appId': typeof AuthenticatedGatekeepersAppIdRoute
   '/workspace/$id': typeof AuthenticatedWorkspaceIdRoute
 }
@@ -166,7 +166,6 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/admin': typeof AuthenticatedAdminRoute
-  '/blueprints': typeof AuthenticatedBlueprintsRoute
   '/calendar': typeof AuthenticatedCalendarRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/context': typeof AuthenticatedContextRoute
@@ -177,9 +176,10 @@ export interface FileRoutesByTo {
   '/outputs': typeof AuthenticatedOutputsRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/providers': typeof AuthenticatedProvidersRoute
+  '/templates': typeof AuthenticatedTemplatesRoute
   '/workspaces': typeof AuthenticatedWorkspacesRoute
-  '/blueprint/$id': typeof BlueprintIdRoute
   '/gadget/$id': typeof GadgetIdRoute
+  '/template/$id': typeof TemplateIdRoute
   '/': typeof AuthenticatedIndexRoute
   '/gatekeepers/$appId': typeof AuthenticatedGatekeepersAppIdRoute
   '/workspace/$id': typeof AuthenticatedWorkspaceIdRoute
@@ -190,7 +190,6 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
-  '/_authenticated/blueprints': typeof AuthenticatedBlueprintsRoute
   '/_authenticated/calendar': typeof AuthenticatedCalendarRoute
   '/_authenticated/channels': typeof AuthenticatedChannelsRoute
   '/_authenticated/context': typeof AuthenticatedContextRoute
@@ -201,9 +200,10 @@ export interface FileRoutesById {
   '/_authenticated/outputs': typeof AuthenticatedOutputsRoute
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/providers': typeof AuthenticatedProvidersRoute
+  '/_authenticated/templates': typeof AuthenticatedTemplatesRoute
   '/_authenticated/workspaces': typeof AuthenticatedWorkspacesRoute
-  '/blueprint/$id': typeof BlueprintIdRoute
   '/gadget/$id': typeof GadgetIdRoute
+  '/template/$id': typeof TemplateIdRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/gatekeepers_/$appId': typeof AuthenticatedGatekeepersAppIdRoute
   '/_authenticated/workspace/$id': typeof AuthenticatedWorkspaceIdRoute
@@ -215,7 +215,6 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/admin'
-    | '/blueprints'
     | '/calendar'
     | '/channels'
     | '/context'
@@ -226,9 +225,10 @@ export interface FileRouteTypes {
     | '/outputs'
     | '/profile'
     | '/providers'
+    | '/templates'
     | '/workspaces'
-    | '/blueprint/$id'
     | '/gadget/$id'
+    | '/template/$id'
     | '/gatekeepers/$appId'
     | '/workspace/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -236,7 +236,6 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/admin'
-    | '/blueprints'
     | '/calendar'
     | '/channels'
     | '/context'
@@ -247,9 +246,10 @@ export interface FileRouteTypes {
     | '/outputs'
     | '/profile'
     | '/providers'
+    | '/templates'
     | '/workspaces'
-    | '/blueprint/$id'
     | '/gadget/$id'
+    | '/template/$id'
     | '/'
     | '/gatekeepers/$appId'
     | '/workspace/$id'
@@ -259,7 +259,6 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/_authenticated/admin'
-    | '/_authenticated/blueprints'
     | '/_authenticated/calendar'
     | '/_authenticated/channels'
     | '/_authenticated/context'
@@ -270,9 +269,10 @@ export interface FileRouteTypes {
     | '/_authenticated/outputs'
     | '/_authenticated/profile'
     | '/_authenticated/providers'
+    | '/_authenticated/templates'
     | '/_authenticated/workspaces'
-    | '/blueprint/$id'
     | '/gadget/$id'
+    | '/template/$id'
     | '/_authenticated/'
     | '/_authenticated/gatekeepers_/$appId'
     | '/_authenticated/workspace/$id'
@@ -282,8 +282,8 @@ export interface RootRouteChildren {
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   LoginRoute: typeof LoginRoute
   SignupRoute: typeof SignupRoute
-  BlueprintIdRoute: typeof BlueprintIdRoute
   GadgetIdRoute: typeof GadgetIdRoute
+  TemplateIdRoute: typeof TemplateIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -321,13 +321,6 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AuthenticatedAdminRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/blueprints': {
-      id: '/_authenticated/blueprints'
-      path: '/blueprints'
-      fullPath: '/blueprints'
-      preLoaderRoute: typeof AuthenticatedBlueprintsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/calendar': {
@@ -400,6 +393,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProvidersRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/templates': {
+      id: '/_authenticated/templates'
+      path: '/templates'
+      fullPath: '/templates'
+      preLoaderRoute: typeof AuthenticatedTemplatesRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/workspaces': {
       id: '/_authenticated/workspaces'
       path: '/workspaces'
@@ -407,18 +407,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedWorkspacesRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/blueprint/$id': {
-      id: '/blueprint/$id'
-      path: '/blueprint/$id'
-      fullPath: '/blueprint/$id'
-      preLoaderRoute: typeof BlueprintIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/gadget/$id': {
       id: '/gadget/$id'
       path: '/gadget/$id'
       fullPath: '/gadget/$id'
       preLoaderRoute: typeof GadgetIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/template/$id': {
+      id: '/template/$id'
+      path: '/template/$id'
+      fullPath: '/template/$id'
+      preLoaderRoute: typeof TemplateIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/gatekeepers_/$appId': {
@@ -440,7 +440,6 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteChildren {
   AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
-  AuthenticatedBlueprintsRoute: typeof AuthenticatedBlueprintsRoute
   AuthenticatedCalendarRoute: typeof AuthenticatedCalendarRoute
   AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
   AuthenticatedContextRoute: typeof AuthenticatedContextRoute
@@ -451,6 +450,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedOutputsRoute: typeof AuthenticatedOutputsRoute
   AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
   AuthenticatedProvidersRoute: typeof AuthenticatedProvidersRoute
+  AuthenticatedTemplatesRoute: typeof AuthenticatedTemplatesRoute
   AuthenticatedWorkspacesRoute: typeof AuthenticatedWorkspacesRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedGatekeepersAppIdRoute: typeof AuthenticatedGatekeepersAppIdRoute
@@ -459,7 +459,6 @@ interface AuthenticatedRouteChildren {
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAdminRoute: AuthenticatedAdminRoute,
-  AuthenticatedBlueprintsRoute: AuthenticatedBlueprintsRoute,
   AuthenticatedCalendarRoute: AuthenticatedCalendarRoute,
   AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
   AuthenticatedContextRoute: AuthenticatedContextRoute,
@@ -470,6 +469,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedOutputsRoute: AuthenticatedOutputsRoute,
   AuthenticatedProfileRoute: AuthenticatedProfileRoute,
   AuthenticatedProvidersRoute: AuthenticatedProvidersRoute,
+  AuthenticatedTemplatesRoute: AuthenticatedTemplatesRoute,
   AuthenticatedWorkspacesRoute: AuthenticatedWorkspacesRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedGatekeepersAppIdRoute: AuthenticatedGatekeepersAppIdRoute,
@@ -484,8 +484,8 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,
-  BlueprintIdRoute: BlueprintIdRoute,
   GadgetIdRoute: GadgetIdRoute,
+  TemplateIdRoute: TemplateIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

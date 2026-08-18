@@ -10,11 +10,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(here, "..");
 const target = resolve(
   packageRoot,
-  "../workshop-backend/format-blueprints/fixed-bid-pricing.gadget",
+  "../workshop-backend/format-templates/fixed-bid-pricing.template",
 );
 const sidecarPath = resolve(
   packageRoot,
-  "../workshop-backend/format-blueprints/fixed-bid-pricing.json",
+  "../workshop-backend/format-templates/fixed-bid-pricing.json",
 );
 const MAGIC = 0xec2e2d3a2300e317n;
 const ARCHIVE_VERSION = 1;
@@ -22,7 +22,7 @@ const PREFIX_BYTES = 24;
 
 const mode = process.argv[2];
 if (mode !== "--check" && mode !== "--write") {
-  throw new Error("Usage: node scripts/build-blueprint.mjs --check|--write");
+  throw new Error("Usage: node scripts/build-template.mjs --check|--write");
 }
 
 async function bundle(entryPoint, options) {
@@ -84,15 +84,15 @@ function archiveFiles(bytes) {
 }
 
 const [provenance, sidecar, server, client, readme] = await Promise.all([
-  readFile(join(packageRoot, "blueprint.json"), "utf8").then(JSON.parse),
+  readFile(join(packageRoot, "template.json"), "utf8").then(JSON.parse),
   readFile(sidecarPath, "utf8").then(JSON.parse),
-  bundle("gadget/server.ts", {
+  bundle("artifact/server.ts", {
     platform: "neutral",
     format: "esm",
     external: ["cloudflare:workers"],
   }),
-  bundle("gadget/client.ts", { platform: "browser", format: "iife" }),
-  readFile(join(packageRoot, "gadget/README.md"), "utf8"),
+  bundle("artifact/client.ts", { platform: "browser", format: "iife" }),
+  readFile(join(packageRoot, "artifact/README.md"), "utf8"),
 ]);
 
 const sourceFiles = new Map([
@@ -111,7 +111,7 @@ for (const [name, source] of [...sourceFiles].toSorted(([left], [right]) =>
 const update = Y.encodeStateAsUpdateV2(document);
 const content = gzipSync(update, { level: 9, mtime: 0 });
 // zlib stamps the host OS into byte 9 of the gzip header (3 on Linux, 19 on macOS). The field is
-// informational, so normalize it to "unknown" to keep the checked-in Blueprint platform-neutral.
+// informational, so normalize it to "unknown" to keep the checked-in Template platform-neutral.
 content[9] = 255;
 const metadata = {
   title: sidecar.title,
@@ -131,7 +131,7 @@ Y.applyUpdateV2(roundTrip, gunzipSync(parsed.content));
 const roundTripFiles = roundTrip.getMap();
 for (const [name, source] of sourceFiles) {
   if (roundTripFiles.get(name)?.toString() !== source) {
-    throw new Error(`${name} did not survive the Blueprint archive round trip.`);
+    throw new Error(`${name} did not survive the Template archive round trip.`);
   }
 }
 if (!server.includes("getPricingSummary") || !server.includes("proposeChanges") ||
@@ -153,7 +153,7 @@ if (mode === "--write") {
   } catch (caught) {
     if (caught?.code === "ENOENT") {
       throw new Error(
-        "Fixed-bid Blueprint archive is missing; run pnpm build:blueprint.",
+        "Fixed-bid Template archive is missing; run pnpm build:template.",
         {cause: caught},
       );
     }
@@ -163,15 +163,15 @@ if (mode === "--write") {
   const fresh = archiveFiles(archive);
   if (JSON.stringify(checked.metadata) !== JSON.stringify(fresh.metadata)) {
     throw new Error(
-      "Fixed-bid Blueprint archive is stale; run pnpm build:blueprint and commit the result.",
+      "Fixed-bid Template archive is stale; run pnpm build:template and commit the result.",
     );
   }
   for (const name of new Set([...checked.files.keys(), ...fresh.files.keys()])) {
     if (checked.files.get(name) !== fresh.files.get(name)) {
       throw new Error(
-        "Fixed-bid Blueprint archive is stale; run pnpm build:blueprint and commit the result.",
+        "Fixed-bid Template archive is stale; run pnpm build:template and commit the result.",
       );
     }
   }
-  console.log(`Fixed-bid Blueprint archive matches source (${archive.byteLength} bytes, ${digest})`);
+  console.log(`Fixed-bid Template archive matches source (${archive.byteLength} bytes, ${digest})`);
 }

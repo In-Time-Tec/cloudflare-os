@@ -113,7 +113,7 @@ type RolePolicy = {
   marketRatePerHour: number;
 };
 
-/** Versioned commercial policy compiled into the Blueprint. */
+/** Versioned commercial policy compiled into the Template. */
 export type PricingPolicy = {
   version: string;
   effectiveDate: string;

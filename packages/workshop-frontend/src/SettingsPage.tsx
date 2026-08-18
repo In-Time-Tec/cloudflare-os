@@ -12,7 +12,7 @@ import { compressAvatar, avatarBlobUrl } from './avatarUtils'
 import UsageSettings from './components/billing/UsageSettings'
 import { useDocumentTitle } from './useDocumentTitle'
 
-// Shared, on-language control classes (match the rest of the app: Workspaces/Blueprints headers,
+// Shared, on-language control classes (match the rest of the app: Workspaces/Templates headers,
 // the gatekeepers toolbar, the command palette). Kept here so the profile page reads as part of the
 // system rather than a stack of default Kumo cards.
 const PRIMARY_BTN =

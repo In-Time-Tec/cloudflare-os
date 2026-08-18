@@ -2,18 +2,18 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'reac
 import { Dialog, useKumoToastManager } from '@cloudflare/kumo'
 import { ArrowsClockwise, Check, Copy, ImageSquare, Pencil, Plus, Trash, Warning, X } from '@phosphor-icons/react'
 import { RpcStub } from 'capnweb'
-import { BlueprintGadgetSummary, GadgetClient, GadgetMetadata, Overseer, BlueprintBindingAnnotation, BlueprintScreenshotUpload } from '@gadgets/workshop-shared/api'
+import { TemplateGadgetSummary, GadgetClient, GadgetMetadata, Overseer, TemplateBindingAnnotation, TemplateScreenshotUpload } from '@gadgets/workshop-shared/api'
 import { WorkshopButton, WorkshopIconButton, WorkshopInput, WorkshopInputArea } from './components/WorkshopControls'
 import { copyToClipboard } from './clipboard'
 import {
   BindingCardData,
-  BlueprintBindingCard,
+  TemplateBindingCard,
   loadBindingCardData,
-} from './components/BlueprintBindingCard'
+} from './components/TemplateBindingCard'
 
-const BLUEPRINT_SCREENSHOT_WIDTH = 1280
-const BLUEPRINT_SCREENSHOT_HEIGHT = 720
-const MAX_BLUEPRINT_SCREENSHOT_BYTES = 700 * 1024
+const TEMPLATE_SCREENSHOT_WIDTH = 1280
+const TEMPLATE_SCREENSHOT_HEIGHT = 720
+const MAX_TEMPLATE_SCREENSHOT_BYTES = 700 * 1024
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -24,16 +24,16 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number):
   })
 }
 
-async function compressBlueprintScreenshot(file: File): Promise<Blob> {
+async function compressTemplateScreenshot(file: File): Promise<Blob> {
   const bitmap = await createImageBitmap(file)
   const canvas = document.createElement('canvas')
-  canvas.width = BLUEPRINT_SCREENSHOT_WIDTH
-  canvas.height = BLUEPRINT_SCREENSHOT_HEIGHT
+  canvas.width = TEMPLATE_SCREENSHOT_WIDTH
+  canvas.height = TEMPLATE_SCREENSHOT_HEIGHT
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Failed to get 2D canvas context')
 
   try {
-    const targetRatio = BLUEPRINT_SCREENSHOT_WIDTH / BLUEPRINT_SCREENSHOT_HEIGHT
+    const targetRatio = TEMPLATE_SCREENSHOT_WIDTH / TEMPLATE_SCREENSHOT_HEIGHT
     const sourceRatio = bitmap.width / bitmap.height
     let sx = 0
     let sy = 0
@@ -48,11 +48,11 @@ async function compressBlueprintScreenshot(file: File): Promise<Blob> {
       sy = (bitmap.height - sh) / 2
     }
 
-    ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, BLUEPRINT_SCREENSHOT_WIDTH, BLUEPRINT_SCREENSHOT_HEIGHT)
+    ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, TEMPLATE_SCREENSHOT_WIDTH, TEMPLATE_SCREENSHOT_HEIGHT)
 
     for (let quality = 0.86; quality >= 0.5; quality -= 0.12) {
       const blob = await canvasToBlob(canvas, 'image/jpeg', quality)
-      if (blob.size <= MAX_BLUEPRINT_SCREENSHOT_BYTES) return blob
+      if (blob.size <= MAX_TEMPLATE_SCREENSHOT_BYTES) return blob
     }
 
     return canvasToBlob(canvas, 'image/jpeg', 0.42)
@@ -65,15 +65,15 @@ type Props = {
   open: boolean
   onClose: () => void
   overseer: RpcStub<Overseer>
-  // The gadget this modal exports blueprints from (the gadget currently selected in the editor).
+  // The gadget this modal exports templates from (the gadget currently selected in the editor).
   gadget: RpcStub<GadgetClient>
   metadata: GadgetMetadata
 }
 
-export default function BlueprintModal({ open, onClose, overseer, gadget, metadata }: Props) {
+export default function TemplateModal({ open, onClose, overseer, gadget, metadata }: Props) {
   const toasts = useKumoToastManager()
 
-  const [blueprints, setBlueprints] = useState<BlueprintGadgetSummary[]>([])
+  const [templates, setTemplates] = useState<TemplateGadgetSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [formMode, setFormMode] = useState<'list' | 'create' | 'edit'>('list')
   const [newTitle, setNewTitle] = useState('')
@@ -85,7 +85,7 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
   const screenshotInputRef = useRef<HTMLInputElement>(null)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
-  const [editingBlueprint, setEditingBlueprint] = useState<BlueprintGadgetSummary | null>(null)
+  const [editingTemplate, setEditingTemplate] = useState<TemplateGadgetSummary | null>(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
@@ -93,13 +93,13 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
   const [bindingsLoading, setBindingsLoading] = useState(false)
   const [bindingsError, setBindingsError] = useState<string | null>(null)
 
-  const loadBlueprints = useCallback(async () => {
+  const loadTemplates = useCallback(async () => {
     setLoading(true)
     try {
-      setBlueprints(await overseer.listBlueprints())
+      setTemplates(await overseer.listTemplates())
     } catch (err) {
-      console.error('Failed to load blueprints:', err)
-      toasts.add({ title: 'Failed to load blueprints', variant: 'error' })
+      console.error('Failed to load templates:', err)
+      toasts.add({ title: 'Failed to load templates', variant: 'error' })
     } finally {
       setLoading(false)
     }
@@ -109,7 +109,7 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
     setBindingsLoading(true)
     setBindingsError(null)
     try {
-      // No chat scope: a blueprint exports only the gadget's permanent bindings, never a chat's
+      // No chat scope: a template exports only the gadget's permanent bindings, never a chat's
       // still-provisional additions.
       const list = await gadget.listBindings()
       const loaded = await Promise.all(list.map((b) => loadBindingCardData(gadget, b)))
@@ -124,7 +124,7 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
 
   useEffect(() => {
     if (open) {
-      loadBlueprints()
+      loadTemplates()
       setFormMode('list')
       setNewTitle(metadata.title)
       setNewDescription('')
@@ -133,7 +133,7 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
       setClearScreenshot(false)
       setCreateError(null)
     }
-  }, [open, loadBlueprints, metadata.title])
+  }, [open, loadTemplates, metadata.title])
 
   useEffect(() => {
     if (formMode !== 'list') {
@@ -163,7 +163,7 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
 
     setProcessingScreenshot(true)
     try {
-      const blob = await compressBlueprintScreenshot(file)
+      const blob = await compressTemplateScreenshot(file)
       setNewScreenshotBlob(blob)
       setNewScreenshotUrl(prev => {
         if (prev) URL.revokeObjectURL(prev)
@@ -171,65 +171,65 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
       })
       setClearScreenshot(false)
     } catch (err) {
-      console.error('Failed to process blueprint screenshot:', err)
+      console.error('Failed to process template screenshot:', err)
       toasts.add({ title: 'Failed to process screenshot', variant: 'error' })
     } finally {
       setProcessingScreenshot(false)
     }
   }
 
-  const updateBindingAnnotation = (bindingName: string, annotation: BlueprintBindingAnnotation) => {
+  const updateBindingAnnotation = (bindingName: string, annotation: TemplateBindingAnnotation) => {
     setBindings((prev) =>
       prev.map((b) => (b.bindingName === bindingName ? { ...b, annotation } : b)),
     )
   }
 
-  const createBlueprint = async () => {
+  const createTemplate = async () => {
     if (bindingsLoading) return
     setCreating(true)
     setCreateError(null)
     try {
       await Promise.all(
-        bindings.map((b) => gadget.setBlueprintAnnotation(b.bindingName, b.annotation)),
+        bindings.map((b) => gadget.setTemplateAnnotation(b.bindingName, b.annotation)),
       )
 
-      const screenshot: BlueprintScreenshotUpload | undefined = newScreenshotBlob
+      const screenshot: TemplateScreenshotUpload | undefined = newScreenshotBlob
         ? {
           mimeType: 'image/jpeg',
           content: new Uint8Array(await newScreenshotBlob.arrayBuffer()),
         }
         : undefined
 
-      await gadget.createBlueprint(
+      await gadget.createTemplate(
         newTitle.trim() || undefined,
         newDescription.trim() || undefined,
         screenshot,
       )
-      toasts.add({ title: 'Blueprint created.', variant: 'success' })
+      toasts.add({ title: 'Template created.', variant: 'success' })
       setFormMode('list')
       setNewTitle(metadata.title)
       setNewDescription('')
       setNewScreenshotBlob(null)
       setNewScreenshotUrl(null)
       setClearScreenshot(false)
-      await loadBlueprints()
+      await loadTemplates()
     } catch (err: any) {
-      setCreateError(err.message || 'Could not create blueprint.')
+      setCreateError(err.message || 'Could not create template.')
     } finally {
       setCreating(false)
     }
   }
 
-  const saveBlueprintEdits = async () => {
-    if (!editingBlueprint || bindingsLoading) return
+  const saveTemplateEdits = async () => {
+    if (!editingTemplate || bindingsLoading) return
     setCreating(true)
     setCreateError(null)
     try {
       await Promise.all(
-        bindings.map((b) => gadget.setBlueprintAnnotation(b.bindingName, b.annotation)),
+        bindings.map((b) => gadget.setTemplateAnnotation(b.bindingName, b.annotation)),
       )
 
-      const screenshot: BlueprintScreenshotUpload | null | undefined = clearScreenshot
+      const screenshot: TemplateScreenshotUpload | null | undefined = clearScreenshot
         ? null
         : newScreenshotBlob
           ? {
@@ -238,42 +238,42 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
           }
           : undefined
 
-      await overseer.updateBlueprint(editingBlueprint.id, {
-        title: newTitle.trim() || editingBlueprint.title,
+      await overseer.updateTemplate(editingTemplate.id, {
+        title: newTitle.trim() || editingTemplate.title,
         description: newDescription.trim(),
         updateBindings: true,
         screenshot,
       })
-      toasts.add({ title: 'Blueprint updated.', variant: 'success' })
+      toasts.add({ title: 'Template updated.', variant: 'success' })
       setFormMode('list')
-      setEditingBlueprint(null)
+      setEditingTemplate(null)
       setNewScreenshotBlob(null)
       setNewScreenshotUrl(null)
       setClearScreenshot(false)
-      await loadBlueprints()
+      await loadTemplates()
     } catch (err: any) {
-      setCreateError(err.message || 'Could not update blueprint.')
+      setCreateError(err.message || 'Could not update template.')
     } finally {
       setCreating(false)
     }
   }
 
-  const deleteBlueprint = async (id: string) => {
+  const deleteTemplate = async (id: string) => {
     setDeletingId(id)
     try {
-      await overseer.deleteBlueprint(id)
-      toasts.add({ title: 'Blueprint deleted.', variant: 'success' })
+      await overseer.deleteTemplate(id)
+      toasts.add({ title: 'Template deleted.', variant: 'success' })
       setConfirmingDeleteId(null)
-      await loadBlueprints()
+      await loadTemplates()
     } catch (err: any) {
-      toasts.add({ title: err.message || 'Failed to delete blueprint.', variant: 'error' })
+      toasts.add({ title: err.message || 'Failed to delete template.', variant: 'error' })
     } finally {
       setDeletingId(null)
     }
   }
 
-  const savedScreenshotUrl = formMode === 'edit' && editingBlueprint?.screenshotUrl && !clearScreenshot
-    ? editingBlueprint.screenshotUrl
+  const savedScreenshotUrl = formMode === 'edit' && editingTemplate?.screenshotUrl && !clearScreenshot
+    ? editingTemplate.screenshotUrl
     : null
   const screenshotPreviewUrl = newScreenshotUrl ?? savedScreenshotUrl
 
@@ -284,13 +284,13 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
             <div className="flex min-w-0 items-start gap-3">
               <div className="min-w-0">
               <Dialog.Title className="text-[17px] leading-6 font-medium tracking-[-0.35px] text-kumo-default">
-                {formMode === 'create' ? 'Create blueprint' : formMode === 'edit' ? 'Edit blueprint' : 'Blueprints'}
+                {formMode === 'create' ? 'Create template' : formMode === 'edit' ? 'Edit template' : 'Templates'}
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-[13px] leading-[18px] font-normal tracking-[-0.25px] text-kumo-subtle">
                 {formMode === 'create'
-                  ? 'Describe what people get when they start from this blueprint.'
+                  ? 'Describe what people get when they start from this template.'
                   : formMode === 'edit'
-                    ? 'Update the details, screenshot, and connection guidance for this blueprint.'
+                    ? 'Update the details, screenshot, and connection guidance for this template.'
                     : 'Turn this gadget into a reusable starting point.'}
               </Dialog.Description>
               </div>
@@ -317,14 +317,14 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                   <div className="space-y-3">
                     <WorkshopInput
                       placeholder="Title"
-                      aria-label="Blueprint title"
+                      aria-label="Template title"
                       value={newTitle}
                       onChange={(e) => setNewTitle(e.target.value)}
                       className="w-full"
                     />
                     <WorkshopInputArea
                       placeholder="Description (optional)"
-                      aria-label="Blueprint description"
+                      aria-label="Template description"
                       value={newDescription}
                       onChange={(e) => setNewDescription(e.target.value)}
                       rows={3}
@@ -344,12 +344,12 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                             Screenshot
                           </p>
                           <p className="m-0 mt-0.5 text-[12px] leading-4 font-normal tracking-[-0.2px] text-kumo-subtle">
-                            Optional image shown on Explore and the blueprint detail page.
-                            {formMode === 'edit' && !newScreenshotUrl && editingBlueprint?.screenshotUrl && !clearScreenshot ? ' The current screenshot will stay unless you upload a new one.' : ''}
+                            Optional image shown on Explore and the template detail page.
+                            {formMode === 'edit' && !newScreenshotUrl && editingTemplate?.screenshotUrl && !clearScreenshot ? ' The current screenshot will stay unless you upload a new one.' : ''}
                           </p>
                         </div>
                         <div className="flex shrink-0 items-center gap-1.5">
-                          {(newScreenshotUrl || (formMode === 'edit' && editingBlueprint?.screenshotUrl && !clearScreenshot)) && (
+                          {(newScreenshotUrl || (formMode === 'edit' && editingTemplate?.screenshotUrl && !clearScreenshot)) && (
                             <WorkshopButton
                               className="!h-8"
                               onClick={() => {
@@ -371,7 +371,7 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                             disabled={processingScreenshot || creating}
                           >
                             <ImageSquare size={13} weight="bold" />
-                            {processingScreenshot ? 'Processing...' : newScreenshotUrl || (formMode === 'edit' && editingBlueprint?.screenshotUrl && !clearScreenshot) ? 'Change' : 'Upload'}
+                            {processingScreenshot ? 'Processing...' : newScreenshotUrl || (formMode === 'edit' && editingTemplate?.screenshotUrl && !clearScreenshot) ? 'Change' : 'Upload'}
                           </WorkshopButton>
                         </div>
                       </div>
@@ -379,7 +379,7 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                         <div className="mt-3 overflow-hidden rounded-lg border border-kumo-line bg-kumo-tint">
                           <img
                             src={screenshotPreviewUrl}
-                            alt="Blueprint screenshot preview"
+                            alt="Template screenshot preview"
                             className="max-h-[320px] w-full object-contain"
                           />
                         </div>
@@ -404,11 +404,11 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                         Connections
                       </h3>
                       <p className="m-0 mb-3 text-[12px] leading-4 font-normal tracking-[-0.2px] text-kumo-subtle">
-                        Name each connection and add guidance for people using this blueprint.
+                        Name each connection and add guidance for people using this template.
                       </p>
                       <div className="space-y-2">
                         {bindings.map((b) => (
-                          <BlueprintBindingCard
+                          <TemplateBindingCard
                             key={b.bindingName}
                             data={b}
                             onChange={(annotation) => updateBindingAnnotation(b.bindingName, annotation)}
@@ -431,7 +431,7 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                       className="!h-9 min-w-[64px]"
                       onClick={() => {
                         setFormMode('list')
-                        setEditingBlueprint(null)
+                        setEditingTemplate(null)
                       }}
                       disabled={creating}
                     >
@@ -440,7 +440,7 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                     <WorkshopButton
                       tone="primary"
                       className="min-w-[64px]"
-                      onClick={formMode === 'create' ? createBlueprint : saveBlueprintEdits}
+                      onClick={formMode === 'create' ? createTemplate : saveTemplateEdits}
                       disabled={creating || bindingsLoading || processingScreenshot}
                     >
                       {creating
@@ -462,14 +462,14 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                   setNewScreenshotBlob(null)
                   setNewScreenshotUrl(null)
                   setClearScreenshot(false)
-                  setEditingBlueprint(null)
+                  setEditingTemplate(null)
                   setFormMode('create')
                 }}
                 className="flex w-full items-center justify-between rounded-xl border border-kumo-line bg-kumo-base px-4 py-3 text-left transition-colors hover:bg-kumo-elevated"
               >
                 <span>
                   <span className="block text-[13px] leading-[18px] font-medium tracking-[-0.25px] text-kumo-default">
-                    Create blueprint
+                    Create template
                   </span>
                   <span className="mt-0.5 block text-[13px] leading-[18px] font-normal tracking-[-0.25px] text-kumo-subtle">
                     Publish this gadget as a reusable template.
@@ -480,21 +480,21 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
 
             <section>
               <h3 className="mb-2 text-[13px] leading-[18px] font-medium tracking-[-0.25px] text-kumo-default">
-                Existing blueprints
+                Existing templates
               </h3>
 
           {loading ? (
             null
-          ) : blueprints.length === 0 ? (
+          ) : templates.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-kumo-line bg-kumo-base px-4 py-6 text-center">
                   <p className="text-[13px] leading-[18px] font-normal tracking-[-0.25px] text-kumo-subtle">
-                    No blueprints yet.
+                    No templates yet.
                   </p>
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-xl border border-kumo-line bg-kumo-base">
-                  {blueprints.map((bp, index) => (
-                    <BlueprintRow
+                  {templates.map((bp, index) => (
+                    <TemplateRow
                       key={bp.id}
                       bp={bp}
                       isFirst={index === 0}
@@ -504,35 +504,35 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
                         setNewScreenshotBlob(null)
                         setNewScreenshotUrl(null)
                         setClearScreenshot(false)
-                        setEditingBlueprint(bp)
+                        setEditingTemplate(bp)
                         setFormMode('edit')
                       }}
                       onUpdateCode={async () => {
                         try {
-                          await overseer.updateBlueprint(bp.id, { updateCode: true })
-                          toasts.add({ title: 'Blueprint updated to current code.', variant: 'success' })
-                          loadBlueprints()
+                          await overseer.updateTemplate(bp.id, { updateCode: true })
+                          toasts.add({ title: 'Template updated to current code.', variant: 'success' })
+                          loadTemplates()
                         } catch (err: any) {
-                          toasts.add({ title: err.message || 'Failed to update blueprint.', variant: 'error' })
+                          toasts.add({ title: err.message || 'Failed to update template.', variant: 'error' })
                         }
                       }}
                       onRetryPublish={async () => {
                         try {
-                          await overseer.retryBlueprintPublish(bp.id)
-                          toasts.add({ title: 'Blueprint published successfully.', variant: 'success' })
-                          loadBlueprints()
+                          await overseer.retryTemplatePublish(bp.id)
+                          toasts.add({ title: 'Template published successfully.', variant: 'success' })
+                          loadTemplates()
                         } catch (err: any) {
                           toasts.add({ title: err.message || 'Retry failed.', variant: 'error' })
                         }
                       }}
                       onCopyLink={async () => {
-                        const url = `${window.location.origin}/blueprint/${bp.id}`
+                        const url = `${window.location.origin}/template/${bp.id}`
                         return copyToClipboard(url)
                       }}
                       isConfirmingDelete={confirmingDeleteId === bp.id}
                       isDeleting={deletingId === bp.id}
                       onStartDelete={() => setConfirmingDeleteId(bp.id)}
-                      onConfirmDelete={() => deleteBlueprint(bp.id)}
+                      onConfirmDelete={() => deleteTemplate(bp.id)}
                       onCancelDelete={() => setConfirmingDeleteId(null)}
                     />
                   ))}
@@ -547,7 +547,7 @@ export default function BlueprintModal({ open, onClose, overseer, gadget, metada
   )
 }
 
-function BlueprintRow({
+function TemplateRow({
   bp,
   isFirst,
   onStartEdit,
@@ -560,7 +560,7 @@ function BlueprintRow({
   onConfirmDelete,
   onCancelDelete,
 }: {
-  bp: BlueprintGadgetSummary
+  bp: TemplateGadgetSummary
   isFirst: boolean
   onStartEdit: () => void
   onUpdateCode: () => void
@@ -591,7 +591,7 @@ function BlueprintRow({
               Delete "{bp.title}"?
             </p>
             <p className="m-0 mt-0.5 text-[12px] leading-4 font-normal tracking-[-0.2px] text-kumo-subtle">
-              People who started a gadget from this blueprint won't be affected, but the link will stop working.
+              People who started a gadget from this template won't be affected, but the link will stop working.
             </p>
           </div>
           <button
@@ -684,7 +684,7 @@ function BlueprintRow({
             type="button"
             onClick={onStartEdit}
             className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-transparent text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-default"
-            aria-label="Edit blueprint"
+            aria-label="Edit template"
           >
             <Pencil size={13} />
           </button>
@@ -692,7 +692,7 @@ function BlueprintRow({
             type="button"
             onClick={onStartDelete}
             className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-transparent text-kumo-subtle transition-colors hover:bg-kumo-danger-tint hover:text-kumo-danger"
-            aria-label="Delete blueprint"
+            aria-label="Delete template"
           >
             <Trash size={13} />
           </button>

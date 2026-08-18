@@ -6,7 +6,7 @@ import {
   Pencil,
   Check,
   X,
-  Blueprint,
+  Blueprint as BlueprintIcon,
   Trash,
   ArrowsOutSimple,
   Pulse,
@@ -23,7 +23,7 @@ import {
   ActionLogEntry,
   WorkpieceId,
   WorkpieceSummary,
-  BlueprintOutput,
+  TemplateOutput,
   WorkpiecesSubscriber,
 } from '@gadgets/workshop-shared/api'
 import ObserverConfigModal from './ObserverConfigModal'
@@ -43,7 +43,7 @@ import { formatOf } from './components/format/formats'
 import { FormatGlyph } from './components/format/FormatVisuals'
 import ShareModal from './ShareModal'
 import { GadgetPresence } from './components/GadgetPresence'
-import BlueprintModal from './BlueprintModal'
+import TemplateModal from './TemplateModal'
 import { WorkshopButton, WorkshopIconButton, WorkshopInput } from './components/WorkshopControls'
 import { useActions } from './useActions'
 import DeleteConfirmationDialog from './components/DeleteConfirmationDialog'
@@ -157,8 +157,8 @@ function formatHeaderCost(cost: number) {
 }
 
 // The first tab is named after what the selected workpiece is ("Document" for a gadget built from
-// a document blueprint), falling back to "App" when it declares no format.
-function rightTabs(output?: BlueprintOutput): { value: RightTab; label: string }[] {
+// a document template), falling back to "App" when it declares no format.
+function rightTabs(output?: TemplateOutput): { value: RightTab; label: string }[] {
   return [
     { value: 'app', label: formatOf(output).noun },
     { value: 'code', label: 'Code' },
@@ -181,7 +181,7 @@ function PaneLabel({
   badge,
 }: {
   icon?: Icon
-  output?: BlueprintOutput
+  output?: TemplateOutput
   title: string
   badge?: string
 }) {
@@ -448,7 +448,7 @@ export default function GadgetEditor() {
   const [workpiecesReady, setWorkpiecesReady] = useState(() => cachedWorkpieces !== undefined)
   const knownWorkpieceIdsRef = useRef<Set<WorkpieceId> | null>(null)
   // GadgetClient stub for the currently-selected gadget workpiece. Per-gadget operations (UI
-  // bundle, RPC connection, bindings, blueprints) go through this stub. Null while the workspace
+  // bundle, RPC connection, bindings, templates) go through this stub. Null while the workspace
   // has no (visible) gadgets.
   const [gadget, setGadget] = useState<{ id: WorkpieceId; stub: RpcStub<GadgetClient> } | null>(null)
 
@@ -506,7 +506,7 @@ export default function GadgetEditor() {
   const [activityView, setActivityView] = useState<ActivityView>('history')
   const [activityClosing, setActivityClosing] = useState(false)
   const [shareModalOpen, setShareModalOpen] = useState(false)
-  const [blueprintModalOpen, setBlueprintModalOpen] = useState(false)
+  const [templateModalOpen, setTemplateModalOpen] = useState(false)
   const [previewMode, _setPreviewMode] = useState(false)
   const [workpieceRailExpanded, setWorkpieceRailExpanded] = useState(getInitialAppRailExpanded)
   const workpieceRailWidth = workpieceRailExpanded
@@ -646,9 +646,9 @@ export default function GadgetEditor() {
   // Keyed on the formats, not on the workpiece list: this feeds buildChatDisplayEntries(), which
   // rebuilds the whole transcript when its inputs change, while `workpieces` is replaced by every
   // unrelated update.
-  const workpieceOutputsRef = useRef(new Map<WorkpieceId, BlueprintOutput>())
+  const workpieceOutputsRef = useRef(new Map<WorkpieceId, TemplateOutput>())
   const outputSignature = useMemo(() => {
-    const outputs = new Map<WorkpieceId, BlueprintOutput>()
+    const outputs = new Map<WorkpieceId, TemplateOutput>()
     for (const workpiece of workpieces.values()) {
       if (workpiece.output) outputs.set(workpiece.id, workpiece.output)
     }
@@ -1407,7 +1407,7 @@ export default function GadgetEditor() {
           )}
         </div>
 
-        {/* Right: presence, cost, workspace, share, blueprints */}
+        {/* Right: presence, cost, workspace, share, templates */}
         <div className="flex items-center gap-1 flex-shrink-0">
           <GadgetPresence
             overseer={overseer.stub}
@@ -1436,12 +1436,12 @@ export default function GadgetEditor() {
           </WorkshopIconButton>
 
           <WorkshopIconButton
-            onClick={() => setBlueprintModalOpen(true)}
+            onClick={() => setTemplateModalOpen(true)}
             disabled={!selectedGadgetStub}
-            title="Blueprints"
-            aria-label="Blueprints"
+            title="Templates"
+            aria-label="Templates"
           >
-            <Blueprint size={16} />
+            <BlueprintIcon size={16} />
           </WorkshopIconButton>
 
           {!metadata.owner && (
@@ -1766,9 +1766,9 @@ export default function GadgetEditor() {
             authenticatedApi={authenticatedApi}
           />
           {selectedGadgetStub && (
-            <BlueprintModal
-              open={blueprintModalOpen}
-              onClose={() => setBlueprintModalOpen(false)}
+            <TemplateModal
+              open={templateModalOpen}
+              onClose={() => setTemplateModalOpen(false)}
               overseer={overseer.stub}
               gadget={selectedGadgetStub}
               metadata={metadata}

@@ -2,7 +2,7 @@ import { logRpcFailure } from './rpcErrors'
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { useNavigate, useParams, useRouter } from '@tanstack/react-router'
 import { RpcStub } from 'capnweb'
-import { PublicApi, AuthenticatedApi, AdminApi, BlueprintPublicInfo, BlueprintBinding, BlueprintBindingAssignment, BlueprintUserSummary, AiChatAuthorInfo } from '@gadgets/workshop-shared/api'
+import { PublicApi, AuthenticatedApi, AdminApi, TemplatePublicInfo, TemplateBinding, TemplateBindingAssignment, TemplateUserSummary, AiChatAuthorInfo } from '@gadgets/workshop-shared/api'
 import { SupportedResource, VendorDescription, ResourceConfiguratorFrame } from '@gadgets/workshop-shared/gatekeeper'
 import { Button, Dialog, DropdownMenu, Select, Tooltip, useKumoToastManager } from '@cloudflare/kumo'
 import { ArrowsOutSimple, ArrowLeft, ArrowSquareOut, DotsThree, DownloadSimple, Lightning, Plus, Robot, Sparkle, Star, Trash, X } from '@phosphor-icons/react'
@@ -11,8 +11,8 @@ import { useWorkshopSession, workshopSession } from './session'
 import LoginPage from './LoginPage'
 import { normalizeResourceUrl } from './resourceMatching'
 import {
-  BLUEPRINT_ARCHIVE_EXTENSION,
-  makeBlueprintFilename,
+  TEMPLATE_ARCHIVE_EXTENSION,
+  makeTemplateFilename,
   saveStreamToFile,
 } from './fileTransfers'
 import { AccountChooser, AccountOption } from './gatekeeper-modal/AccountChooser'
@@ -21,7 +21,7 @@ import { WorkshopButton, WorkshopIconButton } from './components/WorkshopControl
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './components/menuStyles'
 import { useDocumentTitle } from './useDocumentTitle'
 import { AccountsSubscriberAdapter } from './accountsSubscriber'
-import { usePublicBlueprintQuery } from './query/public'
+import { usePublicTemplateQuery } from './query/public'
 import { gatekeeperVendorsOptions, modelsOptions } from './query/hooks'
 import { useQuery } from '@tanstack/react-query'
 
@@ -33,7 +33,7 @@ interface Props {
 type BindingFormState = Record<string, any>
 const NO_AGENT_MODEL_ID = 'gadgets:sentinel:no-agent-model'
 
-export default function BlueprintLandingPage({ rpcStub }: Props) {
+export default function TemplateLandingPage({ rpcStub }: Props) {
   const params = useParams({ strict: false }) as { id?: string }
   const id = params.id ?? ''
   const navigate = useNavigate()
@@ -43,7 +43,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
   const authenticatedApi = session.authenticatedApi
   const toasts = useKumoToastManager()
 
-  const { data: queriedBlueprint, isError: blueprintQueryError, error: blueprintQueryErr } = usePublicBlueprintQuery(id)
+  const { data: queriedTemplate, isError: templateQueryError, error: templateQueryErr } = usePublicTemplateQuery(id)
   const { data: queriedModels = [] } = useQuery({
     ...modelsOptions(workshopSession),
     enabled: isAuthenticated,
@@ -52,14 +52,14 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     ...gatekeeperVendorsOptions(workshopSession),
     enabled: isAuthenticated,
   })
-  const [blueprint, setBlueprint] = useState<BlueprintPublicInfo | null>(null)
-  useDocumentTitle(blueprint?.metadata.title)
+  const [template, setTemplate] = useState<TemplatePublicInfo | null>(null)
+  useDocumentTitle(template?.metadata.title)
   const [notFound, setNotFound] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const [activeBindingName, setActiveBindingName] = useState<string | null>(null)
   const [bindingForm, setBindingForm] = useState<BindingFormState>({})
-  const [draftAssignments, setDraftAssignments] = useState<Record<string, BlueprintBindingAssignment>>({})
+  const [draftAssignments, setDraftAssignments] = useState<Record<string, TemplateBindingAssignment>>({})
   const [models, setModels] = useState<AiChatAuthorInfo[]>([])
   const [creating, setCreating] = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -86,13 +86,13 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
   // in an object so the stub isn't mistaken for a state updater function. Disposed on cleanup.
   const [admin, setAdmin] = useState<{ api: RpcStub<AdminApi> } | null>(null)
   const [isInLibrary, setIsInLibrary] = useState(false)
-  const [isUploadedBlueprint, setIsUploadedBlueprint] = useState(false)
+  const [isUploadedTemplate, setIsUploadedTemplate] = useState(false)
   const [loadingLibraryState, setLoadingLibraryState] = useState(false)
   const [isPinned, setIsPinned] = useState(false)
   const [updatingPinned, setUpdatingPinned] = useState(false)
-  const [isOwnBlueprint, setIsOwnBlueprint] = useState(false)
-  const [ownBlueprintSummary, setOwnBlueprintSummary] = useState<BlueprintUserSummary | null>(null)
-  const [loadingOwnBlueprintState, setLoadingOwnBlueprintState] = useState(false)
+  const [isOwnTemplate, setIsOwnTemplate] = useState(false)
+  const [ownTemplateSummary, setOwnTemplateSummary] = useState<TemplateUserSummary | null>(null)
+  const [loadingOwnTemplateState, setLoadingOwnTemplateState] = useState(false)
   const [addingToLibrary, setAddingToLibrary] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [removingFromLibrary, setRemovingFromLibrary] = useState(false)
@@ -103,22 +103,22 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
   useEffect(() => {
     if (!id) {
       setNotFound(true)
-      setBlueprint(null)
+      setTemplate(null)
       return
     }
-    if (blueprintQueryError) {
-      setError(blueprintQueryErr instanceof Error ? blueprintQueryErr.message : 'Failed to load blueprint.')
+    if (templateQueryError) {
+      setError(templateQueryErr instanceof Error ? templateQueryErr.message : 'Failed to load template.')
       return
     }
-    if (queriedBlueprint === undefined) return
-    if (queriedBlueprint) {
-      setBlueprint(queriedBlueprint)
+    if (queriedTemplate === undefined) return
+    if (queriedTemplate) {
+      setTemplate(queriedTemplate)
       setNotFound(false)
       setError(null)
     } else {
       setNotFound(true)
     }
-  }, [id, queriedBlueprint, blueprintQueryError, blueprintQueryErr])
+  }, [id, queriedTemplate, templateQueryError, templateQueryErr])
 
   useEffect(() => {
     setActiveBindingName(null)
@@ -250,9 +250,9 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
         stub = api
         setAdmin({ api })
 
-        const result = await api.isBlueprintFeatured(id)
+        const result = await api.isTemplateFeatured(id)
         if (cancelled) return
-        // null means the blueprint can't be featured; a boolean means it can.
+        // null means the template can't be featured; a boolean means it can.
         if (result === null) {
           setCanManageFeatured(false)
           setIsFeatured(false)
@@ -287,15 +287,15 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     }
 
     setLoadingLibraryState(true)
-    authenticatedApi.isBlueprintInLibrary(id).then(result => {
+    authenticatedApi.isTemplateInLibrary(id).then(result => {
       if (cancelled) return
       setIsInLibrary(result !== null)
-      setIsUploadedBlueprint(result?.uploaded ?? false)
+      setIsUploadedTemplate(result?.uploaded ?? false)
     }).catch(err => {
       if (cancelled) return
       console.error('Failed to load library state:', err)
       setIsInLibrary(false)
-      setIsUploadedBlueprint(false)
+      setIsUploadedTemplate(false)
     }).finally(() => {
       if (!cancelled) {
         setLoadingLibraryState(false)
@@ -312,32 +312,32 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
 
     if (!id || !authenticatedApi) {
       setIsPinned(false)
-      setIsOwnBlueprint(false)
-      setOwnBlueprintSummary(null)
-      setLoadingOwnBlueprintState(false)
+      setIsOwnTemplate(false)
+      setOwnTemplateSummary(null)
+      setLoadingOwnTemplateState(false)
       return () => {
         cancelled = true
       }
     }
 
-    setLoadingOwnBlueprintState(true)
+    setLoadingOwnTemplateState(true)
     Promise.all([
-      authenticatedApi.isBlueprintPinned(id),
-      authenticatedApi.getOwnBlueprint(id),
-    ]).then(([pinned, ownBlueprint]) => {
+      authenticatedApi.isTemplatePinned(id),
+      authenticatedApi.getOwnTemplate(id),
+    ]).then(([pinned, ownTemplate]) => {
       if (cancelled) return
       setIsPinned(pinned)
-      setOwnBlueprintSummary(ownBlueprint)
-      setIsOwnBlueprint(ownBlueprint !== null)
+      setOwnTemplateSummary(ownTemplate)
+      setIsOwnTemplate(ownTemplate !== null)
     }).catch(err => {
       if (cancelled) return
-      console.error('Failed to load blueprint user state:', err)
+      console.error('Failed to load template user state:', err)
       setIsPinned(false)
-      setOwnBlueprintSummary(null)
-      setIsOwnBlueprint(false)
+      setOwnTemplateSummary(null)
+      setIsOwnTemplate(false)
     }).finally(() => {
       if (!cancelled) {
-        setLoadingOwnBlueprintState(false)
+        setLoadingOwnTemplateState(false)
       }
     })
 
@@ -346,7 +346,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     }
   }, [id, authenticatedApi])
 
-  const findMatchingAccounts = useCallback((binding: Extract<BlueprintBinding, { type: 'gatekeeper' }>) => {
+  const findMatchingAccounts = useCallback((binding: Extract<TemplateBinding, { type: 'gatekeeper' }>) => {
     return accounts.filter(account =>
       account.vendorId.toLowerCase() === binding.gatekeeperName.toLowerCase() &&
       account.credentialsValid &&
@@ -373,16 +373,16 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
   }, [models])
 
   const getFirstUnresolvedBindingName = useCallback((assignments = draftAssignments) => {
-    if (!blueprint) return null
-    for (let name of Object.keys(blueprint.metadata.bindings)) {
+    if (!template) return null
+    for (let name of Object.keys(template.metadata.bindings)) {
       if (!assignments[name]) return name
     }
     return null
-  }, [blueprint, draftAssignments])
+  }, [template, draftAssignments])
 
   const openBindingConfigurator = useCallback((name: string) => {
-    if (!blueprint) return
-    const binding = blueprint.metadata.bindings[name]
+    if (!template) return
+    const binding = template.metadata.bindings[name]
     if (!binding) return
 
     setGatekeeperReady(prev => ({ ...prev, [name]: false }))
@@ -408,10 +408,10 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     }
     setBindingForm(prev => ({ ...prev, [name]: initial }))
     setActiveBindingName(name)
-  }, [blueprint, draftAssignments])
+  }, [template, draftAssignments])
 
   useEffect(() => {
-    if (!blueprint || !isAuthenticated) return
+    if (!template || !isAuthenticated) return
 
     // Re-run when account/model data changes: findMatchingAccounts depends on accounts,
     // and findSuggestedModelId depends on models.
@@ -419,7 +419,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
       let next = { ...prev }
       let changed = false
 
-      for (let [name, binding] of Object.entries(blueprint.metadata.bindings)) {
+      for (let [name, binding] of Object.entries(template.metadata.bindings)) {
         if (next[name]) continue
 
         if (binding.type === 'gatekeeper') {
@@ -456,7 +456,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
 
       return changed ? next : prev
     })
-  }, [blueprint, isAuthenticated, findMatchingAccounts, findSuggestedModelId])
+  }, [template, isAuthenticated, findMatchingAccounts, findSuggestedModelId])
 
   const handleStartConfigure = () => {
     if (!isAuthenticated) {
@@ -481,7 +481,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     }
   }
 
-  const updateBinding = useCallback((name: string, updates: Partial<BlueprintBindingAssignment>) => {
+  const updateBinding = useCallback((name: string, updates: Partial<TemplateBindingAssignment>) => {
     setBindingForm(prev => ({
       ...prev,
       [name]: { ...prev[name], ...updates },
@@ -489,8 +489,8 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
   }, [])
 
   const canSaveActiveBinding = useCallback(() => {
-    if (!activeBindingName || !blueprint) return false
-    const binding = blueprint.metadata.bindings[activeBindingName]
+    if (!activeBindingName || !template) return false
+    const binding = template.metadata.bindings[activeBindingName]
     const assignment = bindingForm[activeBindingName]
     if (!binding || !assignment) return false
     if (binding.type === 'gatekeeper') {
@@ -502,16 +502,16 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
       return (assignment as any).modelId !== undefined
     }
     return false
-  }, [activeBindingName, blueprint, bindingForm, gatekeeperReady])
+  }, [activeBindingName, template, bindingForm, gatekeeperReady])
 
   const handleSaveActiveBinding = async () => {
-    if (!activeBindingName || !blueprint) return
-    const binding = blueprint.metadata.bindings[activeBindingName]
+    if (!activeBindingName || !template) return
+    const binding = template.metadata.bindings[activeBindingName]
     const form = bindingForm[activeBindingName]
     if (!binding || !form) return
 
     try {
-      let assignment: BlueprintBindingAssignment
+      let assignment: TemplateBindingAssignment
       if (binding.type === 'gatekeeper') {
         const collect = collectorsRef.current.get(activeBindingName)
         if (!collect) {
@@ -543,7 +543,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
   }
 
   const handleCreate = async () => {
-    if (!authenticatedApi || !blueprint || !id) return
+    if (!authenticatedApi || !template || !id) return
 
     let firstUnresolved = getFirstUnresolvedBindingName()
     if (firstUnresolved) {
@@ -553,12 +553,12 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
 
     setCreating(true)
     setError(null)
-    const overseer = authenticatedApi.newGadgetFromBlueprint(id, draftAssignments)
+    const overseer = authenticatedApi.newGadgetFromTemplate(id, draftAssignments)
     try {
       let metadata = await overseer.getMetadata()
       window.location.href = `/workspace/${metadata.id}`
     } catch (err: any) {
-      setError(err.message || 'Failed to create gadget from blueprint.')
+      setError(err.message || 'Failed to create gadget from template.')
     } finally {
       overseer.then(stub => stub[Symbol.dispose]()).catch(() => {})
       setCreating(false)
@@ -566,22 +566,22 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
   }
 
   const handleDownload = async () => {
-    if (!id || !blueprint) return
+    if (!id || !template) return
     setDownloading(true)
     setError(null)
 
     try {
       await saveStreamToFile(
-        () => rpcStub.downloadBlueprint(id),
-        makeBlueprintFilename(blueprint.metadata.title, blueprint.metadata.version),
+        () => rpcStub.downloadTemplate(id),
+        makeTemplateFilename(template.metadata.title, template.metadata.version),
         {
-          description: 'Gadget Blueprint',
+          description: 'Gadget Template',
           contentType: 'application/octet-stream',
-          extension: BLUEPRINT_ARCHIVE_EXTENSION,
+          extension: TEMPLATE_ARCHIVE_EXTENSION,
         },
       )
     } catch (err: any) {
-      setError(err.message || 'Failed to download blueprint.')
+      setError(err.message || 'Failed to download template.')
     } finally {
       setDownloading(false)
     }
@@ -594,12 +594,12 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     setUpdatingFeatured(true)
 
     try {
-      await admin.api.setBlueprintFeatured(id, nextFeatured)
+      await admin.api.setTemplateFeatured(id, nextFeatured)
       setIsFeatured(nextFeatured)
     } catch (err: any) {
       console.error('Failed to update featured status:', err)
       toasts.add({
-        title: nextFeatured ? 'Failed to feature blueprint' : 'Failed to unfeature blueprint',
+        title: nextFeatured ? 'Failed to feature template' : 'Failed to unfeature template',
         variant: 'error',
       })
     } finally {
@@ -618,15 +618,15 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     const nextPinned = !isPinned
     setUpdatingPinned(true)
     try {
-      await authenticatedApi.setBlueprintPinned(id, nextPinned)
+      await authenticatedApi.setTemplatePinned(id, nextPinned)
       setIsPinned(nextPinned)
-      if (nextPinned && !isOwnBlueprint) {
+      if (nextPinned && !isOwnTemplate) {
         setIsInLibrary(true)
-        setIsUploadedBlueprint(false)
+        setIsUploadedTemplate(false)
       }
-      toasts.add({ title: nextPinned ? 'Blueprint favorited' : 'Blueprint unfavorited', variant: 'success' })
+      toasts.add({ title: nextPinned ? 'Template favorited' : 'Template unfavorited', variant: 'success' })
     } catch (err) {
-      console.error('Failed to update blueprint pin:', err)
+      console.error('Failed to update template pin:', err)
       toasts.add({ title: 'Failed to update favorite status', variant: 'error' })
     } finally {
       setUpdatingPinned(false)
@@ -647,12 +647,12 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
 
     setAddingToLibrary(true)
     try {
-      await authenticatedApi.addBlueprintToLibrary(id)
+      await authenticatedApi.addTemplateToLibrary(id)
       setIsInLibrary(true)
-      toasts.add({ title: 'Blueprint added to library', variant: 'success' })
+      toasts.add({ title: 'Template added to library', variant: 'success' })
     } catch (err) {
-      console.error('Failed to add blueprint to library:', err)
-      toasts.add({ title: 'Failed to add blueprint to library', variant: 'error' })
+      console.error('Failed to add template to library:', err)
+      toasts.add({ title: 'Failed to add template to library', variant: 'error' })
     } finally {
       setAddingToLibrary(false)
     }
@@ -663,20 +663,20 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
 
     setRemovingFromLibrary(true)
     try {
-      await authenticatedApi.removeBlueprintFromLibrary(id)
-      if (isUploadedBlueprint) {
+      await authenticatedApi.removeTemplateFromLibrary(id)
+      if (isUploadedTemplate) {
         setShowDeleteConfirm(false)
-        toasts.add({ title: 'Blueprint deleted', variant: 'success' })
+        toasts.add({ title: 'Template deleted', variant: 'success' })
         navigate({ to: '/' })
       } else {
         setIsInLibrary(false)
         setIsPinned(false)
-        toasts.add({ title: 'Blueprint removed from library', variant: 'success' })
+        toasts.add({ title: 'Template removed from library', variant: 'success' })
       }
     } catch (err) {
-      console.error('Failed to remove blueprint from library:', err)
+      console.error('Failed to remove template from library:', err)
       toasts.add({
-        title: isUploadedBlueprint ? 'Failed to delete blueprint' : 'Failed to remove blueprint from library',
+        title: isUploadedTemplate ? 'Failed to delete template' : 'Failed to remove template from library',
         variant: 'error',
       })
     } finally {
@@ -684,26 +684,26 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     }
   }
 
-  const handleDeleteOwnedBlueprint = async () => {
+  const handleDeleteOwnedTemplate = async () => {
     if (!id || !authenticatedApi) return
 
     setRemovingFromLibrary(true)
     let overseer: ReturnType<typeof authenticatedApi.openGadget> | null = null
     try {
-      // The source workspace owns its blueprints, so it must do the deleting. Once it is gone (or
-      // the blueprint was never published from one), the user record is all there is to clean up.
-      if (ownBlueprintSummary?.source.type === 'workspace') {
-        overseer = authenticatedApi.openGadget(ownBlueprintSummary.source.workspaceId)
-        await overseer.deleteBlueprint(id)
+      // The source workspace owns its templates, so it must do the deleting. Once it is gone (or
+      // the template was never published from one), the user record is all there is to clean up.
+      if (ownTemplateSummary?.source.type === 'workspace') {
+        overseer = authenticatedApi.openGadget(ownTemplateSummary.source.workspaceId)
+        await overseer.deleteTemplate(id)
       } else {
-        await authenticatedApi.deleteOrphanedBlueprint(id)
+        await authenticatedApi.deleteOrphanedTemplate(id)
       }
       setShowDeleteConfirm(false)
-      toasts.add({ title: 'Blueprint deleted', variant: 'success' })
+      toasts.add({ title: 'Template deleted', variant: 'success' })
       navigate({ to: '/' })
     } catch (err) {
-      console.error('Failed to delete blueprint:', err)
-      toasts.add({ title: 'Failed to delete blueprint', variant: 'error' })
+      console.error('Failed to delete template:', err)
+      toasts.add({ title: 'Failed to delete template', variant: 'error' })
     } finally {
       overseer?.then(stub => stub[Symbol.dispose]()).catch(() => {})
       setRemovingFromLibrary(false)
@@ -714,33 +714,33 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     return <LoginPage rpcStub={rpcStub} onLoginSuccess={handleLoginSuccess} />
   }
 
-  if (!blueprint && !notFound && !error) {
+  if (!template && !notFound && !error) {
     return <div className="min-h-full bg-kumo-base" />
   }
 
   if (notFound) {
     return (
-      <BlueprintStatePage
-        title="Blueprint not found"
-        message="This blueprint may have been removed or the link may be incorrect."
+      <TemplateStatePage
+        title="Template not found"
+        message="This template may have been removed or the link may be incorrect."
         actionLabel="Back to Explore"
         onAction={() => navigate({ to: '/explore' })}
       />
     )
   }
 
-  if (!blueprint) {
+  if (!template) {
     return (
-      <BlueprintStatePage
-        title="Couldn’t load blueprint"
-        message={error || 'Failed to load blueprint.'}
+      <TemplateStatePage
+        title="Couldn’t load template"
+        message={error || 'Failed to load template.'}
         actionLabel="Back to Explore"
         onAction={() => navigate({ to: '/explore' })}
       />
     )
   }
 
-  let meta = blueprint.metadata
+  let meta = template.metadata
   let bindingEntries = Object.entries(meta.bindings)
   let activeBinding = activeBindingName ? meta.bindings[activeBindingName] : undefined
   let readyCount = bindingEntries.filter(([name]) => draftAssignments[name]).length
@@ -757,10 +757,10 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
     primaryActionLabel = 'Create Gadget'
   }
   let createDisabled = creating
-  let canDeleteOwnedBlueprint = isOwnBlueprint && !loadingOwnBlueprintState
-  // Only set when the workspace this blueprint was published from is still around to open.
+  let canDeleteOwnedTemplate = isOwnTemplate && !loadingOwnTemplateState
+  // Only set when the workspace this template was published from is still around to open.
   let sourceWorkspace =
-    ownBlueprintSummary?.source.type === 'workspace' ? ownBlueprintSummary.source : null
+    ownTemplateSummary?.source.type === 'workspace' ? ownTemplateSummary.source : null
 
   return (
     <div className="min-h-full bg-kumo-base">
@@ -806,10 +806,10 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
           </div>
 
           <aside className="space-y-3 lg:w-[360px] lg:justify-self-end lg:pt-1">
-            {blueprint.screenshotUrl && (
-              <BlueprintScreenshotHero
+            {template.screenshotUrl && (
+              <TemplateScreenshotHero
                 title={meta.title}
-                screenshotUrl={blueprint.screenshotUrl}
+                screenshotUrl={template.screenshotUrl}
               />
             )}
             <div className="flex items-center gap-2">
@@ -824,11 +824,11 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
                 </button>
               </span>
 
-            {!isOwnBlueprint && !loadingOwnBlueprintState && !isInLibrary && (
+            {!isOwnTemplate && !loadingOwnTemplateState && !isInLibrary && (
               <Tooltip content={isAuthenticated ? 'Add to library' : 'Log in to add to library'} asChild>
                 <button
                   type="button"
-                  aria-label={isAuthenticated ? 'Add blueprint to library' : 'Log in to add blueprint to library'}
+                  aria-label={isAuthenticated ? 'Add template to library' : 'Log in to add template to library'}
                   onClick={handleAddToLibrary}
                   disabled={addingToLibrary || loadingLibraryState}
                   className="press inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-kumo-line bg-kumo-base p-0 text-kumo-subtle transition-colors duration-150 ease-out hover:border-kumo-fill hover:bg-kumo-tint hover:text-kumo-default disabled:cursor-not-allowed disabled:opacity-60"
@@ -842,7 +842,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
               <DropdownMenu.Trigger
                 render={(
                   <WorkshopIconButton
-                    aria-label="More blueprint actions"
+                    aria-label="More template actions"
                     className="!h-10 !w-10 shrink-0 rounded-lg border border-kumo-line bg-kumo-base text-kumo-subtle hover:border-kumo-fill hover:bg-kumo-tint hover:text-kumo-default data-[popup-open]:border-kumo-fill data-[popup-open]:bg-kumo-tint data-[popup-open]:text-kumo-default"
                   >
                     <DotsThree size={18} weight="bold" />
@@ -878,7 +878,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
                   </DropdownMenu.Item>
                 )}
 
-                {canDeleteOwnedBlueprint && (
+                {canDeleteOwnedTemplate && (
                   <>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item
@@ -887,22 +887,22 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
                       onClick={() => setShowDeleteConfirm(true)}
                       className={MENU_ITEM_DANGER}
                     >
-                      Delete blueprint
+                      Delete template
                     </DropdownMenu.Item>
                   </>
                 )}
 
-                {!isOwnBlueprint && !loadingOwnBlueprintState && isInLibrary && (
+                {!isOwnTemplate && !loadingOwnTemplateState && isInLibrary && (
                   <>
                     <DropdownMenu.Separator />
-                    {isUploadedBlueprint ? (
+                    {isUploadedTemplate ? (
                       <DropdownMenu.Item
                         icon={<Trash size={13} className="mr-2" />}
                         variant="danger"
                         onClick={() => setShowDeleteConfirm(true)}
                         className={MENU_ITEM_DANGER}
                       >
-                        Delete blueprint
+                        Delete template
                       </DropdownMenu.Item>
                     ) : (
                       <DropdownMenu.Item
@@ -927,7 +927,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
                       disabled={updatingFeatured}
                       className={MENU_ITEM}
                     >
-                      {updatingFeatured ? 'Updating...' : (isFeatured ? 'Unfeature blueprint' : 'Feature blueprint')}
+                      {updatingFeatured ? 'Updating...' : (isFeatured ? 'Unfeature template' : 'Feature template')}
                     </DropdownMenu.Item>
                   </>
                 )}
@@ -955,7 +955,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
               </div>
               <div className="overflow-hidden rounded-2xl border border-kumo-line bg-kumo-base">
                 {bindingEntries.map(([name, binding]) => (
-                  <BlueprintBindingSummaryCard
+                  <TemplateBindingSummaryCard
                     key={name}
                     name={name}
                     binding={binding}
@@ -973,7 +973,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
                 No connections required
               </p>
               <p className="mt-1 text-[13px] leading-[18px] font-normal tracking-[-0.25px] text-kumo-subtle">
-                This blueprint can create a Gadget without configuring external resources.
+                This template can create a Gadget without configuring external resources.
               </p>
             </section>
           )}
@@ -1059,7 +1059,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
         />
       </Dialog.Root>
 
-      {/* Delete blueprint confirmation dialog */}
+      {/* Delete template confirmation dialog */}
       <Dialog.Root
         role="alertdialog"
         open={showDeleteConfirm}
@@ -1067,12 +1067,12 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
       >
         <Dialog className="p-8" size="sm">
           <Dialog.Title className="text-lg font-semibold">
-            Delete blueprint
+            Delete template
           </Dialog.Title>
           <Dialog.Description className="mt-2 text-kumo-subtle">
-            Delete "{blueprint?.metadata.title}"? {canDeleteOwnedBlueprint
-              ? 'This blueprint link will stop working, but gadgets already created from it won’t be affected.'
-              : 'This blueprint was uploaded manually and cannot be recovered.'}
+            Delete "{template?.metadata.title}"? {canDeleteOwnedTemplate
+              ? 'This template link will stop working, but gadgets already created from it won’t be affected.'
+              : 'This template was uploaded manually and cannot be recovered.'}
           </Dialog.Description>
           <div className="mt-6 flex justify-end gap-2">
             <Dialog.Close
@@ -1084,7 +1084,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
             />
             <Button
               variant="destructive"
-              onClick={canDeleteOwnedBlueprint ? handleDeleteOwnedBlueprint : handleRemoveFromLibrary}
+              onClick={canDeleteOwnedTemplate ? handleDeleteOwnedTemplate : handleRemoveFromLibrary}
               disabled={removingFromLibrary}
               aria-busy={removingFromLibrary}
             >
@@ -1097,7 +1097,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
   )
 }
 
-function BlueprintScreenshotHero({
+function TemplateScreenshotHero({
   title,
   screenshotUrl,
 }: {
@@ -1152,7 +1152,7 @@ function BlueprintScreenshotHero({
   )
 }
 
-function BlueprintStatePage({
+function TemplateStatePage({
   title,
   message,
   actionLabel,
@@ -1194,7 +1194,7 @@ function BindingIconTile({
   binding,
   vendor,
 }: {
-  binding: BlueprintBinding
+  binding: TemplateBinding
   vendor?: { id: string, description: VendorDescription, supportedResources: SupportedResource[] }
 }) {
   let icon: ReactNode
@@ -1220,7 +1220,7 @@ function BindingIconTile({
   )
 }
 
-function BlueprintBindingSummaryCard({
+function TemplateBindingSummaryCard({
   name,
   binding,
   assignment,
@@ -1229,8 +1229,8 @@ function BlueprintBindingSummaryCard({
   onConfigure,
 }: {
   name: string
-  binding: BlueprintBinding
-  assignment?: BlueprintBindingAssignment
+  binding: TemplateBinding
+  assignment?: TemplateBindingAssignment
   vendor?: { id: string, description: VendorDescription, supportedResources: SupportedResource[] }
   models: AiChatAuthorInfo[]
   onConfigure: () => void
@@ -1334,15 +1334,15 @@ function BindingField({
   selectPortalContainer,
 }: {
   name: string
-  binding: BlueprintBinding
-  value: Partial<BlueprintBindingAssignment>
+  binding: TemplateBinding
+  value: Partial<TemplateBindingAssignment>
   models: AiChatAuthorInfo[]
   authenticatedApi: RpcStub<AuthenticatedApi>
   vendors: {id: string, description: VendorDescription, supportedResources: SupportedResource[]}[]
   accounts: AccountOption[]
   connectingVendor: string | null
   reconnectingAccountId: number | null
-  onChange: (updates: Partial<BlueprintBindingAssignment>) => void
+  onChange: (updates: Partial<TemplateBindingAssignment>) => void
   onConnectAccount: (vendorId: string) => void
   onReconnectAccount: (accountId: number) => void
   onReadyChange: (ready: boolean) => void
@@ -1353,7 +1353,7 @@ function BindingField({
 
   if (binding.type === 'gatekeeper') {
     return (
-      <BlueprintGatekeeperBindingField
+      <TemplateGatekeeperBindingField
         title={title}
         binding={binding}
         value={value}
@@ -1463,7 +1463,7 @@ function formatSuggestedResource(resourceUrl: string): string {
 // Renders the connection-wizard-style UI for a single gatekeeper binding: an account chooser
 // scoped to the binding's required resource type, plus the vendor-supplied resource configurator
 // iframe. The URL is collected from the iframe at submit time via `collectResourceUrl()`.
-function BlueprintGatekeeperBindingField({
+function TemplateGatekeeperBindingField({
   title,
   binding,
   value,
@@ -1479,14 +1479,14 @@ function BlueprintGatekeeperBindingField({
   onCollectorChange,
 }: {
   title: string
-  binding: Extract<BlueprintBinding, { type: 'gatekeeper' }>
-  value: Partial<BlueprintBindingAssignment>
+  binding: Extract<TemplateBinding, { type: 'gatekeeper' }>
+  value: Partial<TemplateBindingAssignment>
   authenticatedApi: RpcStub<AuthenticatedApi>
   vendors: {id: string, description: VendorDescription, supportedResources: SupportedResource[]}[]
   accounts: AccountOption[]
   connectingVendor: string | null
   reconnectingAccountId: number | null
-  onChange: (updates: Partial<BlueprintBindingAssignment>) => void
+  onChange: (updates: Partial<TemplateBindingAssignment>) => void
   onConnectAccount: (vendorId: string) => void
   onReconnectAccount: (accountId: number) => void
   onReadyChange: (ready: boolean) => void
@@ -1644,7 +1644,7 @@ function BlueprintGatekeeperBindingField({
         <div className="space-y-2.5">
           {binding.resourceUrl && (
             <p className="m-0 pl-[2px] text-[12px] leading-4 font-normal tracking-[-0.2px] text-kumo-subtle">
-              Blueprint recommends: <span className="break-all text-kumo-default">{formatSuggestedResource(binding.resourceUrl)}</span>
+              Template recommends: <span className="break-all text-kumo-default">{formatSuggestedResource(binding.resourceUrl)}</span>
             </p>
           )}
 

@@ -24,18 +24,18 @@ async function route(env: Env, path: string): Promise<string> {
 }
 
 describe('router fetch', () => {
-  it('routes /api and /blueprint-screenshot prefixes to the backend', async () => {
+  it('routes /api and /template-screenshot prefixes to the backend', async () => {
     const env = makeEnv({ ASSETS: stubFetcher('assets') });
     expect(await route(env, '/api')).toBe('backend');
     expect(await route(env, '/api/workshop')).toBe('backend');
-    expect(await route(env, '/blueprint-screenshot')).toBe('backend');
-    expect(await route(env, '/blueprint-screenshot/abc')).toBe('backend');
+    expect(await route(env, '/template-screenshot')).toBe('backend');
+    expect(await route(env, '/template-screenshot/abc')).toBe('backend');
   });
 
   it('does not treat /api-lookalike paths as backend routes', async () => {
     const env = makeEnv({ ASSETS: stubFetcher('assets') });
     expect(await route(env, '/apiary')).toBe('assets');
-    expect(await route(env, '/blueprint-screenshots')).toBe('assets');
+    expect(await route(env, '/template-screenshots')).toBe('assets');
   });
 
   it('routes /gatekeeper/<short> by scanning GATEKEEPER_* bindings', async () => {
@@ -69,7 +69,7 @@ describe('router fetch', () => {
   it('serves everything else from ASSETS when the binding is present', async () => {
     const env = makeEnv({ ASSETS: stubFetcher('assets') });
     expect(await route(env, '/')).toBe('assets');
-    expect(await route(env, '/blueprints/123')).toBe('assets');
+    expect(await route(env, '/templates/123')).toBe('assets');
     expect(await route(env, '/gatekeeper/not-installed')).toBe('assets');
   });
 
@@ -78,7 +78,7 @@ describe('router fetch', () => {
   it('falls through to the backend when ASSETS is absent', async () => {
     const env = makeEnv();
     expect(await route(env, '/')).toBe('backend');
-    expect(await route(env, '/blueprints/123')).toBe('backend');
+    expect(await route(env, '/templates/123')).toBe('backend');
   });
 });
 
@@ -114,8 +114,8 @@ describe('wrangler.jsonc contract', () => {
     const first: string[] = config.assets.run_worker_first;
     expect(first).toContain('/api');
     expect(first).toContain('/api/*');
-    expect(first).toContain('/blueprint-screenshot');
-    expect(first).toContain('/blueprint-screenshot/*');
+    expect(first).toContain('/template-screenshot');
+    expect(first).toContain('/template-screenshot/*');
     expect(first).toContain('/gatekeeper/*');
   });
 

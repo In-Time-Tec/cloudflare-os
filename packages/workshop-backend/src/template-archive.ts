@@ -1,44 +1,44 @@
-// Helpers around managing blueprints and encoding/decoding blueprint downloads (`.gadget` files).
+// Helpers around managing templates and encoding/decoding template downloads (`.template` files).
 //
-// `.gadget` archives are streamed as a 24-byte prefix (magic, version, metadata byte length,
+// `.template` archives are streamed as a 24-byte prefix (magic, version, metadata byte length,
 // content byte length), followed by UTF-8 JSON metadata and the gzip-compressed Yjs snapshot.
-// See docs/blueprints.md for the full format description.
+// See docs/templates.md for the full format description.
 
-import { BlueprintMetadata, BlueprintOutput, BlueprintPublicInfo, isOutputIcon } from '@gadgets/workshop-shared/api';
+import { TemplateMetadata, TemplateOutput, TemplatePublicInfo, isOutputIcon } from '@gadgets/workshop-shared/api';
 
-export const FEATURED_BLUEPRINTS_KEY = '.featured';
+export const FEATURED_TEMPLATES_KEY = '.featured';
 
 /**
- * Reserved key in the BLUEPRINTS KV namespace holding the deployment-wide admin config (a single
+ * Reserved key in the TEMPLATES KV namespace holding the deployment-wide admin config (a single
  * JSON object). AdminSettings already owns this namespace; see admin-config.ts.
  */
 export const ADMIN_CONFIG_KEY = '.adminConfig';
 
-const BLUEPRINT_ARCHIVE_MAGIC = 0xec2e2d3a2300e317n;
-const BLUEPRINT_ARCHIVE_VERSION = 1;
-const BLUEPRINT_ARCHIVE_PREFIX_BYTES = 24;
-const MAX_BLUEPRINT_METADATA_BYTES = 64 * 1024;
-const MAX_BLUEPRINT_CONTENT_BYTES = 32 * 1024 * 1024;
+const TEMPLATE_ARCHIVE_MAGIC = 0xec2e2d3a2300e317n;
+const TEMPLATE_ARCHIVE_VERSION = 1;
+const TEMPLATE_ARCHIVE_PREFIX_BYTES = 24;
+const MAX_TEMPLATE_METADATA_BYTES = 64 * 1024;
+const MAX_TEMPLATE_CONTENT_BYTES = 32 * 1024 * 1024;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-export type BlueprintKvRecord = {
-  metadata: BlueprintMetadata;
+export type TemplateKvRecord = {
+  metadata: TemplateMetadata;
   /**
-   * The User DO that published or uploaded this blueprint, and which owns the authoritative
-   * "featured" bit for it. Undefined for a blueprint the deployment installed itself, which
+   * The User DO that published or uploaded this template, and which owns the authoritative
+   * "featured" bit for it. Undefined for a template the deployment installed itself, which
    * has no owning user.
    */
   ownerId?: string;
   gadgetId?: string;  // undefined = uploaded, not published from a gadget on this instance
 };
 
-export function isReservedBlueprintKey(id: string): boolean {
-  return id === FEATURED_BLUEPRINTS_KEY || id === ADMIN_CONFIG_KEY;
+export function isReservedTemplateKey(id: string): boolean {
+  return id === FEATURED_TEMPLATES_KEY || id === ADMIN_CONFIG_KEY;
 }
 
-export function reviveBlueprintMetadata(metadata: BlueprintMetadata): BlueprintMetadata {
+export function reviveTemplateMetadata(metadata: TemplateMetadata): TemplateMetadata {
   metadata.created = new Date(metadata.created);
   metadata.lastUpdated = new Date(metadata.lastUpdated);
   return metadata;
@@ -56,14 +56,14 @@ function outputString(value: unknown): string | undefined {
 }
 
 /**
- * Accept a blueprint's declared output format only if it is completely well-formed, otherwise
- * treat the blueprint as declaring nothing (a generic app). Blueprint metadata arrives from
+ * Accept a template's declared output format only if it is completely well-formed, otherwise
+ * treat the template as declaring nothing (a generic app). Template metadata arrives from
  * uploaded archives, so an unknown icon key or an overlong noun must degrade rather than reach
  * the UI.
  */
-export function sanitizeBlueprintOutput(output: unknown): BlueprintOutput | undefined {
+export function sanitizeTemplateOutput(output: unknown): TemplateOutput | undefined {
   if (!output || typeof output !== "object") return undefined;
-  let {id, noun, plural, icon} = output as Partial<BlueprintOutput>;
+  let {id, noun, plural, icon} = output as Partial<TemplateOutput>;
   let cleanId = outputString(id);
   let cleanNoun = outputString(noun);
   let cleanPlural = outputString(plural);
@@ -71,67 +71,67 @@ export function sanitizeBlueprintOutput(output: unknown): BlueprintOutput | unde
   return {id: cleanId, noun: cleanNoun, plural: cleanPlural, icon};
 }
 
-export function parseBlueprintKvRecord(raw: string): BlueprintKvRecord {
-  let kvRecord = JSON.parse(raw) as BlueprintKvRecord;
-  kvRecord.metadata = reviveBlueprintMetadata(kvRecord.metadata);
+export function parseTemplateKvRecord(raw: string): TemplateKvRecord {
+  let kvRecord = JSON.parse(raw) as TemplateKvRecord;
+  kvRecord.metadata = reviveTemplateMetadata(kvRecord.metadata);
   return kvRecord;
 }
 
-export function parseFeaturedBlueprints(raw: string): BlueprintPublicInfo[] {
-  let featured = JSON.parse(raw) as BlueprintPublicInfo[];
+export function parseFeaturedTemplates(raw: string): TemplatePublicInfo[] {
+  let featured = JSON.parse(raw) as TemplatePublicInfo[];
   for (let entry of featured) {
-    entry.metadata = reviveBlueprintMetadata(entry.metadata);
+    entry.metadata = reviveTemplateMetadata(entry.metadata);
   }
   return featured;
 }
 
-export function serializeFeaturedBlueprints(featured: BlueprintPublicInfo[]): string {
+export function serializeFeaturedTemplates(featured: TemplatePublicInfo[]): string {
   return JSON.stringify(featured);
 }
 
 /**
- * The env a blueprint KV read needs. Narrowed to the one binding so helpers that only read
- * blueprints can be called from anywhere holding it, without passing a whole env around.
+ * The env a template KV read needs. Narrowed to the one binding so helpers that only read
+ * templates can be called from anywhere holding it, without passing a whole env around.
  */
-export type BlueprintKvEnv = Pick<Cloudflare.Env, 'BLUEPRINTS'>;
+export type TemplateKvEnv = Pick<Cloudflare.Env, 'TEMPLATES'>;
 
-export async function readBlueprintKvRecord(
-  env: BlueprintKvEnv,
-  blueprintId: string,
-): Promise<BlueprintKvRecord | null> {
-  if (isReservedBlueprintKey(blueprintId)) {
+export async function readTemplateKvRecord(
+  env: TemplateKvEnv,
+  templateId: string,
+): Promise<TemplateKvRecord | null> {
+  if (isReservedTemplateKey(templateId)) {
     return null;
   }
 
-  let raw = await env.BLUEPRINTS.get(blueprintId);
+  let raw = await env.TEMPLATES.get(templateId);
   if (!raw) {
     return null;
   }
 
-  return parseBlueprintKvRecord(raw);
+  return parseTemplateKvRecord(raw);
 }
 
-export async function listFeaturedBlueprintsFromKv(
-  env: BlueprintKvEnv,
-): Promise<BlueprintPublicInfo[]> {
-  let raw = await env.BLUEPRINTS.get(FEATURED_BLUEPRINTS_KEY);
+export async function listFeaturedTemplatesFromKv(
+  env: TemplateKvEnv,
+): Promise<TemplatePublicInfo[]> {
+  let raw = await env.TEMPLATES.get(FEATURED_TEMPLATES_KEY);
   if (!raw) {
     return [];
   }
 
-  return parseFeaturedBlueprints(raw);
+  return parseFeaturedTemplates(raw);
 }
 
 /**
- * Read a blueprint's code snapshot (an uncompressed Yjs V2 state update of a doc whose unnamed
+ * Read a template's code snapshot (an uncompressed Yjs V2 state update of a doc whose unnamed
  * root map is filename -> Y.Text) from R2, or null if the content object doesn't exist.
  */
-export async function readBlueprintContent(
-  env: Pick<Cloudflare.Env, 'BLUEPRINT_CONTENT'>,
-  blueprintId: string,
+export async function readTemplateContent(
+  env: Pick<Cloudflare.Env, 'TEMPLATE_CONTENT'>,
+  templateId: string,
   version: number,
 ): Promise<Uint8Array | null> {
-  let r2Object = await env.BLUEPRINT_CONTENT.get(`${blueprintId}/${version}`);
+  let r2Object = await env.TEMPLATE_CONTENT.get(`${templateId}/${version}`);
   if (!r2Object) {
     return null;
   }
@@ -140,26 +140,26 @@ export async function readBlueprintContent(
   return new Uint8Array(await new Response(decompressed).arrayBuffer());
 }
 
-export function randomBlueprintId(): string {
+export function randomTemplateId(): string {
   let idBytes = new Uint8Array(16);
   crypto.getRandomValues(idBytes);
   return idBytes.toHex();
 }
 
-function encodeBlueprintArchivePrefix(metadata: BlueprintMetadata, contentLength: number): Uint8Array {
+function encodeTemplateArchivePrefix(metadata: TemplateMetadata, contentLength: number): Uint8Array {
   let metadataBytes = textEncoder.encode(JSON.stringify(metadata));
-  let result = new Uint8Array(BLUEPRINT_ARCHIVE_PREFIX_BYTES + metadataBytes.byteLength);
+  let result = new Uint8Array(TEMPLATE_ARCHIVE_PREFIX_BYTES + metadataBytes.byteLength);
   let view = new DataView(result.buffer);
-  view.setBigUint64(0, BLUEPRINT_ARCHIVE_MAGIC);
-  view.setUint32(8, BLUEPRINT_ARCHIVE_VERSION);
+  view.setBigUint64(0, TEMPLATE_ARCHIVE_MAGIC);
+  view.setUint32(8, TEMPLATE_ARCHIVE_VERSION);
   view.setUint32(12, metadataBytes.byteLength);
   view.setBigUint64(16, BigInt(contentLength));
-  result.set(metadataBytes, BLUEPRINT_ARCHIVE_PREFIX_BYTES);
+  result.set(metadataBytes, TEMPLATE_ARCHIVE_PREFIX_BYTES);
   return result;
 }
 
-export function buildBlueprintArchiveStream(
-  metadata: BlueprintMetadata,
+export function buildTemplateArchiveStream(
+  metadata: TemplateMetadata,
   content: ReadableStream<Uint8Array>,
   contentLength: number,
 ): ReadableStream<Uint8Array> {
@@ -167,7 +167,7 @@ export function buildBlueprintArchiveStream(
 
   void (async () => {
     try {
-      await new Response(encodeBlueprintArchivePrefix(metadata, contentLength)).body!
+      await new Response(encodeTemplateArchivePrefix(metadata, contentLength)).body!
           .pipeTo(archive.writable, { preventClose: true });
       await content.pipeTo(archive.writable);
     } catch (err) {
@@ -253,26 +253,26 @@ function makeStreamPrefixReader(stream: ReadableStream<Uint8Array>) {
   };
 }
 
-export async function parseBlueprintArchive(archive: ReadableStream<Uint8Array>)
-    : Promise<{metadata: BlueprintMetadata, contentLength: number, content: ReadableStream<Uint8Array>}> {
+export async function parseTemplateArchive(archive: ReadableStream<Uint8Array>)
+    : Promise<{metadata: TemplateMetadata, contentLength: number, content: ReadableStream<Uint8Array>}> {
   let reader = makeStreamPrefixReader(archive);
-  let prefix = await reader.readExact(BLUEPRINT_ARCHIVE_PREFIX_BYTES);
+  let prefix = await reader.readExact(TEMPLATE_ARCHIVE_PREFIX_BYTES);
   let view = new DataView(prefix.buffer, prefix.byteOffset, prefix.byteLength);
 
-  if (view.getBigUint64(0) !== BLUEPRINT_ARCHIVE_MAGIC) {
+  if (view.getBigUint64(0) !== TEMPLATE_ARCHIVE_MAGIC) {
     throw new Error("Invalid gadget archive magic number.");
   }
 
   let version = view.getUint32(8);
-  if (version !== BLUEPRINT_ARCHIVE_VERSION) {
+  if (version !== TEMPLATE_ARCHIVE_VERSION) {
     throw new Error(`Unsupported gadget archive version: ${version}.`);
   }
 
   let metadataSize = view.getUint32(12);
   if (metadataSize === 0) {
-    throw new Error("Gadget archive is missing blueprint metadata.");
+    throw new Error("Gadget archive is missing template metadata.");
   }
-  if (metadataSize > MAX_BLUEPRINT_METADATA_BYTES) {
+  if (metadataSize > MAX_TEMPLATE_METADATA_BYTES) {
     throw new Error("Gadget archive metadata size is out of range.");
   }
 
@@ -280,18 +280,18 @@ export async function parseBlueprintArchive(archive: ReadableStream<Uint8Array>)
   if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
     throw new Error("Gadget archive has an invalid content length.");
   }
-  if (contentLength > MAX_BLUEPRINT_CONTENT_BYTES) {
+  if (contentLength > MAX_TEMPLATE_CONTENT_BYTES) {
     throw new Error("Gadget archive content is too large.");
   }
 
   let metadataBytes = await reader.readExact(metadataSize);
-  let rawMetadata: BlueprintMetadata;
+  let rawMetadata: TemplateMetadata;
   try {
     rawMetadata = JSON.parse(textDecoder.decode(metadataBytes));
   } catch {
     throw new Error("Gadget archive metadata is not valid JSON.");
   }
 
-  let metadata = reviveBlueprintMetadata(rawMetadata);
+  let metadata = reviveTemplateMetadata(rawMetadata);
   return { metadata, contentLength, content: reader.takeTail() };
 }

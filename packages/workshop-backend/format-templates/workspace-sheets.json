@@ -1,5 +1,5 @@
 {
-  "blueprintId": "format.spreadsheet",
+  "templateId": "format.spreadsheet",
   "title": "Workspace Sheets",
   "description": "Use to write, format, and edit spreadsheets interactively or with natural language.",
   "output": {

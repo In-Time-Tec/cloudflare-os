@@ -35,9 +35,9 @@ declare global {
       DEPLOYMENT_AI_DEFAULT_MODEL?: string; // Suggested model ID placed first in model lists
       OPENROUTER_API_TOKEN?: string;        // Backend-only Worker secret
 
-      // Blueprint storage bindings.
-      BLUEPRINTS: KVNamespace;             // Workers KV for blueprint metadata lookup
-      BLUEPRINT_CONTENT: R2Bucket;         // R2 bucket for blueprint code snapshots
+      // Template storage bindings.
+      TEMPLATES: KVNamespace;             // Workers KV for template metadata lookup
+      TEMPLATE_CONTENT: R2Bucket;         // R2 bucket for template code snapshots
 
       // User avatar storage.
       AVATARS: KVNamespace;                // Workers KV for user avatar images

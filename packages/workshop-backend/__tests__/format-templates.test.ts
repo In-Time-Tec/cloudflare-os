@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { parseBlueprintArchive, parseBlueprintKvRecord, sanitizeBlueprintOutput } from "../src/blueprint-archive.js";
-import { formatBlueprintsManifestVersion, installFormatBlueprints } from "../src/format-blueprints.js";
-import { FORMAT_BLUEPRINTS } from "../src/generated/format-blueprints.js";
+import { parseTemplateArchive, parseTemplateKvRecord, sanitizeTemplateOutput } from "../src/template-archive.js";
+import { formatTemplatesManifestVersion, installFormatTemplates } from "../src/format-templates.js";
+import { FORMAT_TEMPLATES } from "../src/generated/format-templates.js";
 
-async function readClientCode(entry: (typeof FORMAT_BLUEPRINTS)[number]): Promise<string> {
+async function readClientCode(entry: (typeof FORMAT_TEMPLATES)[number]): Promise<string> {
   let archive = new Response(Uint8Array.fromBase64(entry.archive) as BufferSource).body!;
-  let {content} = await parseBlueprintArchive(archive);
+  let {content} = await parseTemplateArchive(archive);
   let decompressed = content.pipeThrough(new DecompressionStream("gzip"));
   let update = new Uint8Array(await new Response(decompressed).arrayBuffer());
   let doc = new Y.Doc();
@@ -15,7 +15,7 @@ async function readClientCode(entry: (typeof FORMAT_BLUEPRINTS)[number]): Promis
 }
 
 // Minimal in-memory stand-ins for the two bindings the installer writes to. They record what was
-// written so the test can assert on the installed blueprint the way a reader would see it.
+// written so the test can assert on the installed template the way a reader would see it.
 function makeEnv() {
   let kv = new Map<string, string>();
   let r2 = new Map<string, Uint8Array>();
@@ -23,10 +23,10 @@ function makeEnv() {
     kv,
     r2,
     env: {
-      BLUEPRINTS: {
+      TEMPLATES: {
         put: async (key: string, value: string) => { kv.set(key, value); },
       },
-      BLUEPRINT_CONTENT: {
+      TEMPLATE_CONTENT: {
         // Deliberately strict: real R2 rejects a stream of unknown length, so accepting one here
         // would hide exactly the bug this stands in for.
         put: async (key: string, value: unknown) => {
@@ -40,22 +40,22 @@ function makeEnv() {
               : value));
         },
       },
-    } as unknown as Pick<Cloudflare.Env, "BLUEPRINTS" | "BLUEPRINT_CONTENT">,
+    } as unknown as Pick<Cloudflare.Env, "TEMPLATES" | "TEMPLATE_CONTENT">,
   };
 }
 
-describe("bundled format blueprints", () => {
-  it("installs every manifest entry as an ordinary blueprint", async () => {
+describe("bundled format templates", () => {
+  it("installs every manifest entry as an ordinary template", async () => {
     let {kv, r2, env} = makeEnv();
 
-    let installed = await installFormatBlueprints(env);
+    let installed = await installFormatTemplates(env);
 
-    expect(installed).toHaveLength(FORMAT_BLUEPRINTS.length);
-    for (let entry of FORMAT_BLUEPRINTS) {
-      let raw = kv.get(entry.blueprintId);
-      expect(raw, `${entry.blueprintId} metadata`).toBeDefined();
+    expect(installed).toHaveLength(FORMAT_TEMPLATES.length);
+    for (let entry of FORMAT_TEMPLATES) {
+      let raw = kv.get(entry.templateId);
+      expect(raw, `${entry.templateId} metadata`).toBeDefined();
 
-      let record = parseBlueprintKvRecord(raw!);
+      let record = parseTemplateKvRecord(raw!);
       // No owning user: these belong to the deployment, so the owner-anchored featured toggle
       // must not apply to them.
       expect(record.ownerId).toBeUndefined();
@@ -64,37 +64,37 @@ describe("bundled format blueprints", () => {
       expect(record.metadata.title).toBe(entry.title);
       expect(record.metadata.description).toBe(entry.description);
       expect(record.metadata.author).toEqual(entry.author);
-      // The sidecar's declaration is written into the installed blueprint, so from here on the
-      // blueprint declares its own format like any other.
+      // The sidecar's declaration is written into the installed template, so from here on the
+      // template declares its own format like any other.
       expect(record.metadata.output).toEqual(entry.output);
       // ...and it survives the same validation an uploaded archive's would.
-      expect(sanitizeBlueprintOutput(record.metadata.output)).toEqual(entry.output);
+      expect(sanitizeTemplateOutput(record.metadata.output)).toEqual(entry.output);
 
-      // Content lands where readBlueprintContent() looks for it.
-      let content = r2.get(`${entry.blueprintId}/${record.metadata.version}`);
-      expect(content, `${entry.blueprintId} content`).toBeDefined();
+      // Content lands where readTemplateContent() looks for it.
+      let content = r2.get(`${entry.templateId}/${record.metadata.version}`);
+      expect(content, `${entry.templateId} content`).toBeDefined();
       expect(content!.byteLength).toBeGreaterThan(0);
     }
   });
 
   it("ships print layouts for every standard output format", async () => {
-    for (let entry of FORMAT_BLUEPRINTS) {
-      expect(await readClientCode(entry), entry.blueprintId).toContain("@media print");
+    for (let entry of FORMAT_TEMPLATES) {
+      expect(await readClientCode(entry), entry.templateId).toContain("@media print");
     }
   });
 
-  // Skipped when the deployment bundles nothing, which FORMAT_BLUEPRINTS_DIR makes a supported
+  // Skipped when the deployment bundles nothing, which FORMAT_TEMPLATES_DIR makes a supported
   // configuration rather than a broken checkout.
-  it.skipIf(FORMAT_BLUEPRINTS.length === 0)(
+  it.skipIf(FORMAT_TEMPLATES.length === 0)(
       "changes the manifest version when an entry's revision changes", () => {
-    let entry = FORMAT_BLUEPRINTS[0];
-    let before = formatBlueprintsManifestVersion();
-    expect(before).toContain(entry.blueprintId);
+    let entry = FORMAT_TEMPLATES[0];
+    let before = formatTemplatesManifestVersion();
+    expect(before).toContain(entry.templateId);
 
     let original = entry.revision;
     try {
       entry.revision = original + 1;
-      expect(formatBlueprintsManifestVersion()).not.toBe(before);
+      expect(formatTemplatesManifestVersion()).not.toBe(before);
     } finally {
       entry.revision = original;
     }
@@ -103,10 +103,10 @@ describe("bundled format blueprints", () => {
   // Curated text is the input most likely to be edited -- it is the whole point of keeping it in a
   // text file -- and an edit that doesn't reach deployments which already installed would be
   // invisible: the build succeeds and the old wording stays put.
-  it.skipIf(FORMAT_BLUEPRINTS.length === 0)(
+  it.skipIf(FORMAT_TEMPLATES.length === 0)(
       "changes the manifest version when curated presentation changes, with no revision bump", () => {
-    let entry = FORMAT_BLUEPRINTS[0];
-    let before = formatBlueprintsManifestVersion();
+    let entry = FORMAT_TEMPLATES[0];
+    let before = formatTemplatesManifestVersion();
 
     for (let mutate of [
       () => { entry.description += " Now with more detail."; },
@@ -116,13 +116,13 @@ describe("bundled format blueprints", () => {
       let restore = {...entry};
       try {
         mutate();
-        expect(formatBlueprintsManifestVersion()).not.toBe(before);
+        expect(formatTemplatesManifestVersion()).not.toBe(before);
         expect(entry.revision).toBe(restore.revision);
       } finally {
         Object.assign(entry, restore);
       }
     }
 
-    expect(formatBlueprintsManifestVersion()).toBe(before);
+    expect(formatTemplatesManifestVersion()).toBe(before);
   });
 });

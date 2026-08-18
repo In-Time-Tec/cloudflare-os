@@ -87,4 +87,4 @@ Use `getPricingSummary()` when only the current project and deterministic pricin
   immutable.
 
 Every estimate is pinned to the policy version shown in the header. Repository updates create a new
-Blueprint revision but do not silently rewrite an existing or signed estimate.
+Template revision but do not silently rewrite an existing or signed estimate.

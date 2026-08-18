@@ -6,14 +6,14 @@ import { DropdownMenu, Dialog, Button, useKumoToastManager } from '@cloudflare/k
 import { RpcStub } from 'capnweb'
 import { useAuthenticatedApi } from '../AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
-import { gadgetsKey, useFeaturedBlueprints, useGadgets, useWhoami } from '../query/hooks'
+import { gadgetsKey, useFeaturedTemplates, useGadgets, useWhoami } from '../query/hooks'
 import { asTime } from '../query/time'
 import { useGadgetMutations } from '../query/useGadgetMutations'
-import { GadgetMetadataWithTimestamps, BlueprintPublicInfo, Overseer } from '@gadgets/workshop-shared/api'
+import { GadgetMetadataWithTimestamps, TemplatePublicInfo, Overseer } from '@gadgets/workshop-shared/api'
 import ShareModal from '../ShareModal'
-import { BindingBadge, getGradient as getBlueprintGradient, uniqueBindingBadges } from './BlueprintCard'
+import { BindingBadge, getGradient as getTemplateGradient, uniqueBindingBadges } from './TemplateCard'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './menuStyles'
-import { BlueprintPreviewImage } from './BlueprintPreviewImage'
+import { TemplatePreviewImage } from './TemplatePreviewImage'
 import DeleteConfirmationDialog from './DeleteConfirmationDialog'
 
 // Neutral monogram for a workspace — matches the sidebar treatment (no per-item color noise).
@@ -313,7 +313,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
               No workspaces found
             </div>
           ) : (
-            <FeaturedBlueprintsGallery />
+            <FeaturedTemplatesGallery />
           )
         ) : (
           filtered.map((gadget) => (
@@ -406,46 +406,46 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
   )
 }
 
-// ─── featured blueprints gallery (shown when gadget list is empty) ────────────
+// ─── featured templates gallery (shown when gadget list is empty) ────────────
 
 const MAX_FEATURED_SHOWN = 6
 
-function HomeFeaturedBlueprintCard({
-  blueprint,
+function HomeFeaturedTemplateCard({
+  template,
 }: {
-  blueprint: BlueprintPublicInfo
+  template: TemplatePublicInfo
 }) {
-  const badges = uniqueBindingBadges(blueprint.metadata.bindings).slice(0, 1)
-  const pending = useLinkPending({ to: '/blueprint/$id', params: { id: blueprint.id } })
+  const badges = uniqueBindingBadges(template.metadata.bindings).slice(0, 1)
+  const pending = useLinkPending({ to: '/template/$id', params: { id: template.id } })
 
   return (
     <div className="themed-card-hover-shadow group relative isolate flex min-h-[190px] flex-col overflow-hidden rounded-2xl border border-kumo-line bg-kumo-base text-left transition-[border-color,box-shadow,transform] duration-150 ease-out hover:-translate-y-px hover:border-kumo-fill active:scale-[0.995]">
       <Link
-        to="/blueprint/$id"
-        params={{ id: blueprint.id }}
-        aria-label={`Open blueprint ${blueprint.metadata.title}`}
+        to="/template/$id"
+        params={{ id: template.id }}
+        aria-label={`Open template ${template.metadata.title}`}
         aria-busy={pending}
         className="absolute inset-0 z-10 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kumo-brand"
       />
       <div className="pointer-events-none relative z-20 flex flex-1 flex-col p-2.5">
-        <BlueprintPreviewImage
-          blueprintId={blueprint.id}
-          title={blueprint.metadata.title}
-          screenshotUrl={blueprint.screenshotUrl}
+        <TemplatePreviewImage
+          templateId={template.id}
+          title={template.metadata.title}
+          screenshotUrl={template.screenshotUrl}
           className="mb-3"
         />
         <div className="flex min-w-0 items-start gap-2 px-1 pb-1">
-          <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br ${getBlueprintGradient(blueprint.id)}`}>
+          <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br ${getTemplateGradient(template.id)}`}>
             <PendingIcon pending={pending} size={16}>
               <Hexagon size={13} className="text-white/75" weight="bold" />
             </PendingIcon>
           </div>
           <div className="min-w-0 flex-1">
             <p className="m-0 truncate text-[13px] leading-[18px] font-semibold tracking-[-0.25px] text-kumo-default">
-              {blueprint.metadata.title}
+              {template.metadata.title}
             </p>
-            <p className={`mt-0.5 line-clamp-2 min-h-8 text-[12px] leading-4 tracking-[-0.2px] ${blueprint.metadata.description ? 'text-kumo-subtle' : 'text-kumo-inactive italic'}`}>
-              {blueprint.metadata.description || 'No description'}
+            <p className={`mt-0.5 line-clamp-2 min-h-8 text-[12px] leading-4 tracking-[-0.2px] ${template.metadata.description ? 'text-kumo-subtle' : 'text-kumo-inactive italic'}`}>
+              {template.metadata.description || 'No description'}
             </p>
             {badges.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
@@ -461,29 +461,29 @@ function HomeFeaturedBlueprintCard({
   )
 }
 
-function FeaturedBlueprintsGallery() {
-  const { data: blueprints = [] } = useFeaturedBlueprints()
+function FeaturedTemplatesGallery() {
+  const { data: templates = [] } = useFeaturedTemplates()
 
-  if (blueprints.length === 0) {
+  if (templates.length === 0) {
     return null
   }
 
-  const shown = blueprints.slice(0, MAX_FEATURED_SHOWN)
-  const hasMore = blueprints.length > MAX_FEATURED_SHOWN
+  const shown = templates.slice(0, MAX_FEATURED_SHOWN)
+  const hasMore = templates.length > MAX_FEATURED_SHOWN
 
   return (
     <div className="py-4 pr-4 sm:pr-6">
       <div className="mb-5">
         <h3 className="text-[13px] leading-[18px] font-medium tracking-[-0.25px] text-kumo-default">
-          Start from a featured blueprint.
+          Start from a featured template.
         </h3>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         {shown.map((bp) => (
-          <HomeFeaturedBlueprintCard
+          <HomeFeaturedTemplateCard
             key={bp.id}
-            blueprint={bp}
+            template={bp}
           />
         ))}
       </div>
@@ -494,7 +494,7 @@ function FeaturedBlueprintsGallery() {
             to="/explore"
             className="inline-flex items-center gap-1.5 text-xs font-medium text-kumo-brand hover:text-kumo-brand-hover transition-colors"
           >
-            Browse all blueprints
+            Browse all templates
             <ArrowRight size={12} weight="bold" />
           </Link>
         </div>

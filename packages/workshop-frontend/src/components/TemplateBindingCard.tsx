@@ -2,14 +2,14 @@ import { Checkbox } from '@cloudflare/kumo'
 import type { RpcStub } from 'capnweb'
 import { GatekeeperIcon } from './GatekeeperIcon'
 import { WorkshopInput, WorkshopInputArea } from './WorkshopControls'
-import type { BlueprintBindingAnnotation, GadgetClient, GatekeeperCreationSpec } from '@gadgets/workshop-shared/api'
+import type { TemplateBindingAnnotation, GadgetClient, GatekeeperCreationSpec } from '@gadgets/workshop-shared/api'
 
 export type BindingCardData = {
   bindingName: string
   resourceTitle: string
   vendorId?: string
   creationSpec: GatekeeperCreationSpec
-  annotation: BlueprintBindingAnnotation
+  annotation: TemplateBindingAnnotation
 }
 
 export function suggestValueLabel(spec: GatekeeperCreationSpec, title?: string): string {
@@ -22,26 +22,26 @@ export function suggestValueLabel(spec: GatekeeperCreationSpec, title?: string):
     case 'agentSpawner':
       return displayTitle ? `Suggest "${displayTitle}" by default` : 'Suggest this agent setup by default'
     case 'ambient':
-      // Ambient resources are auto-provided and excluded from blueprints, so this never renders.
+      // Ambient resources are auto-provided and excluded from templates, so this never renders.
       return 'Suggest this by default'
   }
 }
 
-export function BlueprintBindingCard({
+export function TemplateBindingCard({
   data,
   onChange,
   autoFocusDescription,
   flat = false,
 }: {
   data: BindingCardData
-  onChange: (annotation: BlueprintBindingAnnotation) => void
+  onChange: (annotation: TemplateBindingAnnotation) => void
   autoFocusDescription?: boolean
   /** When true, render without the outer card chrome (border, background, divider). */
   flat?: boolean
 }) {
   const { bindingName, resourceTitle, vendorId, creationSpec, annotation } = data
-  const titleId = `blueprint-binding-title-${bindingName}`
-  const descriptionId = `blueprint-binding-desc-${bindingName}`
+  const titleId = `template-binding-title-${bindingName}`
+  const descriptionId = `template-binding-desc-${bindingName}`
   const displayTitle = annotation.title || resourceTitle || bindingName
 
   const containerClass = flat
@@ -101,7 +101,7 @@ export function BlueprintBindingCard({
   )
 }
 
-export function defaultAnnotation(): BlueprintBindingAnnotation {
+export function defaultAnnotation(): TemplateBindingAnnotation {
   return { title: '', description: '', suggestValue: false }
 }
 
@@ -113,7 +113,7 @@ export async function loadBindingCardData(
   try {
     if (!gk) return null
     const creationSpecP = gk.getCreationSpec()
-    const annotationP = gadget.getBlueprintAnnotation(meta.name)
+    const annotationP = gadget.getTemplateAnnotation(meta.name)
     const [creationSpec, existing] = await Promise.all([creationSpecP, annotationP])
     return {
       bindingName: meta.name,

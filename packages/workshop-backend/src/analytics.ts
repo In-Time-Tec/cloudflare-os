@@ -12,7 +12,7 @@ export type ProductAnalyticsConnectionType = "gatekeeper" | "ai_model" | "agent_
 // - gadget_created/opened/deleted: gadget lifecycle and open events.
 // - gadget_interaction: chat, UI connection, and code merge interactions.
 // - connection_created/removed: gatekeeper, AI model, or agent spawner connections changed.
-// - blueprint_created/imported: blueprint lifecycle events.
+// - template_created/imported: template lifecycle events.
 //
 // Per-event shapes defined in ProductAnalyticsGadgetInput and ProductAnalyticsInput.
 
@@ -32,9 +32,9 @@ export type ProductAnalyticsGadgetInput =
       user_id: string;
       gadget_id?: string;
       gadget_owner_user_id?: string;
-      /** Whether the gadget was created from empty chat or via blueprint. */
-      source: "blank" | "blueprint";
-      blueprint_id?: string;
+      /** Whether the gadget was created from empty chat or via template. */
+      source: "blank" | "template";
+      template_id?: string;
     }
   | {
       event_name: "gadget_opened";
@@ -79,11 +79,11 @@ export type ProductAnalyticsGadgetInput =
       vendor_id?: string;
     }
   | {
-      event_name: "blueprint_created";
+      event_name: "template_created";
       user_id: string;
       gadget_id?: string;
       gadget_owner_user_id?: string;
-      blueprint_id: string;
+      template_id: string;
     };
 
 export type ProductAnalyticsInput =
@@ -98,9 +98,9 @@ export type ProductAnalyticsInput =
       source: "password" | "cf_access" | "session_token";
     }
   | {
-      event_name: "blueprint_imported";
+      event_name: "template_imported";
       user_id: string;
-      blueprint_id: string;
+      template_id: string;
     }
   | ProductAnalyticsGadgetInput;
 
