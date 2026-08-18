@@ -335,6 +335,29 @@ export interface AgentHooks {
    */
   executeShellInOrb(command: string, timeoutMs: number)
       : Promise<{stdout: string, stderr: string, exitCode: number}>;
+
+  /**
+   * Spawn a child thread owned by the same user, seeded with `prompt` as its first message
+   * (which starts the child's own agent turn). Returns the child's thread id. The child's
+   * completed responses are consumed with waitForChildThreads.
+   */
+  spawnChildThread(title: string, prompt: string): Promise<string>;
+
+  /** Send a follow-up prompt to a child thread this thread previously spawned. */
+  sendToChildThread(childThreadId: string, prompt: string): Promise<void>;
+
+  /**
+   * Block until at least one spawned child thread has completed a response (or timeout),
+   * consuming and returning each ready child's oldest response. Empty = timeout.
+   */
+  waitForChildThreads(timeoutMs: number)
+      : Promise<{threadId: string, title: string, response: string}[]>;
+
+  /** List child threads this thread has spawned, with unconsumed-response counts. */
+  listChildThreads(): {threadId: string, title: string, pendingResponses: number}[];
+
+  /** Read a spawned child thread's conversation transcript (bounded plain text). */
+  readChildThreadTranscript(childThreadId: string): Promise<string>;
   activeAgentCallbackCount(chatId: number): number;
   rejectAllAgentCallbacks(chatId: number, error: string): void;
   consumeCapturedActions(chatId: number)
@@ -469,6 +492,14 @@ When the user asks for a new Artifact, ALWAYS consider starting from a template.
 Note that users rarely ask for "a Artifact" in those words. They ask for a thing: a doc, a deck, a tracker, a tool that does X. Any of those is a request for a new Artifact, and so a request to consider a template — including when the thread already contains a Artifact, which does not make the request an edit to that one.
 
 Tools refer to Artifacts by their binding name in your env: the file tools (\`readFile\`, \`writeFile\`, \`editFile\`) take a \`artifact\` parameter naming the Artifact that owns the file, and \`setArtifactBinding\` takes a \`artifact\` parameter naming the Artifact whose bindings to modify. Some older threads have a "default" Artifact (noted in the artifact list) which the file tools fall back to when \`artifact\` is omitted; even so, prefer passing the name explicitly.
+
+# Your Machine
+
+Each thread has its own persistent Linux machine (sandbox). Use the \`executeShell\` tool to run commands on it: install packages, clone repos, process data, run scripts. The machine's filesystem persists across commands and across the machine sleeping when idle — it wakes automatically when you use it. This is separate from Artifact code (which runs on sandboxed Cloudflare Workers): use the machine for heavy computation, real tooling (git, node, python), and scratch work; use Artifacts for what the user keeps.
+
+# Child Threads
+
+You can delegate work to child threads: independent agents, each in its own thread with its own conversation, files, and machine. \`spawnThread\` creates one with an initial task; \`sendToThread\` sends follow-ups; \`waitForThreads\` collects responses; \`listSpawnedThreads\` and \`readThread\` inspect them. A child cannot see your conversation or files, so make each task prompt self-contained. Spawn children to parallelize independent subtasks (e.g. researching several topics at once) or to keep a large subtask's detail out of this conversation; for simple sequential work, just do it yourself. The user sees child threads in their sidebar nested under this one.
 
 # Writing Artifacts
 
@@ -2855,6 +2886,140 @@ export async function runAgent(
             text = text.slice(0, 40_000) + "\n[output truncated]";
           }
           return toolResult(text || "(no output)", {output: text} as Partial<AiToolCall>);
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    spawnThread: defineTool({
+      name: "spawnThread",
+      label: "Spawn thread",
+      description:
+          "Spawns a new child thread — an independent agent working in its own thread with its " +
+          "own conversation, files, and machine — and sends it an initial task prompt. The child " +
+          "starts working immediately. Returns its thread id. Use child threads to parallelize " +
+          "independent subtasks or to isolate a large task's context; collect results with " +
+          "waitForThreads. The user sees child threads nested under this thread in their sidebar.",
+      parameters: Type.Object({
+        title: Type.String({
+          description: "Short human-readable title for the child thread (shown in the sidebar).",
+        }),
+        prompt: Type.String({
+          description:
+              "The child's task. Be complete and self-contained: the child cannot see this " +
+              "thread's conversation, files, or bindings.",
+        }),
+      }),
+      execute: async (toolCallId, {title, prompt}) => {
+        try {
+          let threadId = await hooks.spawnChildThread(title, prompt);
+          let output = `Spawned child thread ${threadId} ("${title}"). ` +
+              `It is working now; use waitForThreads to collect its response.`;
+          return toolResult(output, { output });
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    sendToThread: defineTool({
+      name: "sendToThread",
+      label: "Send to thread",
+      description:
+          "Sends a follow-up message to a child thread previously created with spawnThread. " +
+          "The child's agent runs another turn on it; collect the response with waitForThreads.",
+      parameters: Type.Object({
+        threadId: Type.String({ description: "The child thread id returned by spawnThread." }),
+        prompt: Type.String({ description: "The follow-up message for the child's agent." }),
+      }),
+      execute: async (toolCallId, {threadId, prompt}) => {
+        try {
+          await hooks.sendToChildThread(threadId, prompt);
+          let output = `Message sent to child thread ${threadId}.`;
+          return toolResult(output, { output });
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    waitForThreads: defineTool({
+      name: "waitForThreads",
+      label: "Wait for threads",
+      description:
+          "Waits for spawned child threads to finish responding. Returns each ready child's " +
+          "oldest unread response (consuming it). Returns a timeout notice if none respond in " +
+          "time — you can call this again, or continue other work and check back later.",
+      parameters: Type.Object({
+        timeoutSeconds: Type.Optional(Type.Number({
+          description: "Max seconds to wait (default 120, max 300).",
+        })),
+      }),
+      execute: async (toolCallId, {timeoutSeconds}) => {
+        try {
+          let timeoutMs = Math.min(Math.max(timeoutSeconds ?? 120, 1), 300) * 1000;
+          let responses = await hooks.waitForChildThreads(timeoutMs);
+          let output: string;
+          if (responses.length === 0) {
+            let children = hooks.listChildThreads();
+            let stillWorking = children.filter(c => c.pendingResponses === 0);
+            output = `No child responses within the timeout. ` +
+                `${stillWorking.length} child thread(s) may still be working. ` +
+                `Call waitForThreads again to keep waiting.`;
+          } else {
+            output = responses.map(r =>
+                `── Response from child thread ${r.threadId} ("${r.title}") ──\n${r.response}`)
+                .join("\n\n");
+          }
+          return toolResult(output, { output });
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    listSpawnedThreads: defineTool({
+      name: "listSpawnedThreads",
+      label: "List spawned threads",
+      description:
+          "Lists the child threads this thread has spawned, with how many of each child's " +
+          "responses are waiting to be read via waitForThreads.",
+      parameters: Type.Object({}),
+      execute: async (toolCallId, _params) => {
+        try {
+          let children = hooks.listChildThreads();
+          let output = children.length === 0
+              ? "No child threads have been spawned."
+              : children.map(c =>
+                  `${c.threadId} — "${c.title}" (${c.pendingResponses} unread response(s))`)
+                  .join("\n");
+          return toolResult(output, { output });
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    readThread: defineTool({
+      name: "readThread",
+      label: "Read thread",
+      description:
+          "Reads a spawned child thread's full conversation transcript. Use this to inspect a " +
+          "child's progress or reasoning beyond the responses returned by waitForThreads.",
+      parameters: Type.Object({
+        threadId: Type.String({ description: "The child thread id returned by spawnThread." }),
+      }),
+      execute: async (toolCallId, {threadId}) => {
+        try {
+          let output = await hooks.readChildThreadTranscript(threadId);
+          if (!output.trim()) output = "(the child thread's conversation is empty)";
+          return toolResult(output, { output });
         } catch (error) {
           toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
           throw error;

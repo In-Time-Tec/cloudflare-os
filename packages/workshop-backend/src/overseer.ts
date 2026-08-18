@@ -638,7 +638,15 @@ type ExternalMessageResponseTargetRegistrationDecision =
     };
 
 type ExternalMessageSubmitInput = {
+  /** Resolves the caller's user DO by email. Ignored when `callerUserId` is present. */
   callerEmail: string;
+  /**
+   * Resolves the caller's user DO by hex DO id instead of email. Used by thread-to-thread
+   * messages (spawnThread), where the parent thread knows its owner's DO id, not their email.
+   */
+  callerUserId?: string;
+  /** When this message spawns a child thread, the parent thread's hex DO id. */
+  parentThreadId?: string;
   externalChatKey: string;
   idempotencyKey: string;
   prompt: string;
@@ -649,6 +657,18 @@ type ExternalMessageSubmitInput = {
 type ExternalChatRecord = {
   externalChatKey: string;
   chatId: number;
+};
+
+type ChildThreadRecord = {
+  threadId: string;   // hex DO id of the child thread
+  title: string;
+  createdAt: number;
+  // Counter for per-message idempotency keys (delivery to the child is at-least-once).
+  nextMessageId: number;
+  // Completed child agent responses not yet consumed by a waitForThread tool call, oldest first.
+  pendingResponses: string[];
+  // Recently-consumed delivery idempotency keys, for deduping at-least-once redelivery.
+  deliveredKeys: string[];
 };
 
 type ActiveAgentRecord = {
@@ -821,6 +841,10 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
       // The thread's orb (E2B sandbox) state. Created lazily on first agent turn when orbs are
       // enabled; the DO is the single writer of these fields (see src/orb/orb-manager.ts).
       orbState: <OrbState>{ status: "none", lastActivity: 0 },
+
+      // If this thread was spawned by another thread's agent, the parent thread's DO id.
+      // Set once at spawn time, surfaced through ThreadMetadata.parentThreadId.
+      parentThreadId: <string | undefined>undefined,
     },
 
     collections: {
@@ -939,6 +963,13 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
 
       externalChats: collection<ExternalChatRecord>()({
         primaryKey: "externalChatKey",
+      }),
+
+      // Threads spawned by this thread's agent (the spawnThread tool). Acts as the agent's
+      // capability set: the sendToThread/waitForThread/readThread tools only accept ids
+      // recorded here.
+      childThreads: collection<ChildThreadRecord>()({
+        primaryKey: "threadId",
       }),
 
       chats: collection<AiChatMessage>()({
@@ -5698,6 +5729,138 @@ class OverseerImpl implements AgentHooks {
     return result;
   }
 
+  // --- Thread graph (agent-spawned child threads) ---
+
+  /**
+   * Spawn a child thread and send it an initial prompt. The child is a full thread: a fresh
+   * Overseer DO owned by the same user, registered in their thread index with
+   * `parentThreadId` set, running its own agent turn (and its own orb). The child's response
+   * is delivered back through a ThreadGraphLoopback response target into `childThreads`,
+   * where waitForThread picks it up.
+   */
+  async spawnChildThread(title: string, prompt: string): Promise<string> {
+    if (!this.ownerId) throw new Error("Thread has been deleted.");
+    let ns = this.ctx.exports.OverseerDurableObject;
+    let childId = ns.newUniqueId().toString();
+
+    this.storage.childThreads.put({
+      threadId: childId,
+      title,
+      createdAt: Date.now(),
+      nextMessageId: 1,
+      pendingResponses: [],
+      deliveredKeys: [],
+    });
+
+    await this.#submitToChildThread(childId, title, prompt, 0);
+    return childId;
+  }
+
+  /** Send a follow-up prompt to a child thread previously created by spawnChildThread. */
+  async sendToChildThread(childThreadId: string, prompt: string): Promise<void> {
+    let record = this.storage.childThreads.get(childThreadId);
+    if (!record) {
+      throw new Error(
+          "Unknown child thread id. Only threads spawned by this thread can be messaged; " +
+          "use spawnThread to create one.");
+    }
+    let messageId = record.nextMessageId;
+    record.nextMessageId++;
+    this.storage.childThreads.put(record);
+    await this.#submitToChildThread(childThreadId, record.title, prompt, messageId);
+  }
+
+  async #submitToChildThread(childThreadId: string, title: string, prompt: string,
+                             messageId: number): Promise<void> {
+    if (!this.ownerId) throw new Error("Thread has been deleted.");
+    let parentId = this.ctx.id.toString();
+    let messageKey = `${parentId}:${messageId}`;
+    let target = this.ctx.exports.ThreadGraphLoopback({props: {
+      parentThreadId: parentId,
+      childThreadId,
+      messageKey,
+    }});
+
+    let ns = this.ctx.exports.OverseerDurableObject;
+    let child = ns.get(ns.idFromString(childThreadId));
+    let result = await child.receiveExternalMessage({
+      callerEmail: "",
+      callerUserId: this.ownerId,
+      parentThreadId: parentId,
+      externalChatKey: `thread-graph:${parentId}`,
+      idempotencyKey: `thread-graph:${messageKey}`,
+      prompt,
+      // The child's delivery machinery dups and later disposes this stub; loopback stubs
+      // resolve statelessly from props, so persistence across DO restarts is safe.
+      chatGatewayRpcTarget: target,
+      title,
+    });
+    if (!result.accepted) {
+      throw new Error(`Child thread rejected the message: ${result.message}`);
+    }
+  }
+
+  /** Called by ThreadGraphLoopback when a child thread's agent turn completes. */
+  deliverChildThreadResponse(childThreadId: string, messageKey: string, text: string): void {
+    let record = this.storage.childThreads.get(childThreadId);
+    if (!record) return;  // Child was forgotten; drop.
+    if (record.deliveredKeys.includes(messageKey)) return;  // At-least-once redelivery.
+    record.deliveredKeys = [...record.deliveredKeys.slice(-19), messageKey];
+    record.pendingResponses.push(text);
+    this.storage.childThreads.put(record);
+    // Wake any waitForThread pollers.
+    for (let waiter of this.#childResponseWaiters.splice(0)) waiter();
+  }
+
+  #childResponseWaiters: (() => void)[] = [];
+
+  /**
+   * Wait until some child thread has an unconsumed response (or the timeout elapses), then
+   * consume and return the oldest response of each ready child. Empty result = timeout.
+   */
+  async waitForChildThreads(timeoutMs: number)
+      : Promise<{threadId: string, title: string, response: string}[]> {
+    let deadline = Date.now() + timeoutMs;
+    while (true) {
+      let ready: {threadId: string, title: string, response: string}[] = [];
+      for (let record of Array.from(this.storage.childThreads.list())) {
+        if (record.pendingResponses.length > 0) {
+          let response = record.pendingResponses[0];
+          record.pendingResponses = record.pendingResponses.slice(1);
+          this.storage.childThreads.put(record);
+          ready.push({threadId: record.threadId, title: record.title, response});
+        }
+      }
+      if (ready.length > 0) return ready;
+      let remaining = deadline - Date.now();
+      if (remaining <= 0) return [];
+      await new Promise<void>(resolve => {
+        this.#childResponseWaiters.push(resolve);
+        setTimeout(resolve, Math.min(remaining, 10_000));
+      });
+    }
+  }
+
+  /** List this thread's spawned children with response-queue depth, for the agent. */
+  listChildThreads(): {threadId: string, title: string, pendingResponses: number}[] {
+    return Array.from(this.storage.childThreads.list()).map(record => ({
+      threadId: record.threadId,
+      title: record.title,
+      pendingResponses: record.pendingResponses.length,
+    }));
+  }
+
+  /** Read a child thread's transcript (its single conversation), newest page. */
+  async readChildThreadTranscript(childThreadId: string): Promise<string> {
+    let record = this.storage.childThreads.get(childThreadId);
+    if (!record) {
+      throw new Error("Unknown child thread id. Only threads spawned by this thread can be read.");
+    }
+    let ns = this.ctx.exports.OverseerDurableObject;
+    let child = ns.get(ns.idFromString(childThreadId));
+    return await child.renderTranscriptForParent(this.ctx.id.toString());
+  }
+
   // --- Connection-request hooks ---
 
   #ownerUserStub() {
@@ -6745,7 +6908,9 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
     }
 
     // Resolve the caller.
-    let caller = this.impl.users.getByName(input.callerEmail);
+    let caller = input.callerUserId !== undefined
+        ? this.impl.users.get(this.impl.users.idFromString(input.callerUserId))
+        : this.impl.users.getByName(input.callerEmail);
     let callerId = caller.id.toString();
     let callerProfile = await caller.whoamiIfExists();
     if (!callerProfile) {
@@ -6763,6 +6928,9 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
       this.impl.ownerProfileId = callerProfile.id;
       this.impl.storage.ownerId.put(callerId);
       this.impl.storage.title.put(input.title);
+      if (input.parentThreadId) {
+        this.impl.storage.parentThreadId.put(input.parentThreadId);
+      }
       this.impl.storage.ownerRegistrationPending.put(true);
       this.#initializeEmptyCodeSnapshot();
       ownerId = callerId;
@@ -6788,7 +6956,8 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
     // Complete pending registration in the owner's UserDO.
     if (this.impl.storage.ownerRegistrationPending.get()) {
       let owner = this.impl.users.get(this.impl.users.idFromString(ownerId));
-      await owner.ensureThreadRegistered(this.ctx.id.toString(), this.impl.storage.title.get());
+      await owner.ensureThreadRegistered(this.ctx.id.toString(), this.impl.storage.title.get(),
+                                         this.impl.storage.parentThreadId.get());
       this.impl.storage.ownerRegistrationPending.put(false);
     }
 
@@ -6850,7 +7019,8 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
       );
     }
 
-    return { accepted: true, chatPath: `/thread/${this.ctx.id.toString()}?chat=${chatId}` };
+    void chatId;
+    return { accepted: true, chatPath: `/thread/${this.ctx.id.toString()}` };
   }
 
   /**
@@ -6901,6 +7071,38 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
       let owner = this.impl.users.get(this.impl.users.idFromString(this.impl.ownerId));
       await owner.setThreadLastActive(this.ctx.id.toString(), new Date(), undefined);
     }
+  }
+
+  /**
+   * Delivery point for a child thread's completed agent response (see ThreadGraphLoopback).
+   * Idempotent per messageKey; the child redelivers until this returns successfully.
+   */
+  async deliverChildThreadResponse(childThreadId: string, messageKey: string, text: string)
+      : Promise<void> {
+    this.impl.deliverChildThreadResponse(childThreadId, messageKey, text);
+  }
+
+  /**
+   * Render this (child) thread's conversation as plain text for its parent thread's agent
+   * (the readThread tool). Refuses callers other than the recorded parent.
+   */
+  async renderTranscriptForParent(callerThreadId: string): Promise<string> {
+    if (this.impl.storage.parentThreadId.get() !== callerThreadId) {
+      throw new Error("Only this thread's parent may read its transcript.");
+    }
+    let lines: string[] = [];
+    for (let msg of this.impl.storage.chats.list()) {
+      if (msg.type === "message" && msg.message.trim()) {
+        let who = msg.author.type === "agent" ? `agent(${msg.author.name})` : msg.author.name;
+        lines.push(`[${who}] ${msg.message}`);
+      } else if (msg.type === "error") {
+        lines.push(`[error] ${msg.message}`);
+      }
+    }
+    let text = lines.join("\n\n");
+    // Bound the transcript; the newest content matters most to the parent.
+    if (text.length > 60_000) text = "[transcript truncated]\n\n" + text.slice(-60_000);
+    return text;
   }
 
   async startGatekeeperSession(
@@ -7194,6 +7396,33 @@ export class AgentSelfLoopback
   dummyMethodToWorkAroundValidatorBug() {}
 }
 
+type ThreadGraphLoopbackProps = {
+  /** The PARENT thread's hex DO id — where the child's response should be delivered. */
+  parentThreadId: string;
+  /** The CHILD thread's hex DO id — identifies which child produced the response. */
+  childThreadId: string;
+  /** Per-message idempotency key; the parent dedupes at-least-once redelivery with it. */
+  messageKey: string;
+};
+
+/**
+ * Response target handed to a child thread when a parent thread's agent messages it (the
+ * spawnThread / sendToThread tools). The child's external-message delivery machinery calls
+ * `onArtifactResponse` when the child's agent turn completes; we forward the text to the parent
+ * thread DO, which queues it for the parent agent's waitForThread tool. Delivery is
+ * at-least-once (the child retries until acknowledged), so the parent dedupes by key.
+ */
+export class ThreadGraphLoopback
+    extends WorkerEntrypoint<Cloudflare.Env, ThreadGraphLoopbackProps> {
+  async onArtifactResponse(response: {text: string}): Promise<void> {
+    let ns = this.ctx.exports.OverseerDurableObject;
+    let stub: DurableObjectStub<OverseerDurableObject> =
+        ns.get(ns.idFromString(this.ctx.props.parentThreadId));
+    await stub.deliverChildThreadResponse(
+        this.ctx.props.childThreadId, this.ctx.props.messageKey, response.text);
+  }
+}
+
 type TransientStubLoopbackProps = {
   overseerId: string;
   chatId: number;
@@ -7448,6 +7677,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     if (this.impl.orbSettings().enabled) {
       result.orbStatus = this.impl.orbStatus();
     }
+    result.parentThreadId = this.impl.storage.parentThreadId.get();
     if (!this.isOwner) {
       result.owner = await this.#owner.whoami();
     }
@@ -7470,6 +7700,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     if (this.impl.orbSettings().enabled) {
       metadata.orbStatus = this.impl.orbStatus();
     }
+    metadata.parentThreadId = this.impl.storage.parentThreadId.get();
 
     // For collaborators, include owner info.
     if (!this.isOwner) {

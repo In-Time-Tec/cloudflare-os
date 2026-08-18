@@ -17,6 +17,7 @@ function initials(title: string | undefined): string {
 export default function SidebarGadgetRow({
   gadget,
   collapsed = false,
+  nested = false,
   onTogglePin,
   onRename,
   onShare,
@@ -24,6 +25,8 @@ export default function SidebarGadgetRow({
 }: {
   gadget: ThreadMetadataWithTimestamps
   collapsed?: boolean
+  /** Render indented as a child thread (spawned by the row above's agent). */
+  nested?: boolean
   onTogglePin: (g: ThreadMetadataWithTimestamps) => void
   onRename: (g: ThreadMetadataWithTimestamps, newTitle: string) => void
   onShare: (g: ThreadMetadataWithTimestamps) => void
@@ -49,12 +52,12 @@ export default function SidebarGadgetRow({
   const title = gadget.title || 'Untitled thread'
   const rowClass = hoverRowClassName({
     hasActions: !collapsed && !renaming,
-    className: 'h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default',
+    className: `h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-default${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
   })
   const activeClass = hoverRowClassName({
     active: true,
     hasActions: !collapsed && !renaming,
-    className: 'h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-strong',
+    className: `h-7 gap-1.5 rounded-md pl-1.5 pr-1 text-[12.5px] leading-[18px] tracking-[-0.1px] text-kumo-strong${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
   })
 
   return (

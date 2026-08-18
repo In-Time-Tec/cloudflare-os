@@ -1321,6 +1321,13 @@ export type ThreadMetadata = {
   orbStatus?: "none" | "running" | "paused";
 
   /**
+   * If this thread was spawned by another thread's agent (the spawnThread tool), the id of that
+   * parent thread. Used by the sidebar to nest child threads under their parent. Absent for
+   * top-level threads; a deleted parent leaves the id dangling and the child renders top-level.
+   */
+  parentThreadId?: string;
+
+  /**
    * Various objects in the API specify a artifactId, but make the property optional. When omitted,
    * the default artifact ID should be assumed. This is largely for backwards compatibility with
    * records that were stored before threads could have multiple artifacts.

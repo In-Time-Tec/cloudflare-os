@@ -813,14 +813,16 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return this.storage.gadgets.get(id) || null;
   }
 
-  async newThread(id: string, title: string): Promise<void> {
+  async newThread(id: string, title: string, parentThreadId?: string): Promise<void> {
     let created = new Date();
-    this.storage.gadgets.put({id, title, created});
+    let record: ArtifactRecord = {id, title, created};
+    if (parentThreadId) record.parentThreadId = parentThreadId;
+    this.storage.gadgets.put(record);
   }
 
-  async ensureThreadRegistered(id: string, title: string): Promise<void> {
+  async ensureThreadRegistered(id: string, title: string, parentThreadId?: string): Promise<void> {
     if (this.storage.gadgets.get(id)) return;
-    await this.newThread(id, title);
+    await this.newThread(id, title, parentThreadId);
   }
 
   async setThreadLastActive(id: string, time: Date, totalCost: number | undefined): Promise<void> {

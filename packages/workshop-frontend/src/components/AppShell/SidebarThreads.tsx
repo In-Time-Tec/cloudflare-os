@@ -38,6 +38,7 @@ type ThreadsContextValue = {
   gadgets: ThreadMetadataWithTimestamps[]
   favorites: ThreadMetadataWithTimestamps[]
   recent: ThreadMetadataWithTimestamps[]
+  childrenByParent: Map<string, ThreadMetadataWithTimestamps[]>
 
   onTogglePin: (g: ThreadMetadataWithTimestamps) => void
   onRename: (g: ThreadMetadataWithTimestamps, newTitle: string) => void
@@ -91,19 +92,28 @@ export function SidebarThreadsProvider({ children }: { children: ReactNode }) {
     [needle],
   )
 
-  const { favorites, recent } = useMemo(() => {
+  const { favorites, recent, childrenByParent } = useMemo(() => {
+    // Child threads (spawned by another thread's agent) render nested under their parent, not as
+    // top-level rows. A child whose parent isn't in the list (deleted) falls back to top-level.
+    const ids = new Set(gadgets.map((g) => g.id))
+    const byParent = new Map<string, ThreadMetadataWithTimestamps[]>()
     const favs: ThreadMetadataWithTimestamps[] = []
     const rest: ThreadMetadataWithTimestamps[] = []
-    for (const g of gadgets) {
-      if (!matchText(g.title)) continue
-      if (g.pinned) favs.push(g)
-      else rest.push(g)
-    }
     const byActive = (a: ThreadMetadataWithTimestamps, b: ThreadMetadataWithTimestamps) =>
       asTime(b.lastActive) - asTime(a.lastActive)
+    for (const g of gadgets) {
+      if (!matchText(g.title)) continue
+      if (g.parentThreadId && ids.has(g.parentThreadId)) {
+        const siblings = byParent.get(g.parentThreadId) ?? []
+        siblings.push(g)
+        byParent.set(g.parentThreadId, siblings)
+      } else if (g.pinned) favs.push(g)
+      else rest.push(g)
+    }
+    for (const siblings of byParent.values()) siblings.sort(byActive)
     favs.sort(byActive)
     rest.sort(byActive)
-    return { favorites: favs, recent: rest }
+    return { favorites: favs, recent: rest, childrenByParent: byParent }
   }, [gadgets, matchText])
 
   // --- Thread actions ---------------------------------------------------
@@ -146,6 +156,7 @@ export function SidebarThreadsProvider({ children }: { children: ReactNode }) {
     gadgets,
     favorites,
     recent,
+    childrenByParent,
     onTogglePin,
     onRename,
     onShare,
@@ -196,7 +207,7 @@ export function SidebarThreadsProvider({ children }: { children: ReactNode }) {
  * renders nothing so that strip stays exactly as it was.
  */
 export function SidebarFavorites({ collapsed = false }: { collapsed?: boolean }) {
-  const { favorites, onTogglePin, onRename, onShare, onDelete } = useThreadsContext()
+  const { favorites, childrenByParent, onTogglePin, onRename, onShare, onDelete } = useThreadsContext()
   const [favOpen, setFavOpen] = useState(true)
 
   // With nothing pinned the section is just a header reading "Favorites 0" directly beneath the
@@ -213,9 +224,10 @@ export function SidebarFavorites({ collapsed = false }: { collapsed?: boolean })
       >
         <div className="flex flex-col">
           {favorites.map((g) => (
-            <SidebarGadgetRow
+            <ThreadRowWithChildren
               key={g.id}
               gadget={g}
+              childrenByParent={childrenByParent}
               onTogglePin={onTogglePin}
               onRename={onRename}
               onShare={onShare}
@@ -233,6 +245,7 @@ export function SidebarRecentThreads({ collapsed = false }: { collapsed?: boolea
   const {
     favorites,
     recent,
+    childrenByParent,
     onTogglePin,
     onRename,
     onShare,
@@ -274,9 +287,10 @@ export function SidebarRecentThreads({ collapsed = false }: { collapsed?: boolea
           <>
             <div className="flex flex-col">
               {recentShown.map((g) => (
-                <SidebarGadgetRow
+                <ThreadRowWithChildren
                   key={g.id}
                   gadget={g}
+                  childrenByParent={childrenByParent}
                   onTogglePin={onTogglePin}
                   onRename={onRename}
                   onShare={onShare}
@@ -294,6 +308,56 @@ export function SidebarRecentThreads({ collapsed = false }: { collapsed?: boolea
         ) : null}
       </SidebarSection>
     </div>
+  )
+}
+
+// A thread row plus its agent-spawned child threads, indented one level beneath it.
+// (Grandchildren are keyed under their own parent in childrenByParent and render flat at that
+// same indent — deep trees stay readable in a narrow rail.)
+function ThreadRowWithChildren({
+  gadget,
+  childrenByParent,
+  onTogglePin,
+  onRename,
+  onShare,
+  onDelete,
+}: {
+  gadget: ThreadMetadataWithTimestamps
+  childrenByParent: Map<string, ThreadMetadataWithTimestamps[]>
+  onTogglePin: (g: ThreadMetadataWithTimestamps) => void
+  onRename: (g: ThreadMetadataWithTimestamps, newTitle: string) => void
+  onShare: (g: ThreadMetadataWithTimestamps) => void
+  onDelete: (g: ThreadMetadataWithTimestamps) => void
+}) {
+  // Flatten the subtree below this row (children, grandchildren, ...) in DFS order.
+  const children: ThreadMetadataWithTimestamps[] = []
+  const stack = [...(childrenByParent.get(gadget.id) ?? [])]
+  while (stack.length > 0) {
+    const next = stack.shift()!
+    children.push(next)
+    stack.unshift(...(childrenByParent.get(next.id) ?? []))
+  }
+  return (
+    <>
+      <SidebarGadgetRow
+        gadget={gadget}
+        onTogglePin={onTogglePin}
+        onRename={onRename}
+        onShare={onShare}
+        onDelete={onDelete}
+      />
+      {children.map((child) => (
+        <SidebarGadgetRow
+          key={child.id}
+          gadget={child}
+          nested
+          onTogglePin={onTogglePin}
+          onRename={onRename}
+          onShare={onShare}
+          onDelete={onDelete}
+        />
+      ))}
+    </>
   )
 }
 
