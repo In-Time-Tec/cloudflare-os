@@ -29,7 +29,6 @@ import ObserverConfigModal from './ObserverConfigModal'
 import ArtifactCodeInterface from './ArtifactCodeInterface'
 import ArtifactUI from './ArtifactUI'
 import ArtifactUseView from './ArtifactUseView'
-import Connections from './Connections'
 import Activity from './Activity'
 import { CountBadge } from './components/CountBadge'
 import WorkpiecePicker, {
@@ -142,7 +141,7 @@ function formatConsoleLogs(logs: BufferedLogEntry[]): string {
 
 // ─── right-panel tabs ─────────────────────────────────────────────────────────
 
-type RightTab = 'app' | 'code' | 'connections'
+type RightTab = 'app' | 'code'
 
 type ThreadView =
   | { mode: 'chat' }
@@ -186,7 +185,6 @@ function rightTabs(output?: TemplateOutput): { value: RightTab; label: string }[
   return [
     { value: 'app', label: formatOf(output).noun },
     { value: 'code', label: 'Code' },
-    { value: 'connections', label: 'Connections' },
   ]
 }
 
@@ -626,7 +624,6 @@ export default function ThreadEditor() {
   } | null>(null)
   const [hasCode, setHasCode] = useState<boolean | null>(null)
   const [chatCount, setChatCount] = useState<number | null>(() => boot ? boot.chats.length : null)
-  const [_hasBindings, setHasBindings] = useState(false)
   const [isAgentActive, setIsAgentActive] = useState(false)
   const [hasAnyProposedChanges, setHasAnyProposedChanges] = useState(false)
   const [selectedChatHasProposedChanges, setSelectedChatHasProposedChanges] = useState(false)
@@ -1492,7 +1489,7 @@ export default function ThreadEditor() {
           <div className="absolute inset-y-0 -left-2 -right-2" />
         </div>
 
-        {/* ── RIGHT: App / Code / Connections tabs ───────────────────────────── */}
+        {/* ── RIGHT: App / Code tabs ───────────────────────────── */}
         <div
           className={`flex flex-shrink-0 min-w-0 overflow-hidden bg-kumo-base ${threadTransitionClass}`}
           style={{
@@ -1632,23 +1629,6 @@ export default function ThreadEditor() {
                   isAgentActive={isAgentActive}
                   isVisible={activeTab === 'code'}
                   onHasCodeChange={setHasCode}
-                />
-              ) : (
-                <NoGadgetPlaceholder height={RIGHT_CONTENT_H} />
-              )}
-            </div>
-
-            <div className={activeTab === 'connections' ? 'h-full overflow-auto' : 'hidden'}>
-              {overseer && selectedGadgetStub ? (
-                <Connections
-                  key={selectedGadgetId}
-                  overseer={overseer.stub}
-                  gadget={selectedGadgetStub}
-                  chatId={effectiveSelectedChatId ?? undefined}
-                  authenticatedApi={authenticatedApi}
-                  onConnectionsChange={() => setUiReloadTrigger(t => t + 1)}
-                  isVisible={activeTab === 'connections'}
-                  onHasGatekeepersChange={setHasBindings}
                 />
               ) : (
                 <NoGadgetPlaceholder height={RIGHT_CONTENT_H} />
