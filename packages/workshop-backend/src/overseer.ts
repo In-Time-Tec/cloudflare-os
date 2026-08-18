@@ -2565,7 +2565,7 @@ class OverseerImpl implements AgentHooks {
     if (!record || record.type !== "action") return;
     record.state = outcome.state;
     record.completedAt = new Date();
-    if (outcome.state === "failed") record.failure = outcome.failure;
+    record.failure = outcome.state === "failed" ? outcome.failure : undefined;
     this.storage.actions.put(record);
     if (outcome.state === "failed") {
       this.logger.warn("action failed", {
@@ -3021,7 +3021,13 @@ class OverseerImpl implements AgentHooks {
     }
     this.#chargeActionBudget(caller);
 
-    let actionId = record("succeeded");
+    // Written as an unreported failure, not a success: the action has not run yet, and if this
+    // Durable Object dies before the handle reports, the log must say the outcome is unknown
+    // rather than claim it worked. succeeded() overwrites this.
+    let actionId = record("failed", {
+      message: "The gatekeeper never reported this action's outcome.",
+      mayHaveTakenEffect: true,
+    });
     return new RpcStub<ActionHandle>(new ActionHandleImpl(this, actionId));
   }
 
