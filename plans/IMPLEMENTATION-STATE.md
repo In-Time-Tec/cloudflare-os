@@ -47,3 +47,16 @@ PHASE 2 PLAN (single conversation):
 - overseer.ts: newChat gates - thread's conversation is chat 0 created on first message.
 - Home (index.tsx): unchanged flow (newThread + first message) but title auto-gen from first msg.
 - Breaking: no migration of old multi-chat data.
+
+PHASE 2 COMPLETE (commit a3bf0d0): thread IS the conversation. No chat list/scope/rename/delete UI;
+?chat param gone; effectiveSelectedChatId=0 pinned in ThreadEditor; ChatInterface -811 lines.
+Note: overseer.newChat still used by Home to create conversation 0 on a fresh thread (internal
+bootstrap; fine). navigateToChat in ThreadEditor is now only a draft-branch-cleanup callback.
+
+PHASE 3 NEXT: Pierre UI. Read plans/research-pierre-ui.md §5 for migration steps.
+- pnpm add @pierre/diffs@1.3.5 @pierre/trees (pin exact) to workshop-frontend
+- Replace CodeEditor.tsx (monaco) -> read-only Pierre File view
+- Replace CodeDiffEditor.tsx + diff/diffRenderer.ts -> MultiFileDiff
+- Replace FileSidebar.tsx -> @pierre/trees FileTree (no create/rename/delete)
+- Remove deps: monaco-editor, @monaco-editor/react, y-monaco; delete monacoTheme.ts, getLanguage.ts
+- ArtifactCodeInterface.tsx is the integration point

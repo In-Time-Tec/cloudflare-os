@@ -4,11 +4,11 @@ import { DownloadSimple } from '@phosphor-icons/react'
 import { Overseer, CodeSubscriber, CodeUpdate } from '@gadgets/workshop-shared/api'
 import { RpcStub, RpcTarget } from 'capnweb'
 import * as Y from 'yjs'
-import FileSidebar from './FileSidebar'
-import type { FileChangeStatus, FileSidebarHandle } from './FileSidebar'
-import { WorkshopButton, WorkshopIconButton } from './components/WorkshopControls'
-import CodeEditor from './CodeEditor'
-import CodeDiffEditor from './CodeDiffEditor'
+import FileTreePanel from './FileTreePanel'
+import type { FileChangeStatus } from './fileChangeStatus'
+import { WorkshopIconButton } from './components/WorkshopControls'
+import FileView from './FileView'
+import FileDiffView from './FileDiffView'
 import type { StreamingProposedChanges } from './ChatInterface'
 import { saveTextToFile } from './fileTransfers'
 
@@ -157,7 +157,6 @@ export default function ArtifactCodeInterface({ overseer, filesRoot, height = '1
   // React state for UI
   const [fileNames, setFileNames] = useState<string[]>([])
   const [activeFile, setActiveFile] = useState<string | null>(null)
-  const fileSidebarRef = useRef<FileSidebarHandle | null>(null)
   const [isReady, setIsReady] = useState(false)
   const [loading, setLoading] = useState(true)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
@@ -709,86 +708,8 @@ export default function ArtifactCodeInterface({ overseer, filesRoot, height = '1
     setActiveFile(filename)
   }
 
-  // Handle file creation
-  const handleFileCreate = (filename: string) => {
-    const filesMap = branchMode ? editableFilesMapRef.current : filesMapRef.current
-    if (!filesMap) {
-      return
-    }
-
-    // Check if file already exists
-    if (filesMap.has(filename)) {
-      toasts.add({ title: `File already exists: ${filename}`, variant: 'error' })
-      return
-    }
-
-    // Create new Y.Text for the file
-    filesMap.set(filename, new Y.Text())
-    setActiveFile(filename)
-    toasts.add({ title: `Created file: ${filename}`, variant: 'success' })
-  }
-
-  // Handle file deletion
-  const handleFileDelete = (filename: string) => {
-    const filesMap = branchMode ? editableFilesMapRef.current : filesMapRef.current
-    if (!filesMap) {
-      return
-    }
-
-    if (!filesMap.has(filename)) {
-      toasts.add({ title: 'File not found', variant: 'error' })
-      return
-    }
-
-    // Delete from Y.Map
-    filesMap.delete(filename)
-
-    // Switch to another file if the deleted file was active
-    if (activeFile === filename) {
-      const remainingFiles = Array.from(filesMap.keys()).toSorted()
-      setActiveFile(remainingFiles.length > 0 ? remainingFiles[0] : null)
-    }
-
-    toasts.add({ title: `Deleted file: ${filename}`, variant: 'success' })
-  }
-
-  // Handle file renaming
-  const handleFileRename = (oldName: string, newName: string) => {
-    const filesMap = branchMode ? editableFilesMapRef.current : filesMapRef.current
-    if (!filesMap) {
-      return
-    }
-
-    // Check if old file exists
-    const ytext = filesMap.get(oldName)
-    if (!ytext) {
-      toasts.add({ title: 'File not found', variant: 'error' })
-      return
-    }
-
-    // Check if new name already exists
-    if (filesMap.has(newName)) {
-      toasts.add({ title: `File already exists: ${newName}`, variant: 'error' })
-      return
-    }
-
-    // Set new file with the same Y.Text instance
-    // We have to clone the Y.Text. We can't reuse the same object in a new location, sadly.
-    filesMap.set(newName, ytext.clone())
-    // Delete old file
-    filesMap.delete(oldName)
-
-    // Update active file if it was the renamed file
-    if (activeFile === oldName) {
-      setActiveFile(newName)
-    }
-
-    toasts.add({ title: `Renamed file: ${oldName} \u2192 ${newName}`, variant: 'success' })
-  }
-
   // Get the Y.Text for the active file (original version)
   const activeFileYText = activeFile ? filesMapRef.current.get(activeFile) || null : null
-  const isEditingLocked = branchMode && streamingProposedChanges !== undefined
 
   // Get the modified Y.Text when in diff mode
   const previewFilesMap = streamingFilesMapRef.current ?? (branchMode ? editableFilesMapRef.current : null)
@@ -830,11 +751,7 @@ export default function ArtifactCodeInterface({ overseer, filesRoot, height = '1
       : undefined
   }, [changedFiles, displayedFiles, isDiffMode, previewFilesMap])
   const activeFileDownloadable = activeFile ? displayedFiles.includes(activeFile) : false
-  const activeFileModeLabel = isEditingLocked
-    ? 'Reviewing changes in'
-    : isDiffMode
-      ? 'Editing changes in'
-      : 'Editing'
+  const activeFileModeLabel = isDiffMode ? 'Reviewing changes in' : 'Viewing'
 
   if (loading) {
     return <div style={{ height, width: '100%' }} />
@@ -853,20 +770,11 @@ export default function ArtifactCodeInterface({ overseer, filesRoot, height = '1
         </div>
       )}
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <FileSidebar
-          ref={fileSidebarRef}
+        <FileTreePanel
           files={displayedFiles}
           activeFile={activeFile}
-          streamingActiveFile={streamingActiveFile}
-          dirtyFiles={new Set()}
-          changedFiles={changedFiles}
           fileChangeStatuses={fileChangeStatuses}
-          isDiffMode={isDiffMode}
-          editLocked={isEditingLocked}
           onFileSelect={handleFileSelect}
-          onFileCreate={handleFileCreate}
-          onFileDelete={handleFileDelete}
-          onFileRename={handleFileRename}
           onFileDownload={handleFileDownload}
         />
         <div className="flex flex-col bg-kumo-base" style={{ flex: 1, minWidth: 0 }}>
@@ -894,34 +802,20 @@ export default function ArtifactCodeInterface({ overseer, filesRoot, height = '1
                     No files yet
                   </p>
                   <p className="mt-1.5 mb-0 text-[13px] leading-[19px] tracking-[-0.25px] text-kumo-subtle">
-                    Keep building with the agent in chat and files will appear here as it works, or create one yourself.
+                    Keep working with the agent in chat and files will appear here as it works.
                   </p>
-                  <div className="mt-4 flex justify-center">
-                    <WorkshopButton
-                      onClick={() => fileSidebarRef.current?.openCreateModal()}
-                      disabled={isEditingLocked}
-                      tone="primary"
-                      className="!h-8"
-                    >
-                      New file
-                    </WorkshopButton>
-                  </div>
                 </div>
               </div>
             ) : isDiffMode ? (
-              <CodeDiffEditor
+              <FileDiffView
                 filename={activeFile}
                 originalYText={activeFileYText}
                 modifiedYText={activeFileModifiedYText}
-                readOnly={isEditingLocked}
-                height="100%"
               />
             ) : (
-              <CodeEditor
+              <FileView
                 filename={activeFile}
-                ytext={isDiffMode ? activeFileModifiedYText : activeFileYText}
-                isReady={isReady}
-                height="100%"
+                ytext={activeFileYText}
               />
             )}
           </div>
