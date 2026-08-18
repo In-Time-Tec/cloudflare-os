@@ -13,7 +13,15 @@ function context(session: Partial<WorkshopSession>, queryClient = new QueryClien
 })) {
   return {
     context: { session: session as WorkshopSession, queryClient },
-    location: { pathname: '/email', search: '', hash: '', href: '/email' },
+    // `search` is the router's parsed, null-prototype object — not a string. Interpolating it
+    // into a template literal throws "Cannot convert object to primitive value".
+    location: {
+      pathname: '/email',
+      search: Object.assign(Object.create(null), { tab: 'inbox' }),
+      searchStr: '?tab=inbox',
+      hash: '',
+      href: '/email?tab=inbox',
+    },
     search: { redirect: undefined as string | undefined },
   }
 }
@@ -34,7 +42,7 @@ describe('route guards', () => {
     )
     expect(isRedirect(err)).toBe(true)
     expect((err as { options: { to: string; search: { redirect: string } } }).options.to).toBe('/login')
-    expect((err as { options: { search: { redirect: string } } }).options.search.redirect).toContain('/email')
+    expect((err as { options: { search: { redirect: string } } }).options.search.redirect).toBe('/email?tab=inbox')
   })
 
   it('lets authenticated users through the authenticated layout', async () => {
