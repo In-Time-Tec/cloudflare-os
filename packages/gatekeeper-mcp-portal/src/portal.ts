@@ -24,10 +24,7 @@ import {
   type VendorDescription,
 } from "@gadgets/workshop-shared/gatekeeper";
 import type { ToolCatalog } from "@gadgets/mcp-shared/client";
-import {
-  classifyTool,
-  type ServerTrust,
-} from "@gadgets/mcp-shared/tools";
+import { classifyTool } from "@gadgets/mcp-shared/tools";
 import { bindingNameFragment, hostOf } from "@gadgets/mcp-shared/util";
 import type { McpLog, McpLogFields } from "@gadgets/mcp-shared/log";
 import { generateSessionTypes, sessionTypeName } from "@gadgets/mcp-shared/schema-to-ts";
@@ -72,7 +69,6 @@ import {
   portalResource,
   portalServer,
   portalTokenFor,
-  portalTrust,
   readPortalConfig,
   requirePortalServerScope,
 } from "./config.js";
@@ -185,7 +181,7 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
         : "No MCP server portal is configured",
       description:
         "Use the MCP servers this organization has approved, through its MCP server portal. Reads " +
-        "happen straight away. Anything that writes waits for your approval.",
+        "are recorded as observations; anything that writes is recorded as an action.",
     };
   }
 
@@ -401,20 +397,18 @@ class McpServerConfiguratorUI extends RpcTarget implements McpServerConfigurator
 
     const servers = reconcilePortalServers(
       await this.#fetchPortalServers(), tools, truncated);
-    const trust = portalTrust(this.#env);
     const grouped = groupToolsByServer(tools);
 
     return servers.map(upstream => {
       const owned = grouped.get(upstream.id) ?? [];
-      const reads = owned.filter(
-        tool => classifyTool(tool, trust).mode === "read").length;
+      const reads = owned.filter(tool => classifyTool(tool).mode === "read").length;
       return {
         value: upstream.id,
         title: upstream.name,
         subtitle: truncated
           ? `Catalog truncated \u00b7 ${owned.length} shown, ${reads} shown read-only`
           : `${owned.length} tool${owned.length === 1 ? "" : "s"} \u00b7 ` +
-            `${reads} read-only, ${owned.length - reads} need approval`,
+            `${reads} read-only, ${owned.length - reads} acting`,
         // A server can be configured but switched off for this session, making a grant onto it valid
         // but presently empty, which the person choosing should see.
         meta: upstream.enabled ? undefined : "disabled in portal",
@@ -423,9 +417,9 @@ class McpServerConfiguratorUI extends RpcTarget implements McpServerConfigurator
   }
 
   // Asks the portal which upstream servers it fronts. A tool call, but the gatekeeper's own while
-  // building a configuration form rather than a Gadget's, so it does not pass through the approval
-  // queue. Advisory only: membership comes from tool-name prefixes, so a failure degrades to unnamed
-  // groups rather than an error.
+  // building a configuration form rather than a Gadget's, so it is not recorded. Advisory only:
+  // membership comes from tool-name prefixes, so a failure degrades to unnamed groups rather than
+  // an error.
   async #fetchPortalServers(): Promise<PortalServer[]> {
     const server = await this.#account.getServer();
     return fetchPortalServers(this.#env, this.#account, server.endpoint);
@@ -433,7 +427,6 @@ class McpServerConfiguratorUI extends RpcTarget implements McpServerConfigurator
 
   // Tools the grant may cover, narrowed to one portal upstream server when `serverId` is given.
   async listToolOptions(serverId?: string): Promise<ConfiguratorUIOption[]> {
-    const trust = portalTrust(this.#env);
     const { tools, truncated } = await this.#tools();
     requireCompleteCatalogForToolSelection(truncated);
     const scope: ToolScope = serverId ? { serverId } : {};
@@ -447,8 +440,8 @@ class McpServerConfiguratorUI extends RpcTarget implements McpServerConfigurator
         // `value` keeps the wire name the grant is actually recorded with.
         title: tool.title ?? (serverId ? tool.name.slice(serverId.length + 1) : tool.name),
         subtitle: tool.description?.split(/\r?\n/)[0],
-        // Surfaced here so the person granting can see, per tool, whether calls will interrupt them.
-        meta: classifyTool(tool, trust).mode === "read" ? "read-only" : "needs approval",
+        // Surfaced here so the person granting can see, per tool, whether it only reads.
+        meta: classifyTool(tool).mode === "read" ? "read-only" : "acts",
       }));
   }
 }
@@ -456,9 +449,7 @@ class McpServerConfiguratorUI extends RpcTarget implements McpServerConfigurator
 // ---------------------------------------------------------------------------
 // Gatekeeper facet
 
-// Props identifying which server (and how much of it) a gatekeeper facet governs. The trust tier is
-// absent: it is deployment configuration, read from `portalTrust(this.env)` at each point of use,
-// since baking it into props would pin every binding to the setting on the day it was created.
+// Props identifying which server (and how much of it) a gatekeeper facet governs.
 type McpGatekeeperImplProps = {
   accountObjectId: string;
   endpoint: string;
@@ -478,17 +469,12 @@ export class McpGatekeeperImpl
     return logger.with({
       serverId: this.ctx.props.serverId,
       serverHost: hostOf(this.ctx.props.endpoint),
-      trust: portalTrust(this.env),
     });
   }
 
   protected account(): ConnectionAccount {
     return this.ctx.exports.McpAccount.get(
       this.ctx.exports.McpAccount.idFromString(this.ctx.props.accountObjectId));
-  }
-
-  protected get trust(): ServerTrust {
-    return portalTrust(this.env);
   }
 
   protected get sessionClass() {
@@ -499,7 +485,7 @@ export class McpGatekeeperImpl
     return this.#scopeLabel();
   }
 
-  // How this binding's breadth reads to a human, for approval prompts and the bindings list.
+  // How this binding's breadth reads to a human, for the activity log and the bindings list.
   #scopeLabel(): string {
     const { scope, serverName, scopeServerName } = this.ctx.props;
     return `${serverName} / ${scopeServerName ?? scope.serverId}`;
@@ -511,7 +497,7 @@ export class McpGatekeeperImpl
     const { scope } = this.ctx.props;
     const label = this.#scopeLabel();
 
-    const counts = `${reads} read-only, ${tools.length - reads} requiring approval`;
+    const counts = `${reads} read-only, ${tools.length - reads} acting`;
     const plural = tools.length === 1 ? "" : "s";
     const snippet = scope.tools
       ? `${scope.tools.length} named MCP tool${scope.tools.length === 1 ? "" : "s"} on ` +
@@ -544,9 +530,9 @@ export class McpGatekeeperImpl
   }
 
   /**
-   * Namespaces persistent approval policy by both the readable binding shape and the exact portal
-   * endpoint. A deployment repoint must not carry an always-approve decision to a different system
-   * merely because both portals expose a tool with the same name.
+   * Namespaces action policy by both the readable binding shape and the exact portal endpoint. A
+   * deployment repoint must not carry an administrator's decision about one kind to a different
+   * system merely because both portals expose a tool with the same name.
    */
   protected get actionScopeTag(): string {
     return `mcp-portal:${endpointTag(this.ctx.props.endpoint)}:${this.#bindingId()}`;
@@ -559,14 +545,13 @@ export class McpGatekeeperImpl
       serverName: this.#scopeLabel(),
       endpoint: this.ctx.props.endpoint,
       discriminator: this.resourceUrl,
-      trust: portalTrust(this.env),
       tools: await this.tools(),
     });
   }
 
   /**
    * The upstream server as the user should see it, not the portal's own name. The same label
-   * `describe()` shows, so an approval prompt names the system being written to.
+   * `describe()` shows, so a recorded action names the system being written to.
    */
   get serverName(): string {
     return this.#scopeLabel();

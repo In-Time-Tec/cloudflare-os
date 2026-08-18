@@ -86,7 +86,7 @@ export function validateCustomEndpoint(env: InsecureEnv, input: string): Endpoin
     return { ok: false, reason: "That host is not reachable from Cloudflare OS." };
   }
 
-  // Credentials in the URL would end up in logs and approval prompts.
+  // Credentials in the URL would end up in logs and activity-log entries.
   if (url.username || url.password) {
     return { ok: false, reason: "Remove the username and password from the URL." };
   }

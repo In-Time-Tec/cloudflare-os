@@ -16,19 +16,30 @@ declare module "cloudflare:workers" {
   }
 }
 
-function fakeApprovalQueue() {
+function fakeRecorder() {
   const observations: { title: string; description: string }[] = [];
-  const actions: { id: number; description: { title: string; actionKind?: { tag: string } } }[] = [];
-  const queue = {
+  const actions: {
+    description: { title: string; actionKind: { tag: string } };
+    outcome?: { state: "succeeded"; detail?: string }
+              | { state: "failed"; error: string; mayHaveTakenEffect: boolean };
+  }[] = [];
+  const recorder = {
     async authorizeObservation(description: { title: string; description: string }) {
       observations.push(description);
     },
-    async submitAction(id: number, description: { title: string }) {
-      actions.push({ id, description });
+    async authorizeAction(description: { title: string; actionKind: { tag: string } }) {
+      const entry: (typeof actions)[number] = { description };
+      actions.push(entry);
+      return {
+        async succeeded(detail?: string) { entry.outcome = { state: "succeeded", detail }; },
+        async failed(error: string, mayHaveTakenEffect: boolean) {
+          entry.outcome = { state: "failed", error, mayHaveTakenEffect };
+        },
+      };
     },
-    dup() { return queue; },
+    dup() { return recorder; },
   };
-  return { queue: queue as never, observations, actions };
+  return { recorder: recorder as never, observations, actions };
 }
 
 function stubGraph(responses: Record<string, unknown>) {
@@ -72,22 +83,21 @@ async function primeGatekeeper<T extends Rpc.DurableObjectBranded | undefined>(
 
 beforeEach(() => vi.unstubAllGlobals());
 
-describe("mail sending via approval queue", () => {
-  it("stages sendMail and sends only on applyAction", async () => {
+describe("mail sending", () => {
+  it("sends inline and records the send", async () => {
     const requests = stubGraph({ "me/sendMail": null });
     const accountId = await seedAccount("mail2-send");
     const gk = env.TEST_MAILBOX.getByName("mail2-send");
     await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
+    const { recorder, actions } = fakeRecorder();
 
     await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       await session.sendMail(["a@x.example"], "Hello", "Body text", { cc: ["c@x.example"] });
     });
-    expect(requests.filter(r => r.method === "POST")).toHaveLength(0);
     expect(actions[0].description.title).toContain("Send email");
+    expect(actions[0].outcome).toMatchObject({ state: "succeeded" });
 
-    await runInDurableObject(gk, instance => instance.applyAction(actions[0].id));
     const posts = requests.filter(r => r.method === "POST");
     expect(posts).toHaveLength(1);
     expect(posts[0].body).toMatchObject({
@@ -95,7 +105,7 @@ describe("mail sending via approval queue", () => {
     });
   });
 
-  it("stages reply / replyAll / forward / sendDraft independently", async () => {
+  it("sends reply / replyAll / forward / sendDraft each as its own action", async () => {
     const requests = stubGraph({
       "me/messages/m1/reply": null,
       "me/messages/m1/replyAll": null,
@@ -105,15 +115,14 @@ describe("mail sending via approval queue", () => {
     const accountId = await seedAccount("mail2-replies");
     const gk = env.TEST_MAILBOX.getByName("mail2-replies");
     await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
+    const { recorder, actions } = fakeRecorder();
 
     await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       await session.reply("m1", "r");
       await session.replyAll("m1", "ra");
       await session.forward("m1", ["f@x.example"]);
       await session.sendDraft("d1");
-      for (const action of actions) await instance.applyAction(action.id);
     });
     expect(requests.filter(r => r.method === "POST").map(r => r.url.pathname)).toEqual([
       "/v1.0/me/messages/m1/reply",
@@ -121,6 +130,8 @@ describe("mail sending via approval queue", () => {
       "/v1.0/me/messages/m1/forward",
       "/v1.0/me/messages/d1/send",
     ]);
+    expect(actions).toHaveLength(4);
+    expect(actions.every(a => a.description.actionKind.tag === "microsoft.mail.send")).toBe(true);
   });
 
   it("browses folders and reads attachments as observations", async () => {
@@ -136,10 +147,10 @@ describe("mail sending via approval queue", () => {
     const accountId = await seedAccount("mail2-folders");
     const gk = env.TEST_MAILBOX.getByName("mail2-folders");
     await primeGatekeeper(gk, accountId);
-    const { queue, observations } = fakeApprovalQueue();
+    const { recorder, observations } = fakeRecorder();
 
     const result = await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       const folders = await session.listFolders();
       const cursor = await session.listFolder("f1");
       const messages = await cursor.next();
@@ -159,17 +170,23 @@ describe("mail sending via approval queue", () => {
     ]);
   });
 
-  it("offers draft and send kinds for opt-in auto-approval", async () => {
+  it("declares drafting and sending as separate kinds", async () => {
     const gk = env.TEST_MAILBOX.getByName("mail2-kinds");
-    const kinds = await runInDurableObject(gk, i => i.getAutoApprovableActions());
-    expect(kinds.map(k => k.tag)).toEqual([
+    const catalog = await runInDurableObject(gk, i => i.getActionCatalog());
+    expect(catalog.map(c => c.kind.tag)).toEqual([
       "microsoft.mail.draft.create", "microsoft.mail.send",
     ]);
+    expect(catalog[0].risk).toEqual({
+      reversible: "automatic", reach: "creates-content", audience: "private", freeform: true,
+    });
+    expect(catalog[1].risk).toEqual({
+      reversible: "no", reach: "acts-on-world", audience: "external", freeform: true,
+    });
   });
 });
 
-describe("placeholder-id chaining", () => {
-  it("resolves a pending draft id to the real id created by the earlier action", async () => {
+describe("chaining one action onto another's result", () => {
+  it("sends the draft the previous call actually created", async () => {
     const requests = stubGraph({
       "me/messages": { id: "real-draft-42" },
       "me/messages/real-draft-42/send": null,
@@ -177,37 +194,18 @@ describe("placeholder-id chaining", () => {
     const accountId = await seedAccount("mail2-chain");
     const gk = env.TEST_MAILBOX.getByName("mail2-chain");
     await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
+    const { recorder } = fakeRecorder();
 
     await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
-      const pending = await session.createDraft(["a@x.example"], "Chained", "B");
-      // The agent chains sendDraft on the placeholder id before anything is approved.
-      await session.sendDraft(pending.id);
-      // Approve in submission order: create first, then send.
-      await instance.applyAction(actions[0].id);
-      await instance.applyAction(actions[1].id);
+      const session = await instance.startSession(recorder);
+      const draft = await session.createDraft(["a@x.example"], "Chained", "B");
+      await session.sendDraft(draft.id);
     });
     const posts = requests.filter(r => r.method === "POST").map(r => r.url.pathname);
     expect(posts).toEqual(["/v1.0/me/messages", "/v1.0/me/messages/real-draft-42/send"]);
   });
 
-  it("fails with a clear message when the referenced action was never applied", async () => {
-    stubGraph({});
-    const accountId = await seedAccount("mail2-chain-missing");
-    const gk = env.TEST_MAILBOX.getByName("mail2-chain-missing");
-    await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
-
-    await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
-      await session.sendDraft("pending-draft-999");
-      await expect(instance.applyAction(actions[0].id))
-          .rejects.toThrow(/has not been created yet/);
-    });
-  });
-
-  it("resolves a pending folder id for a chained upload", async () => {
+  it("uploads into the folder the previous call actually created", async () => {
     const requests = stubGraph({
       "me/drive/items/root/children": { id: "real-folder-7", name: "Reports", folder: {} },
       "me/drive/items/real-folder-7:/notes.md:/content":
@@ -216,14 +214,12 @@ describe("placeholder-id chaining", () => {
     const accountId = await seedAccount("files2-chain");
     const gk = env.TEST_FILES.getByName("files2-chain");
     await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
+    const { recorder } = fakeRecorder();
 
     await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       const folder = await session.createFolder(null, "root", "Reports");
       await session.uploadFile(null, folder.id, "notes.md", "# hi");
-      await instance.applyAction(actions[0].id);
-      await instance.applyAction(actions[1].id);
     });
     const writes = requests.filter(r => r.method !== "GET").map(r => r.url.pathname);
     expect(writes).toEqual([
@@ -233,8 +229,8 @@ describe("placeholder-id chaining", () => {
   });
 });
 
-describe("calendar management via approval queue", () => {
-  it("stages update, cancel, and respond; applies each through Graph", async () => {
+describe("calendar management", () => {
+  it("updates, cancels, and responds, each through Graph immediately", async () => {
     const requests = stubGraph({
       "me/events/e1": { id: "e1" },       // PATCH + DELETE
       "me/events/e2/accept": null,
@@ -242,15 +238,19 @@ describe("calendar management via approval queue", () => {
     const accountId = await seedAccount("cal2-manage");
     const gk = env.TEST_CALENDAR.getByName("cal2-manage");
     await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
+    const { recorder, actions } = fakeRecorder();
 
     await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       await session.updateEvent("e1", { subject: "Moved" });
       await session.cancelEvent("e1");
       await session.respondToEvent("e2", "accept", "see you there");
-      for (const action of actions) await instance.applyAction(action.id);
     });
+    expect(actions.map(a => a.description.actionKind.tag)).toEqual([
+      "microsoft.calendar.event.modify",
+      "microsoft.calendar.event.modify",
+      "microsoft.calendar.event.respond",
+    ]);
     expect(requests.filter(r => r.method !== "GET").map(r => [r.method, r.url.pathname]))
         .toEqual([
           ["PATCH", "/v1.0/me/events/e1"],
@@ -261,10 +261,10 @@ describe("calendar management via approval queue", () => {
         .toEqual({ sendResponse: true, comment: "see you there" });
   });
 
-  it("offers all calendar kinds for opt-in auto-approval", async () => {
+  it("declares every calendar kind it can record", async () => {
     const gk = env.TEST_CALENDAR.getByName("cal2-kinds");
-    const kinds = await runInDurableObject(gk, i => i.getAutoApprovableActions());
-    expect(kinds.map(k => k.tag)).toEqual([
+    const catalog = await runInDurableObject(gk, i => i.getActionCatalog());
+    expect(catalog.map(c => c.kind.tag)).toEqual([
       "microsoft.calendar.event.create",
       "microsoft.calendar.event.modify",
       "microsoft.calendar.event.respond",
@@ -272,8 +272,8 @@ describe("calendar management via approval queue", () => {
   });
 });
 
-describe("files writes via approval queue", () => {
-  it("stages folder creation, upload, replace, and delete; applies through Graph", async () => {
+describe("files writes", () => {
+  it("creates, uploads, replaces, and deletes through Graph inline", async () => {
     const requests = stubGraph({
       "me/drive/items/root/children": { id: "nf1", name: "Reports", folder: {} },
       "me/drive/items/root:/notes.md:/content": { id: "file1", name: "notes.md", file: {} },
@@ -283,17 +283,14 @@ describe("files writes via approval queue", () => {
     const accountId = await seedAccount("files2-write");
     const gk = env.TEST_FILES.getByName("files2-write");
     await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
+    const { recorder, actions } = fakeRecorder();
 
     await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       await session.createFolder(null, "root", "Reports");
       await session.uploadFile(null, "root", "notes.md", "# hi", "text/markdown");
       await session.replaceFileContent(null, "file1", "# v2");
       await session.deleteFile(null, "file1");
-      // Nothing mutating reached Graph yet (the two reads are getItem name lookups).
-      expect(requests.filter(r => r.method !== "GET")).toHaveLength(0);
-      for (const action of actions) await instance.applyAction(action.id);
     });
     expect(requests.filter(r => r.method !== "GET").map(r => [r.method, r.url.pathname]))
         .toEqual([
@@ -331,10 +328,10 @@ describe("files writes via approval queue", () => {
     const accountId = await seedAccount("files2-shared");
     const gk = env.TEST_FILES.getByName("files2-shared");
     await primeGatekeeper(gk, accountId);
-    const { queue, observations } = fakeApprovalQueue();
+    const { recorder, observations } = fakeRecorder();
 
     const result = await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       const shared = await session.listSharedWithMe();
       const content = await session.readContent(null, "bin1");
       return { shared, content };
@@ -346,7 +343,7 @@ describe("files writes via approval queue", () => {
   });
 });
 
-describe("teams chats via approval queue", () => {
+describe("teams chats", () => {
   it("pages chats and messages through cursors", async () => {
     stubGraph({
       "me/chats": {
@@ -362,10 +359,10 @@ describe("teams chats via approval queue", () => {
     const accountId = await seedAccount("teams2-page");
     const gk = env.TEST_TEAMS.getByName("teams2-page");
     await primeGatekeeper(gk, accountId);
-    const { queue } = fakeApprovalQueue();
+    const { recorder } = fakeRecorder();
 
     const result = await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       const chats = await session.listChats();
       const first = await chats.next();
       const messages = await (await session.readChat("c1")).next();
@@ -375,7 +372,7 @@ describe("teams chats via approval queue", () => {
     expect(result.messages![0].content).toBe("hi");
   });
 
-  it("stages chat creation, resolving the self profile only at apply", async () => {
+  it("creates a chat inline, binding the signed-in user from their profile", async () => {
     const requests = stubGraph({
       "me": { id: "self-oid", displayName: "Me" },
       "chats": { id: "new-chat" },
@@ -383,15 +380,14 @@ describe("teams chats via approval queue", () => {
     const accountId = await seedAccount("teams2-create");
     const gk = env.TEST_TEAMS.getByName("teams2-create");
     await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
+    const { recorder, actions } = fakeRecorder();
 
-    await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
-      const pending = await session.createChat(["bob@corp.example"]);
-      expect(pending.id).toMatch(/^pending-chat-/);
-      expect(requests).toHaveLength(0);
-      await instance.applyAction(actions[0].id);
+    const chat = await runInDurableObject(gk, async instance => {
+      const session = await instance.startSession(recorder);
+      return session.createChat(["bob@corp.example"]);
     });
+    expect(chat.id).toBe("new-chat");
+    expect(actions[0].outcome).toEqual({ state: "succeeded", detail: "Chat id: new-chat" });
     const post = requests.find(r => r.method === "POST");
     expect(post!.body).toMatchObject({ chatType: "oneOnOne" });
   });

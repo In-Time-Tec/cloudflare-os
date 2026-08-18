@@ -9,7 +9,6 @@ function tool(name: string): ClassifiedTool {
   return {
     tool: { name, inputSchema: { type: "object", properties: {} } },
     mode: "read",
-    autoApprovable: false,
     classifiedBy: "default",
   } as unknown as ClassifiedTool;
 }
@@ -20,7 +19,6 @@ class Base {
     this.calls.push([name, args]);
     return `called:${name}`;
   }
-  getActionResult(_id: number) { return "result"; }
   listTools() { return []; }
 }
 
@@ -62,7 +60,7 @@ describe("toolMethodNames", () => {
   });
 
   it("skips the session's own methods", () => {
-    for (const name of ["call_tool", "get_action_result", "list_tools"]) {
+    for (const name of ["call_tool", "list_tools"]) {
       expect(toolMethodNames([tool(name)]).size, name).toBe(0);
     }
   });

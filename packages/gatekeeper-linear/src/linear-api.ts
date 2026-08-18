@@ -656,13 +656,6 @@ export class LinearApi {
     return data.commentCreate.comment;
   }
 
-  async deleteComment(commentId: string): Promise<void> {
-    await this.graphql<{ commentDelete: { success: boolean } }>(
-      `mutation($id: String!) { commentDelete(id: $id) { success } }`,
-      { id: commentId },
-    );
-  }
-
   async createLabel(input: { teamId: string; name: string; color?: string; description?: string }): Promise<RawLabel> {
     const data = await this.graphql<{ issueLabelCreate: { success: boolean; issueLabel: RawLabel } }>(
       `mutation($input: IssueLabelCreateInput!) {
@@ -674,17 +667,4 @@ export class LinearApi {
     return data.issueLabelCreate.issueLabel;
   }
 
-  async deleteIssue(issueId: string): Promise<void> {
-    await this.graphql<{ issueDelete: { success: boolean } }>(
-      `mutation($id: String!) { issueDelete(id: $id) { success } }`,
-      { id: issueId },
-    );
-  }
-
-  async deleteLabel(labelId: string): Promise<void> {
-    await this.graphql<{ issueLabelDelete: { success: boolean } }>(
-      `mutation($id: String!) { issueLabelDelete(id: $id) { success } }`,
-      { id: labelId },
-    );
-  }
 }

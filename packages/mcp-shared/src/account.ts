@@ -64,7 +64,7 @@ export type ConnectedServer = {
   /** The server's own reported name once known, else the endpoint host. */
   serverName: string;
   /**
-   * Who chose this endpoint. Settled at connect time and true forever after, unlike `ServerTrust`,
+   * Who chose this endpoint. Settled at connect time and true forever after, unlike deployment
    * which is current deployment configuration and must not be frozen onto an account.
    */
   provenance: "user" | "deployment";
@@ -131,7 +131,7 @@ export type AccountEnv = ConnectionEnv & {
   BASE_URL?: string;
 };
 
-// Longest server-supplied name kept. It appears in every approval prompt, so it is capped,
+// Longest server-supplied name kept. It appears on every recorded call, so it is capped,
 // single-line, and stripped of the markdown that would let it forge structure there.
 const MAX_SERVER_NAME = 60;
 
@@ -624,7 +624,7 @@ export abstract class McpAccountBase<E extends AccountEnv, P = unknown>
 
     // Prefer the server's own name over the host once we have spoken to it, but only for an endpoint
     // the user chose. A deployment-configured endpoint has an administrator's name on it, and letting
-    // the far side rename itself in every approval prompt would undo that choice.
+    // the far side rename itself on every recorded call would undo that choice.
     const reported = displayName(info.serverInfo?.title ?? info.serverInfo?.name);
     if (reported && server.provenance === "user") {
       this.ctx.storage.kv.put<ConnectedServer>("server", { ...server, serverName: reported });

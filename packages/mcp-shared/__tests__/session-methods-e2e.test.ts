@@ -13,18 +13,18 @@ it("every method the .d.ts promises is really installed, and routes to the right
   const writes = ["save_issue", "delete_project"];
 
   const tools = [
-    ...reads.map(name => classifyTool({ name, annotations: { readOnlyHint: true } } as never, "byo")),
+    ...reads.map(name => classifyTool({ name, annotations: { readOnlyHint: true } } as never)),
     // No `readOnlyHint` means "action", because classification fails closed.
-    ...writes.map(name => classifyTool({ name } as never, "byo")),
+    ...writes.map(name => classifyTool({ name } as never)),
   ];
 
   const dts = generateSessionTypes({
     baseTypes: "", serverId: "linear", serverName: "Linear",
     endpoint: "https://mcp.linear.app/mcp", discriminator: "https://mcp.linear.app/mcp",
-    trust: "byo", tools,
+    tools,
   });
   const promised = [...dts.matchAll(/^ {2}([a-z]\w*)\(/gm)].map(match => match[1])
-    .filter(name => !["listTools", "callTool", "getActionResult"].includes(name));
+    .filter(name => !["listTools", "callTool"].includes(name));
 
   class Base {
     called: string | null = null;
@@ -35,7 +35,7 @@ it("every method the .d.ts promises is really installed, and routes to the right
 
   // `list_issues` and `listIssues` collide so neither may claim the name; `then`/`map` are hijacked by
   // the RPC stub; `2fa` is not an identifier. The rest camel-case as expected -- including the writes,
-  // which are queued for approval rather than refused.
+  // which are recorded as actions rather than refused.
   expect(promised.toSorted())
     .toEqual(["deleteProject", "getUserById", "saveIssue", "search", "whoami"]);
 
@@ -45,6 +45,6 @@ it("every method the .d.ts promises is really installed, and routes to the right
     expect([...reads, ...writes], method).toContain(session.called);
   }
 
-  // Writes reach `callTool` like anything else; the approval queue, not the type, is the gate.
+  // Writes reach `callTool` like anything else; deployment policy, not the type, is the gate.
   for (const write of writes) expect(dts).toContain(`callTool(name: ${JSON.stringify(write)}`);
 });

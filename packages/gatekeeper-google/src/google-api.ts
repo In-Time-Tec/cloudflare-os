@@ -798,15 +798,14 @@ export class GmailApi {
   // ─────────────────────────────────────────────────────────────────
   // Outbound message construction + send
   //
-  // Outbound mail is built into a raw RFC 2822 message at submit time and is
-  // only delivered (via messages.send) after the action is approved — see the
-  // approval-model comment in google.ts. Nothing is written to the user's
-  // mailbox (no draft) before approval.
+  // Outbound mail is built into a raw RFC 2822 message and delivered by
+  // messages.send within the caller's recorded action. Nothing is written to
+  // the user's mailbox (no draft) beforehand.
   // ─────────────────────────────────────────────────────────────────
 
   /**
    * Build a raw new outbound email and return the exact structured payload
-   * used to generate it, for approval display.
+   * used to generate it, so the caller can describe what it sent.
    */
   buildSendRaw(to: string[], subject: string, body: string): GmailOutboundMessage {
     const normalizedTo = normalizeEmailRecipients(to);
@@ -826,7 +825,7 @@ export class GmailApi {
    * raw message being replied to (no extra fetch). When replyAll is true, this
    * mailbox's own address is filtered out of the CC list. Returns the encoded
    * raw message along with the resolved recipients and subject so the caller
-   * can describe exactly what will be sent in the approval prompt.
+   * can describe exactly what will be sent.
    */
   async buildReplyRaw(
     originalMessage: GmailMessageRaw,
@@ -999,11 +998,9 @@ export class GmailApi {
   }
 
   /**
-   * Send a pre-built raw RFC 2822 message. Optionally attach to an existing
-   * thread. Called only from applyAction(), i.e. after approval. An approved send
-   * lands at most once: a POST is never replayed for a transient failure, and the
-   * one case that is replayed — a 401 — is rejected before the message is accepted
-   * for delivery.
+   * Send a pre-built raw RFC 2822 message. Optionally attach to an existing thread. A send lands
+   * at most once: a POST is never replayed for a transient failure, and the one case that is
+   * replayed — a 401 — is rejected before the message is accepted for delivery.
    */
   async sendRawMessage(raw: string, threadId?: string): Promise<{ id: string; threadId: string }> {
     if (threadId !== undefined) validateGmailId(threadId, "thread ID");

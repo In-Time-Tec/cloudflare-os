@@ -1,6 +1,6 @@
 import { RpcTarget } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import type { ApprovalQueue, HookInitiator } from "@gadgets/workshop-shared/gatekeeper";
+import type { ActionRecorder, HookInitiator } from "@gadgets/workshop-shared/gatekeeper";
 import {
   ScheduleManagementApi,
   ScheduleSessionImpl,
@@ -35,7 +35,7 @@ describe("ScheduleSessionImpl", () => {
     const session = new ScheduleSessionImpl({
       accountId: "account-a",
       workspaceId: "workspace-a",
-      approvalQueue: { bindHook } as unknown as RpcStub<ApprovalQueue>,
+      recorder: { bindHook } as unknown as RpcStub<ActionRecorder>,
       controllerFactory,
       driver: { listWorkspace: vi.fn(async () => []) },
       now: () => 1_000,
@@ -60,7 +60,7 @@ describe("ScheduleSessionImpl", () => {
     const session = new ScheduleSessionImpl({
       accountId: "account-a",
       workspaceId: "workspace-a",
-      approvalQueue: { bindHook } as unknown as RpcStub<ApprovalQueue>,
+      recorder: { bindHook } as unknown as RpcStub<ActionRecorder>,
       controllerFactory,
       driver,
       now: () => 1_000,
@@ -92,7 +92,7 @@ describe("ScheduleSessionImpl", () => {
     const session = new ScheduleSessionImpl({
       accountId: "account-a",
       workspaceId: "workspace-a",
-      approvalQueue: { bindHook: vi.fn(async () => {}) } as unknown as RpcStub<ApprovalQueue>,
+      recorder: { bindHook: vi.fn(async () => {}) } as unknown as RpcStub<ActionRecorder>,
       controllerFactory,
       driver: { listWorkspace: vi.fn(async () => []) },
       now: () => 1_000,
@@ -116,7 +116,7 @@ describe("ScheduleSessionImpl", () => {
     const session = new ScheduleSessionImpl({
       accountId: "account-a",
       workspaceId: "workspace-a",
-      approvalQueue: { bindHook: vi.fn(async () => {}) } as unknown as RpcStub<ApprovalQueue>,
+      recorder: { bindHook: vi.fn(async () => {}) } as unknown as RpcStub<ActionRecorder>,
       controllerFactory,
       driver: { listWorkspace: vi.fn(async () => []) },
       now: () => registeredAt,
@@ -148,7 +148,7 @@ describe("ScheduleSessionImpl", () => {
     const session = new ScheduleSessionImpl({
       accountId: "account-a",
       workspaceId: "workspace-a",
-      approvalQueue: { bindHook } as unknown as RpcStub<ApprovalQueue>,
+      recorder: { bindHook } as unknown as RpcStub<ActionRecorder>,
       controllerFactory,
       driver: { listWorkspace: vi.fn(async () => []) },
       now: () => 1_000,
@@ -173,7 +173,7 @@ describe("ScheduleSessionImpl", () => {
     const session = new ScheduleSessionImpl({
       accountId: "account-a",
       workspaceId: "workspace-a",
-      approvalQueue: { authorizeObservation } as unknown as RpcStub<ApprovalQueue>,
+      recorder: { authorizeObservation } as unknown as RpcStub<ActionRecorder>,
       controllerFactory: vi.fn(),
       driver,
     });
@@ -189,7 +189,7 @@ describe("ScheduleSessionImpl", () => {
     const session = new ScheduleSessionImpl({
       accountId: "account-a",
       workspaceId: "workspace-a",
-      approvalQueue: { bindHook } as unknown as RpcStub<ApprovalQueue>,
+      recorder: { bindHook } as unknown as RpcStub<ActionRecorder>,
       controllerFactory,
       driver: { listWorkspace: vi.fn(async () => []) },
     });
@@ -210,7 +210,7 @@ describe("ScheduleSessionImpl", () => {
     const session = new ScheduleSessionImpl({
       accountId: "account-a",
       workspaceId: "workspace-a",
-      approvalQueue: { bindHook } as unknown as RpcStub<ApprovalQueue>,
+      recorder: { bindHook } as unknown as RpcStub<ActionRecorder>,
       controllerFactory,
       driver: { listWorkspace: vi.fn(async () => []) },
       now: () => 1_000,
@@ -234,7 +234,7 @@ describe("ScheduleSessionImpl", () => {
     const session = new ScheduleSessionImpl({
       accountId: "account-a",
       workspaceId: "workspace-a",
-      approvalQueue: { authorizeObservation } as unknown as RpcStub<ApprovalQueue>,
+      recorder: { authorizeObservation } as unknown as RpcStub<ActionRecorder>,
       controllerFactory: vi.fn(),
       driver: { listWorkspace: vi.fn(async () => [activeSummary("schedule-a")]) },
     });

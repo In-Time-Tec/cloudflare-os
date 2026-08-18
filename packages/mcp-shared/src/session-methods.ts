@@ -2,8 +2,8 @@
 // than `env.LINEAR.callTool("list_issues", {...})`. The runtime half of `schema-to-ts.ts`.
 //
 // Methods go on a prototype, never as own properties, since Cap'n Web and Workers RPC both refuse
-// own properties on an `RpcTarget`. Each is a one-line delegate to `callTool`, so the scope check,
-// approval queue, and observation record stay in one place and the delegates inherit the
+// own properties on an `RpcTarget`. Each is a one-line delegate to `callTool`, so the scope check
+// and the observation/action record stay in one place and the delegates inherit the
 // `@validateRpc()` checking applied there.
 
 import type { ClassifiedTool } from "./tools.js";
@@ -18,7 +18,7 @@ export const RESERVED_METHOD_NAMES: ReadonlySet<string> = new Set([
   "then", "catch", "finally", "dup", "onRpcBroken", "constructor", "toString", "valueOf",
   "hasOwnProperty", "__proto__", "map",
   // The session's own methods.
-  "callTool", "getActionResult", "listTools",
+  "callTool", "listTools",
 ]);
 
 /**

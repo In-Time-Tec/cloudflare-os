@@ -1,6 +1,6 @@
 import { WorkerEntrypoint, DurableObject, RpcTarget, RpcStub } from "cloudflare:workers";
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
-import { AuthenticatedIdentity, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor as GatekeeperVendorIface, Gatekeeper, ResourceDescription, ApprovalQueue, ObservationDescription, VendorDescription, GatekeeperConnectCallback, GatekeeperConnectOptions, AccountDescription, SupportedResource, ResourceConfiguratorFrame, Cursor, ActionKind, stripTrailingSlashes } from '@gadgets/workshop-shared/gatekeeper';
+import { AuthenticatedIdentity, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor as GatekeeperVendorIface, Gatekeeper, ResourceDescription, ActionCapability, ActionDescription, ActionRecorder, ObservationDescription, VendorDescription, GatekeeperConnectCallback, GatekeeperConnectOptions, AccountDescription, SupportedResource, ResourceConfiguratorFrame, Cursor, ActionKind, stripTrailingSlashes } from '@gadgets/workshop-shared/gatekeeper';
 import { exchangeAuthCode, getAccessToken, getGoogleAccountDescription, getGoogleVerifiedIdentity, GOOGLE_ISSUER, GmailApi, GmailMessageRaw, GmailOutboundMessage, GoogleAccessToken, normalizeEmailRecipients, revokeGoogleToken } from "./google-api";
 import {
   GmailSession, GmailThread, GmailMessage,
@@ -19,8 +19,7 @@ import {
   BigQueryQueryOptions, BigQueryQueryResult, BigQuerySession, BigQueryTable,
 } from "./bigquery-types";
 import {
-  calendarEventOverlaps, calendarEventSortKey, eventPatchToGoogle, GoogleCalendarApi,
-  validateCalendarTimeWindow,
+  eventPatchToGoogle, GoogleCalendarApi, validateCalendarTimeWindow,
 } from "./calendar-api";
 import type {
   CalendarAvailabilityMode, CalendarEvent, CalendarEventDraft, CalendarEventPatch,
@@ -1180,42 +1179,41 @@ export class GoogleVerifier extends WorkerEntrypoint<Env, GoogleVerifierProps>
   }
 }
 
-class PendingActionStore<Action> {
-  #kv: DurableObjectStorage["kv"];
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
-  constructor(kv: DurableObjectStorage["kv"]) {
-    this.#kv = kv;
-  }
+/**
+ * Whether a failed Google call may still have landed. A response Google itself rejected (any 4xx)
+ * definitely did not take effect; a server-side failure or a request that never produced a
+ * response leaves the outcome unknown, and none of these calls is ever auto-retried.
+ */
+function callMayHaveTakenEffect(error: unknown): boolean {
+  let status = httpStatusFromError(error);
+  return status === undefined || status >= 500;
+}
 
-  #actionKey(id: number): string {
-    return `pending:action:${id}`;
+/**
+ * Run one side-effecting Google call as a recorded action: authorize it, perform it, then report
+ * its outcome on the handle exactly once. An authorization refusal propagates before anything
+ * reaches Google; a failure is recorded and rethrown. `detail` names what the call produced (e.g.
+ * the new event's id) for the activity log.
+ */
+async function performAction<T>(
+    recorder: RpcStub<ActionRecorder>,
+    description: ActionDescription,
+    perform: () => Promise<T>,
+    detail?: (value: T) => string): Promise<T> {
+  let handle = await recorder.authorizeAction(description);
+  let result: T;
+  try {
+    result = await perform();
+  } catch (error) {
+    await handle.failed(errorMessage(error), callMayHaveTakenEffect(error));
+    throw error;
   }
-
-  submit(action: Action): number {
-    let id = this.#kv.get<number>("pending:nextActionId") ?? 1;
-    this.#kv.put("pending:nextActionId", id + 1);
-    this.#kv.put(this.#actionKey(id), action);
-    return id;
-  }
-
-  get(id: number): Action | undefined {
-    return this.#kv.get<Action>(this.#actionKey(id));
-  }
-
-  put(id: number, action: Action): void {
-    this.#kv.put(this.#actionKey(id), action);
-  }
-
-  list(): {id: number, action: Action}[] {
-    return [...this.#kv.list<Action>({prefix: "pending:action:"})]
-        .map(([key, action]) => ({id: Number(key.slice("pending:action:".length)), action}))
-        .filter(({id}) => Number.isFinite(id))
-        .toSorted((a, b) => a.id - b.id);
-  }
-
-  remove(id: number): void {
-    this.#kv.delete(this.#actionKey(id));
-  }
+  await handle.succeeded(detail?.(result));
+  return result;
 }
 
 // =======================================================================================
@@ -1223,48 +1221,34 @@ class PendingActionStore<Action> {
 //
 // Capability-based API: GmailSession returns GmailThread[] stubs, which return
 // GmailMessage[] stubs, etc. Each stub is an RpcTarget that can be passed across
-// Worker boundaries. Actions go through the approval queue; reads go through
-// authorizeObservation for audit logging.
+// Worker boundaries. Reads go through authorizeObservation; side-effecting calls go
+// through authorizeAction and then straight to Gmail.
 //
-// Approval model:
-//   submitAction (requires approval): all side-effecting actions — archive, trash,
-//                                     markRead, markUnread, send (reply / replyAll /
-//                                     forward all share the `send` action type)
-//   authorizeObservation (audit-only): all reads
+// Recording model:
+//   authorizeAction: all side-effecting calls — archive, trash, markRead, markUnread, and
+//                    the three outbound sends (send / reply / replyAll / forward)
+//   authorizeObservation: all reads
 //
-// All side-effecting actions go through the approval queue. Policy configuration
-// determines which actions are auto-approved vs. requiring human review — it is
-// not up to the gatekeeper to make that decision.
-//
-// Outbound-email semantics: send(), reply(), replyAll(), and forward() submit
-// compact semantic actions (recipients/body/source message ID). Nothing is
-// written to the user's mailbox before approval. applyAction() refetches any
-// immutable source message, builds the raw RFC 5322/MIME payload, and delivers
-// it via messages.send. There is therefore no pre-approval side effect, no
-// large MIME blob in action storage, and no draft to clean up on rejection.
+// Outbound-email semantics: send(), reply(), replyAll(), and forward() build the raw RFC
+// 5322/MIME payload from the immutable source message they already hold and deliver it via
+// messages.send inside the authorized action, so no MIME blob is ever stored.
 
-// ── Action types ────────────────────────────────────────────────────
+/** Mailbox organization: moving threads between folders and toggling their read state. */
+const ORGANIZE_MAIL_KIND: ActionKind = {
+  tag: "google.gmail.organize", label: "Organize Gmail threads",
+};
 
-type GmailAction =
-  | { type: "archive" | "trash" | "markRead" | "markUnread"; threadId: string }
-  | { type: "send"; to: string[]; subject: string; body: string }
-  | {
-      type: "reply";
-      sourceMessageId: string;
-      threadId: string;
-      body: string;
-      replyAll: boolean;
-      sourceWasSent: boolean;
-    }
-  | { type: "forward"; sourceMessageId: string; to: string[]; body?: string };
+/** Outbound delivery: a new message, a reply, or a forward, sent as the account owner. */
+const SEND_MAIL_KIND: ActionKind = {
+  tag: "google.gmail.send", label: "Send email",
+};
 
 // ── Session context ─────────────────────────────────────────────────
 // Shared context passed to all stubs created within a session.
 
 type GmailSessionContext = {
   gmailApi: GmailApi;
-  approvalQueue: RpcStub<ApprovalQueue>;
-  pendingActions: PendingActionStore<GmailAction>;
+  recorder: RpcStub<ActionRecorder>;
   // SESSION PATH: the raw search query passed to the Gmail API for listThreads/search.
   // This handles historical + new messages. See GmailGatekeeperImplProps.searchQuery.
   searchQuery: string | undefined;
@@ -1307,7 +1291,7 @@ class GmailSessionImpl extends RpcTarget implements GmailSession {
     this.#ctx = ctx;
   }
 
-  // TODO: The dup'd approvalQueue RPC stub should be disposed when the session ends.
+  // TODO: The dup'd recorder RPC stub should be disposed when the session ends.
 
   async listThreads(): Promise<Cursor<GmailThreadEntry>> {
     const scopeDescription = this.#ctx.searchQuery
@@ -1316,15 +1300,15 @@ class GmailSessionImpl extends RpcTarget implements GmailSession {
         ? "the connected Gmail label scope"
         : "the Gmail inbox";
 
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "List Gmail threads",
       description:
         `Create a cursor for the most recent threads in ${scopeDescription}.` +
         (this.#ctx.searchQuery
-          ? `\n\n${formatApprovalField("Search restriction", this.#ctx.searchQuery)}`
+          ? `\n\n${formatDetailField("Search restriction", this.#ctx.searchQuery)}`
           : "") +
         (this.#ctx.labelName
-          ? `\n\n${formatApprovalField("Required label", this.#ctx.labelName)}`
+          ? `\n\n${formatDetailField("Required label", this.#ctx.labelName)}`
           : ""),
     });
 
@@ -1345,13 +1329,13 @@ class GmailSessionImpl extends RpcTarget implements GmailSession {
       ? `(${this.#ctx.searchQuery}) (${query})`
       : query;
 
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "Search Gmail",
       description:
         "Create a cursor for Gmail threads matching this effective query.\n\n" +
-        formatApprovalField("Query", effectiveQuery) +
+        formatDetailField("Query", effectiveQuery) +
         (this.#ctx.labelName
-          ? `\n\n${formatApprovalField("Required label", this.#ctx.labelName)}`
+          ? `\n\n${formatDetailField("Required label", this.#ctx.labelName)}`
           : ""),
     });
 
@@ -1376,23 +1360,25 @@ class GmailSessionImpl extends RpcTarget implements GmailSession {
 
     validateOutboundInput(to, subject, body);
     const message = this.#ctx.gmailApi.buildSendRaw(to, subject, body);
-    await submitGmailAction(
-      this.#ctx,
-      { type: "send", to: message.to, subject: message.subject, body: message.body },
+    await performAction(
+      this.#ctx.recorder,
       {
-        title: sanitizeApprovalTitle(`Send email: ${message.subject}`),
+        title: sanitizeActionTitle(`Send email: ${message.subject}`),
         description: describeOutboundMessage("Send a new email.", message),
-      });
+        actionKind: SEND_MAIL_KIND,
+      },
+      () => this.#ctx.gmailApi.sendRawMessage(message.raw),
+      sent => `Message id: ${sent.id}`);
   }
 }
 
-function sanitizeApprovalTitle(value: string): string {
+function sanitizeActionTitle(value: string): string {
   return value.replace(/[\r\n]+/g, " ").slice(0, 200);
 }
 
-function formatApprovalField(label: string, value: string): string {
+function formatDetailField(label: string, value: string): string {
   // Use a fence longer than any backtick run in the value, so untrusted email
-  // fields render verbatim and cannot forge surrounding approval Markdown.
+  // fields render verbatim and cannot forge surrounding activity-log Markdown.
   let fence = "```";
   while (value.includes(fence)) fence += "`";
   return `**${label}:**\n\n${fence}\n${value}\n${fence}`;
@@ -1400,32 +1386,16 @@ function formatApprovalField(label: string, value: string): string {
 
 function describeOutboundMessage(intro: string, message: GmailOutboundMessage): string {
   let fields = [
-    formatApprovalField("From", message.from),
-    formatApprovalField("To", message.to.join(", ")),
-    ...(message.cc.length > 0 ? [formatApprovalField("Cc", message.cc.join(", "))] : []),
-    formatApprovalField("Subject", message.subject),
-    formatApprovalField("Body", message.body),
-    ...message.attachments.map(attachment => formatApprovalField(
+    formatDetailField("From", message.from),
+    formatDetailField("To", message.to.join(", ")),
+    ...(message.cc.length > 0 ? [formatDetailField("Cc", message.cc.join(", "))] : []),
+    formatDetailField("Subject", message.subject),
+    formatDetailField("Body", message.body),
+    ...message.attachments.map(attachment => formatDetailField(
       "Attachment",
       `${attachment.filename} (${attachment.contentType})\n${attachment.description}`)),
   ];
   return `${intro}\n\n${fields.join("\n\n")}`;
-}
-
-async function submitGmailAction(
-    ctx: GmailSessionContext,
-    action: GmailAction,
-    desc: { title: string; description: string }): Promise<void> {
-  if (ctx.pendingActions.list().length >= 100) {
-    throw new Error("Too many pending Gmail actions. Resolve existing actions before adding more.");
-  }
-  let actionId = ctx.pendingActions.submit(action);
-  try {
-    await ctx.approvalQueue.submitAction(actionId, { ...desc, implementsRevert: false });
-  } catch (err) {
-    ctx.pendingActions.remove(actionId);
-    throw err;
-  }
 }
 
 // ── GmailThreadCursorImpl ───────────────────────────────────────────
@@ -1500,11 +1470,11 @@ class GmailThreadCursorImpl extends RpcTarget implements Cursor<GmailThreadEntry
       entries.push(...batch);
     }
 
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read ${entries.length} Gmail threads`,
       description:
         `Fetch the next page of Gmail threads.\n\n` +
-        formatApprovalField("Subjects", entries.map(entry => entry.info.subject).join("\n")),
+        formatDetailField("Subjects", entries.map(entry => entry.info.subject).join("\n")),
     });
 
     this.#pageToken = pageToken;
@@ -1538,8 +1508,8 @@ class GmailThreadStub extends RpcTarget implements GmailThread {
   async getMetadata(): Promise<GmailThreadInfo> {
     const info = await this.#ensureInfo();
 
-    await this.#ctx.approvalQueue.authorizeObservation({
-      title: sanitizeApprovalTitle(`Thread info: ${info.subject}`),
+    await this.#ctx.recorder.authorizeObservation({
+      title: sanitizeActionTitle(`Thread info: ${info.subject}`),
       description: `Get metadata for thread ${this.#threadId}.`,
     });
 
@@ -1549,8 +1519,8 @@ class GmailThreadStub extends RpcTarget implements GmailThread {
   async messages(): Promise<GmailMessage[]> {
     const thread = await this.#ctx.gmailApi.getThread(this.#threadId);
 
-    await this.#ctx.approvalQueue.authorizeObservation({
-      title: sanitizeApprovalTitle(`Get messages: ${thread.snippet || "(no snippet)"}`),
+    await this.#ctx.recorder.authorizeObservation({
+      title: sanitizeActionTitle(`Get messages: ${thread.snippet || "(no snippet)"}`),
       description: `Get all messages in thread ${this.#threadId}.`,
     });
 
@@ -1566,12 +1536,12 @@ class GmailThreadStub extends RpcTarget implements GmailThread {
     const [normalizedAddress] = normalizeEmailRecipients([address]);
     const thread = await this.#ctx.gmailApi.getThread(this.#threadId);
 
-    await this.#ctx.approvalQueue.authorizeObservation({
-      title: sanitizeApprovalTitle(`Messages involving ${normalizedAddress}`),
+    await this.#ctx.recorder.authorizeObservation({
+      title: sanitizeActionTitle(`Messages involving ${normalizedAddress}`),
       description:
         "List messages in this thread involving the requested address.\n\n" +
-        formatApprovalField("Address", normalizedAddress) + "\n\n" +
-        formatApprovalField("Thread snippet", thread.snippet || "(no snippet)"),
+        formatDetailField("Address", normalizedAddress) + "\n\n" +
+        formatDetailField("Thread snippet", thread.snippet || "(no snippet)"),
     });
 
     if (thread.messages.length > MAX_GMAIL_VISIBLE_THREAD_MESSAGES) {
@@ -1602,44 +1572,53 @@ class GmailThreadStub extends RpcTarget implements GmailThread {
     return visible;
   }
 
-  async #submitThreadAction(
-      type: "archive" | "trash" | "markRead" | "markUnread",
+  async #organize(
+      perform: () => Promise<void>,
       titlePrefix: string,
       intro: string): Promise<void> {
     const info = await this.#ensureInfo();
     const subject = info.subject || "(no subject)";
-    await this.#ctx.approvalQueue.authorizeObservation({
-      title: sanitizeApprovalTitle(`Read thread before ${titlePrefix.toLowerCase()}: ${subject}`),
+    await this.#ctx.recorder.authorizeObservation({
+      title: sanitizeActionTitle(`Read thread before ${titlePrefix.toLowerCase()}: ${subject}`),
       description: "Read the current Gmail thread metadata needed to prepare this action.",
     });
-    await submitGmailAction(
-      this.#ctx,
-      { type, threadId: this.#threadId },
+    await performAction(
+      this.#ctx.recorder,
       {
-        title: sanitizeApprovalTitle(`${titlePrefix}: ${subject}`),
+        title: sanitizeActionTitle(`${titlePrefix}: ${subject}`),
         description:
           `${intro}\n\n` +
-          formatApprovalField("Subject", subject) +
+          formatDetailField("Subject", subject) +
           (info.snippet !== undefined
-            ? `\n\n${formatApprovalField("Snippet", info.snippet)}`
+            ? `\n\n${formatDetailField("Snippet", info.snippet)}`
             : ""),
-      });
+        actionKind: ORGANIZE_MAIL_KIND,
+      },
+      perform);
   }
 
   async archive(): Promise<void> {
-    await this.#submitThreadAction("archive", "Archive", "Remove this thread from the inbox.");
+    await this.#organize(
+      () => this.#ctx.gmailApi.modifyThread(this.#threadId, [], ["INBOX"]),
+      "Archive", "Remove this thread from the inbox.");
   }
 
   async trash(): Promise<void> {
-    await this.#submitThreadAction("trash", "Trash", "Move this thread to trash.");
+    await this.#organize(
+      () => this.#ctx.gmailApi.trashThread(this.#threadId),
+      "Trash", "Move this thread to trash.");
   }
 
   async markRead(): Promise<void> {
-    await this.#submitThreadAction("markRead", "Mark read", "Mark every message in this thread as read.");
+    await this.#organize(
+      () => this.#ctx.gmailApi.modifyThread(this.#threadId, [], ["UNREAD"]),
+      "Mark read", "Mark every message in this thread as read.");
   }
 
   async markUnread(): Promise<void> {
-    await this.#submitThreadAction("markUnread", "Mark unread", "Mark every message in this thread as unread.");
+    await this.#organize(
+      () => this.#ctx.gmailApi.modifyThread(this.#threadId, ["UNREAD"], []),
+      "Mark unread", "Mark every message in this thread as unread.");
   }
 }
 
@@ -1671,8 +1650,8 @@ class GmailMessageStub extends RpcTarget implements GmailMessage {
     const raw = await this.#getRaw();
     const rawInfo = await this.#ctx.gmailApi.parseMessageInfo(raw);
 
-    await this.#ctx.approvalQueue.authorizeObservation({
-      title: sanitizeApprovalTitle(`Message info: ${rawInfo.subject}`),
+    await this.#ctx.recorder.authorizeObservation({
+      title: sanitizeActionTitle(`Message info: ${rawInfo.subject}`),
       description: `Get metadata for message ${this.#messageId}.`,
     });
 
@@ -1690,7 +1669,7 @@ class GmailMessageStub extends RpcTarget implements GmailMessage {
   }
 
   async thread(): Promise<GmailThread> {
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Get thread for message`,
       description: `Navigate from message ${this.#messageId} to its parent thread.`,
     });
@@ -1701,8 +1680,8 @@ class GmailMessageStub extends RpcTarget implements GmailMessage {
     const raw = await this.#getRaw();
     const { info, content } = await this.#ctx.gmailApi.parseMessage(raw);
 
-    await this.#ctx.approvalQueue.authorizeObservation({
-      title: sanitizeApprovalTitle(`Read message: ${info.subject}`),
+    await this.#ctx.recorder.authorizeObservation({
+      title: sanitizeActionTitle(`Read message: ${info.subject}`),
       description: `Get body content of message ${this.#messageId}.`,
     });
 
@@ -1714,26 +1693,21 @@ class GmailMessageStub extends RpcTarget implements GmailMessage {
       throw new Error(`Email body must be at most ${MAX_GMAIL_BODY_BYTES} bytes.`);
     }
     const original = await this.#getRaw();
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "Read message headers to prepare reply",
       description: "Read the source message headers needed to calculate reply recipients and threading.",
     });
     const message = await this.#ctx.gmailApi.buildReplyRaw(original, body, false);
     validateOutboundInput([...message.to, ...message.cc], message.subject, message.body);
-    await submitGmailAction(
-      this.#ctx,
+    await performAction(
+      this.#ctx.recorder,
       {
-        type: "reply",
-        sourceMessageId: this.#messageId,
-        threadId: this.#threadId,
-        body,
-        replyAll: false,
-        sourceWasSent: message.sourceWasSent,
-      },
-      {
-        title: sanitizeApprovalTitle(`Reply: ${message.subject}`),
+        title: sanitizeActionTitle(`Reply: ${message.subject}`),
         description: describeOutboundMessage("Send a reply.", message),
-      });
+        actionKind: SEND_MAIL_KIND,
+      },
+      () => this.#ctx.gmailApi.sendRawMessage(message.raw, this.#threadId),
+      sent => `Message id: ${sent.id}`);
   }
 
   async replyAll(body: string): Promise<void> {
@@ -1741,26 +1715,21 @@ class GmailMessageStub extends RpcTarget implements GmailMessage {
       throw new Error(`Email body must be at most ${MAX_GMAIL_BODY_BYTES} bytes.`);
     }
     const original = await this.#getRaw();
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "Read message headers to prepare reply-all",
       description: "Read the source message headers needed to calculate reply-all recipients and threading.",
     });
     const message = await this.#ctx.gmailApi.buildReplyRaw(original, body, true);
     validateOutboundInput([...message.to, ...message.cc], message.subject, message.body);
-    await submitGmailAction(
-      this.#ctx,
+    await performAction(
+      this.#ctx.recorder,
       {
-        type: "reply",
-        sourceMessageId: this.#messageId,
-        threadId: this.#threadId,
-        body,
-        replyAll: true,
-        sourceWasSent: message.sourceWasSent,
-      },
-      {
-        title: sanitizeApprovalTitle(`Reply all: ${message.subject}`),
+        title: sanitizeActionTitle(`Reply all: ${message.subject}`),
         description: describeOutboundMessage("Send a reply to all recipients.", message),
-      });
+        actionKind: SEND_MAIL_KIND,
+      },
+      () => this.#ctx.gmailApi.sendRawMessage(message.raw, this.#threadId),
+      sent => `Message id: ${sent.id}`);
   }
 
   async forward(to: string[], body?: string): Promise<void> {
@@ -1772,21 +1741,23 @@ class GmailMessageStub extends RpcTarget implements GmailMessage {
       throw new Error(`Email body must be at most ${MAX_GMAIL_BODY_BYTES} bytes.`);
     }
     const original = await this.#getRaw();
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "Read message to prepare forward",
       description: "Read the complete source message and attachment metadata needed to prepare a forward.",
     });
     const message = await this.#ctx.gmailApi.buildForwardRaw(original, normalizedTo, body);
     validateOutboundInput(message.to, message.subject, message.body);
-    await submitGmailAction(
-      this.#ctx,
-      { type: "forward", sourceMessageId: this.#messageId, to: normalizedTo, body },
+    await performAction(
+      this.#ctx.recorder,
       {
-        title: sanitizeApprovalTitle(`Forward: ${message.subject}`),
+        title: sanitizeActionTitle(`Forward: ${message.subject}`),
         description: describeOutboundMessage(
           "Forward an existing message. The complete original email is attached losslessly.",
           message),
-      });
+        actionKind: SEND_MAIL_KIND,
+      },
+      () => this.#ctx.gmailApi.sendRawMessage(message.raw),
+      sent => `Message id: ${sent.id}`);
   }
 }
 
@@ -1865,11 +1836,36 @@ export class GmailGatekeeperImpl extends DurableObject<Env, GmailGatekeeperImplP
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions() {
-    return [];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return [
+      {
+        kind: ORGANIZE_MAIL_KIND,
+        summary: "Archive, trash, and change the read state of your threads",
+        risk: {
+          // Labels and the trash are restorable from the Gmail UI, but only by a human, and a
+          // thread's original label set is not recorded anywhere.
+          reversible: "manual",
+          reach: "modifies-content",
+          audience: "private",
+          freeform: false,
+        },
+      },
+      {
+        kind: SEND_MAIL_KIND,
+        summary: "Send mail as you, including replies and forwards",
+        risk: {
+          // Delivered mail cannot be recalled, and a forward carries the entire original
+          // message to a new recipient.
+          reversible: "no",
+          reach: "acts-on-world",
+          audience: "external",
+          freeform: true,
+        },
+      },
+    ];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>)
+  async startSession(recorder: RpcStub<ActionRecorder>)
       : Promise<GmailSession> {
     let selfEmail = await this.#getSelfEmail();
     let gmailApi = new GmailApi(selfEmail, opts => this.#getAccessToken(opts));
@@ -1892,8 +1888,7 @@ export class GmailGatekeeperImpl extends DurableObject<Env, GmailGatekeeperImplP
 
     const ctx: GmailSessionContext = {
       gmailApi,
-      approvalQueue: approvalQueue.dup(),
-      pendingActions: new PendingActionStore<GmailAction>(this.ctx.storage.kv),
+      recorder: recorder.dup(),
       searchQuery: this.ctx.props.searchQuery,
       labelId,
       labelName: this.ctx.props.labelName,
@@ -1902,67 +1897,6 @@ export class GmailGatekeeperImpl extends DurableObject<Env, GmailGatekeeperImplP
     };
 
     return new GmailSessionImpl(ctx);
-  }
-
-  /** --------------------------------------------------------------------------- */
-  async applyAction(actionId: number): Promise<void> {
-    const pendingActions = new PendingActionStore<GmailAction>(this.ctx.storage.kv);
-    const action = pendingActions.get(actionId);
-    if (!action) throw new Error(`Unknown pending Gmail action: ${actionId}`);
-
-    const selfEmail = await this.#getSelfEmail();
-    const gmailApi = new GmailApi(selfEmail, opts => this.#getAccessToken(opts));
-
-    switch (action.type) {
-      case "archive":
-        await gmailApi.modifyThread(action.threadId, [], ["INBOX"]);
-        break;
-      case "trash":
-        await gmailApi.trashThread(action.threadId);
-        break;
-      case "markRead":
-        await gmailApi.modifyThread(action.threadId, [], ["UNREAD"]);
-        break;
-      case "markUnread":
-        await gmailApi.modifyThread(action.threadId, ["UNREAD"], []);
-        break;
-      case "send": {
-        const message = gmailApi.buildSendRaw(action.to, action.subject, action.body);
-        await gmailApi.sendRawMessage(message.raw);
-        break;
-      }
-      case "reply": {
-        const original = await gmailApi.getMessage(action.sourceMessageId);
-        const message = await gmailApi.buildReplyRaw(
-          original, action.body, action.replyAll, action.sourceWasSent);
-        await gmailApi.sendRawMessage(message.raw, action.threadId);
-        break;
-      }
-      case "forward": {
-        const original = await gmailApi.getMessage(action.sourceMessageId);
-        const message = await gmailApi.buildForwardRaw(original, action.to, action.body);
-        await gmailApi.sendRawMessage(message.raw);
-        break;
-      }
-      default:
-        action satisfies never;
-        throw new Error(`unknown action type: ${(action as {type: string}).type}`);
-    }
-
-    pendingActions.remove(actionId);
-  }
-
-  async rejectAction(actionId: number): Promise<void | {restart?: boolean}> {
-    const pendingActions = new PendingActionStore<GmailAction>(this.ctx.storage.kv);
-    if (!pendingActions.get(actionId)) {
-      throw new Error(`Unknown pending Gmail action: ${actionId}`);
-    }
-    pendingActions.remove(actionId);
-  }
-
-  revertAction(action: number):
-      Promise<void | {message?: string, canRetry?: boolean, restart?: boolean}> {
-    throw new Error("revert is not implemented");
   }
 
   /**
@@ -1986,193 +1920,6 @@ export class GmailGatekeeperImpl extends DurableObject<Env, GmailGatekeeperImplP
 // Google Docs Gatekeeper
 // =======================================================================================
 
-type GoogleDocActionBase = {
-  documentId: string;
-  submittedAt: number;
-  baseRevisionId: string;
-  invalidatedReason?: string;
-}
-
-type GoogleDocReplaceAction = GoogleDocActionBase & {
-  type: "replaceText";
-  oldMarkdown: string;
-  newMarkdown: string;
-}
-
-type GoogleDocAppendAction = GoogleDocActionBase & {
-  type: "appendText";
-  markdown: string;
-}
-
-type GoogleDocAction = GoogleDocReplaceAction | GoogleDocAppendAction;
-
-type GoogleDocPendingAction = {id: number, action: GoogleDocAction};
-
-type GoogleDocSimulatedContentCache = {
-  baseRevisionId: string;
-  pendingFingerprint: string;
-  markdown: string;
-  pendingActions: GoogleDocAction[];
-  computedAt: number;
-}
-
-type GoogleDocSimulationCacheHolder = {
-  current?: GoogleDocSimulatedContentCache;
-}
-
-function googleDocPendingFingerprint(pending: GoogleDocPendingAction[]): string {
-  return JSON.stringify(pending);
-}
-
-function previewMarkdown(markdown: string, maxLength: number): string {
-  return markdown.length > maxLength ? markdown.slice(0, maxLength) + "..." : markdown;
-}
-
-function findUniqueMarkdown(markdown: string, oldMarkdown: string, operation: string): number {
-  if (oldMarkdown.length === 0) {
-    throw new Error(`${operation}: oldMarkdown must not be empty.`);
-  }
-
-  let index = markdown.indexOf(oldMarkdown);
-  if (index === -1) {
-    throw new Error(
-      `${operation}: oldMarkdown was not found in the current simulated document. ` +
-      `Make sure the text exactly matches content returned by getContent().`);
-  }
-
-  let secondIndex = markdown.indexOf(oldMarkdown, index + 1);
-  if (secondIndex !== -1) {
-    throw new Error(
-      `${operation}: oldMarkdown matches multiple locations in the current simulated document. ` +
-      `Include more surrounding context to make the match unique.`);
-  }
-
-  return index;
-}
-
-function applyMarkdownReplacement(
-  markdown: string,
-  oldMarkdown: string,
-  newMarkdown: string,
-  operation: string,
-): string {
-  if (oldMarkdown === newMarkdown) {
-    return markdown;
-  }
-
-  let index = findUniqueMarkdown(markdown, oldMarkdown, operation);
-  return markdown.slice(0, index) + newMarkdown + markdown.slice(index + oldMarkdown.length);
-}
-
-function appendMarkdownForSimulation(markdown: string, appendedMarkdown: string): string {
-  let normalizedAppend = appendedMarkdown.endsWith("\n") ? appendedMarkdown : appendedMarkdown + "\n";
-
-  if (markdown.length === 0) {
-    return normalizedAppend;
-  }
-
-  if (markdown.endsWith("\n\n")) {
-    return markdown + normalizedAppend;
-  }
-
-  if (markdown.endsWith("\n")) {
-    return markdown + "\n" + normalizedAppend;
-  }
-
-  return markdown + "\n\n" + normalizedAppend;
-}
-
-function applyGoogleDocActionToMarkdown(markdown: string, action: GoogleDocAction): string {
-  if (action.invalidatedReason) {
-    throw new Error(action.invalidatedReason);
-  }
-
-  switch (action.type) {
-    case "replaceText":
-      return applyMarkdownReplacement(
-          markdown, action.oldMarkdown, action.newMarkdown, "replaceText");
-    case "appendText":
-      return appendMarkdownForSimulation(markdown, action.markdown);
-    default:
-      action satisfies never;
-      throw new Error(`unknown action type: ${(action as any).type}`);
-  }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function invalidateGoogleDocAction(
-  pendingActions: PendingActionStore<GoogleDocAction>,
-  pending: GoogleDocPendingAction,
-  reason: string,
-): void {
-  if (!pending.action.invalidatedReason) {
-    pending.action.invalidatedReason = reason;
-    pendingActions.put(pending.id, pending.action);
-  }
-}
-
-function invalidateUnreplayableGoogleDocActions(
-  pendingActions: PendingActionStore<GoogleDocAction>,
-  baseMarkdown: string,
-  pending: GoogleDocPendingAction[],
-  context: string,
-): {markdown: string, pendingActions: GoogleDocAction[]} {
-  let markdown = baseMarkdown;
-  let replayedActions: GoogleDocAction[] = [];
-  for (let i = 0; i < pending.length; i++) {
-    let action = pending[i].action;
-    if (action.invalidatedReason) {
-      continue;
-    }
-
-    try {
-      markdown = applyGoogleDocActionToMarkdown(markdown, action);
-    } catch (error) {
-      invalidateGoogleDocAction(
-          pendingActions,
-          pending[i],
-          `${context}: ${errorMessage(error)} This edit was dropped from the document. ` +
-          `Reject it and retry if it is still needed.`);
-      continue;
-    }
-    replayedActions.push(action);
-  }
-
-  return {markdown, pendingActions: replayedActions};
-}
-
-function materializeGoogleDocAction(snapshot: DocSnapshot, action: GoogleDocAction): any[] {
-  if (action.invalidatedReason) {
-    throw new Error(action.invalidatedReason);
-  }
-
-  switch (action.type) {
-    case "replaceText": {
-      let matchStart = findUniqueMarkdown(
-          snapshot.markdown, action.oldMarkdown, "applyAction(replaceText)");
-      let result = computeReplaceOperations(
-          snapshot.sourceMap,
-          snapshot.markdown,
-          matchStart,
-          matchStart + action.oldMarkdown.length,
-          action.newMarkdown);
-      return result.requests;
-    }
-
-    case "appendText": {
-      let insertAt = snapshot.bodyEndIndex - 1;
-      return markdownToDocRequests("\n" + action.markdown, insertAt);
-    }
-
-    default:
-      action satisfies never;
-      throw new Error(`unknown action type: ${(action as any).type}`);
-  }
-}
-
 type GoogleDocGatekeeperImplProps = {
   userObjectId: string;
   documentId: string;
@@ -2184,11 +1931,40 @@ const EDIT_DOCUMENT_ACTION: ActionKind = {
   label: "Document edits",
 };
 
+function previewMarkdown(markdown: string, maxLength: number): string {
+  return markdown.length > maxLength ? markdown.slice(0, maxLength) + "..." : markdown;
+}
+
+/**
+ * Locate `oldMarkdown` in the document's Markdown, requiring exactly one match: an edit that
+ * could land in more than one place is refused rather than guessed at.
+ */
+function findUniqueMarkdown(markdown: string, oldMarkdown: string, operation: string): number {
+  if (oldMarkdown.length === 0) {
+    throw new Error(`${operation}: oldMarkdown must not be empty.`);
+  }
+
+  let index = markdown.indexOf(oldMarkdown);
+  if (index === -1) {
+    throw new Error(
+      `${operation}: oldMarkdown was not found in the document. ` +
+      `Make sure the text exactly matches content returned by getContent().`);
+  }
+
+  let secondIndex = markdown.indexOf(oldMarkdown, index + 1);
+  if (secondIndex !== -1) {
+    throw new Error(
+      `${operation}: oldMarkdown matches multiple locations in the document. ` +
+      `Include more surrounding context to make the match unique.`);
+  }
+
+  return index;
+}
+
 @validateRpc()
 export class GoogleDocGatekeeperImpl
     extends DurableObject<Env, GoogleDocGatekeeperImplProps>
     implements Gatekeeper<GoogleDocSession> {
-  #simulationCache: GoogleDocSimulationCacheHolder = {};
   #tokens = new AccessTokenCache(opts => {
     let stub: DurableObjectStub<UserAccount> = this.ctx.exports.UserAccount.get(
         this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId));
@@ -2215,114 +1991,31 @@ export class GoogleDocGatekeeperImpl
     return DOCS_TYPES_CODE;
   }
 
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
-    return [EDIT_DOCUMENT_ACTION];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return [
+      {
+        kind: EDIT_DOCUMENT_ACTION,
+        summary: "Edit the text of the connected document",
+        risk: {
+          // Docs keeps full version history, so any edit can be undone — but only by a person
+          // opening the document's history. Anyone the doc is shared with sees the edit.
+          reversible: "manual",
+          reach: "modifies-content",
+          audience: "shared",
+          freeform: true,
+        },
+      },
+    ];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>)
+  async startSession(recorder: RpcStub<ActionRecorder>)
       : Promise<GoogleDocSession> {
     let api = new GoogleDocsApi(opts => this.#getAccessToken(opts));
-    let pendingActions = new PendingActionStore<GoogleDocAction>(this.ctx.storage.kv);
     return new GoogleDocSessionImpl(
         api,
         this.ctx.props.documentId,
-        approvalQueue.dup(),
-        pendingActions,
-        this.ctx.storage,
-        this.#simulationCache);
-  }
-
-  async applyAction(actionId: number): Promise<void> {
-    let pendingActions = new PendingActionStore<GoogleDocAction>(this.ctx.storage.kv);
-    let pending = pendingActions.list();
-    let pendingIndex = pending.findIndex(({id}) => id === actionId);
-    if (pendingIndex === -1) {
-      throw new Error(`Unknown pending Google Doc action: ${actionId}`);
-    }
-    let pendingRecord = pending[pendingIndex];
-
-    let action = pendingRecord.action;
-    if (action.invalidatedReason) {
-      pendingActions.remove(actionId);
-      this.#simulationCache.current = undefined;
-      return;
-    }
-
-    let firstPending = pending.find(({action}) => !action.invalidatedReason);
-    if (firstPending?.id !== actionId) {
-      throw new Error(
-        `Google Doc edits must be approved in order. Approve earlier edit ` +
-        `${firstPending?.id} before edit ${actionId}.`);
-    }
-
-    let api = new GoogleDocsApi(opts => this.#getAccessToken(opts));
-    let doc = await api.getDocument(action.documentId);
-    let snapshot = docToMarkdown(doc);
-    let requests: any[];
-    try {
-      requests = materializeGoogleDocAction(snapshot, action);
-    } catch (error) {
-      logger.error("dropping stale Google Doc action during apply", {
-        event: "google.doc.action.apply.stale.dropped",
-        actionId, error,
-      });
-      pendingActions.remove(actionId);
-      this.#simulationCache.current = undefined;
-      await this.ctx.storage.put("docSnapshot", snapshot);
-      invalidateUnreplayableGoogleDocActions(
-          pendingActions,
-          snapshot.markdown,
-          pending.slice(pendingIndex + 1),
-          `Pending Google Doc edits could not be replayed after edit ${actionId} was dropped`);
-      return;
-    }
-    if (requests.length > 0) {
-      await api.batchUpdate(action.documentId, requests, snapshot.revisionId);
-    }
-    pendingActions.remove(actionId);
-    this.#simulationCache.current = undefined;
-
-    try {
-      let refreshedSnapshot = snapshot;
-      if (requests.length > 0) {
-        refreshedSnapshot = docToMarkdown(await api.getDocument(action.documentId));
-      }
-      await this.ctx.storage.put("docSnapshot", refreshedSnapshot);
-      invalidateUnreplayableGoogleDocActions(
-          pendingActions,
-          refreshedSnapshot.markdown,
-          pending.slice(pendingIndex + 1),
-          `Pending Google Doc edits could not be replayed after edit ${actionId} was applied`);
-    } catch (error) {
-      logger.warn("failed to refresh Google Doc simulation after applying action", {
-        event: "google.doc.simulation.refresh.failed", error,
-      });
-      await this.ctx.storage.delete("docSnapshot");
-    }
-  }
-
-  async rejectAction(actionId: number): Promise<void | {restart?: boolean}> {
-    let pendingActions = new PendingActionStore<GoogleDocAction>(this.ctx.storage.kv);
-    let pending = pendingActions.list();
-    let index = pending.findIndex(({id}) => id === actionId);
-    if (index === -1) {
-      throw new Error(`Unknown pending Google Doc action: ${actionId}`);
-    }
-
-    let wasActive = !pending[index].action.invalidatedReason;
-
-    pendingActions.remove(actionId);
-    this.#simulationCache.current = undefined;
-    await this.ctx.storage.delete("docSnapshot");
-
-    if (wasActive && index < pending.length - 1) {
-      return {restart: true};
-    }
-  }
-
-  revertAction(action: number):
-      Promise<void | {message?: string, canRetry?: boolean, restart?: boolean}> {
-    throw new Error("revert is not implemented");
+        recorder.dup(),
+        this.ctx.storage);
   }
 
   /**
@@ -2348,43 +2041,35 @@ export class GoogleDocGatekeeperImpl
 class GoogleDocSessionImpl extends RpcTarget implements GoogleDocSession {
   #docsApi: GoogleDocsApi;
   #documentId: string;
-  #approvalQueue: RpcStub<ApprovalQueue>;
-  #pendingActions: PendingActionStore<GoogleDocAction>;
+  #recorder: RpcStub<ActionRecorder>;
   #storage: DurableObjectStorage;
-  #simulationCache: GoogleDocSimulationCacheHolder;
 
   constructor(
     docsApi: GoogleDocsApi,
     documentId: string,
-    approvalQueue: RpcStub<ApprovalQueue>,
-    pendingActions: PendingActionStore<GoogleDocAction>,
+    recorder: RpcStub<ActionRecorder>,
     storage: DurableObjectStorage,
-    simulationCache: GoogleDocSimulationCacheHolder,
   ) {
     super();
     this.#docsApi = docsApi;
     this.#documentId = documentId;
-    this.#approvalQueue = approvalQueue;
-    this.#pendingActions = pendingActions;
+    this.#recorder = recorder;
     this.#storage = storage;
-    this.#simulationCache = simulationCache;
   }
 
-  async #getSnapshot(forceRefresh?: boolean): Promise<DocSnapshot> {
-    if (!forceRefresh) {
-      let cached = await this.#storage.get<DocSnapshot>("docSnapshot");
-      if (cached) {
-        let age = Date.now() - cached.fetchedAt;
-        if (age < 10_000) {
-          return cached;
-        }
-        // TTL expired — check if document has changed.
-        let currentRevisionId = await this.#docsApi.getRevisionId(this.#documentId);
-        if (currentRevisionId === cached.revisionId) {
-          cached.fetchedAt = Date.now();
-          await this.#storage.put("docSnapshot", cached);
-          return cached;
-        }
+  async #getSnapshot(): Promise<DocSnapshot> {
+    let cached = await this.#storage.get<DocSnapshot>("docSnapshot");
+    if (cached) {
+      let age = Date.now() - cached.fetchedAt;
+      if (age < 10_000) {
+        return cached;
+      }
+      // TTL expired — check if document has changed.
+      let currentRevisionId = await this.#docsApi.getRevisionId(this.#documentId);
+      if (currentRevisionId === cached.revisionId) {
+        cached.fetchedAt = Date.now();
+        await this.#storage.put("docSnapshot", cached);
+        return cached;
       }
     }
 
@@ -2395,43 +2080,10 @@ class GoogleDocSessionImpl extends RpcTarget implements GoogleDocSession {
     return snapshot;
   }
 
-  async #getSimulatedContent(): Promise<{
-    snapshot: DocSnapshot,
-    markdown: string,
-    pendingActions: GoogleDocAction[],
-  }> {
-    let snapshot = await this.#getSnapshot();
-    let pending = this.#pendingActions.list();
-    let pendingFingerprint = googleDocPendingFingerprint(pending);
-    let cached = this.#simulationCache.current;
-    if (cached && cached.baseRevisionId === snapshot.revisionId &&
-        cached.pendingFingerprint === pendingFingerprint) {
-      return {
-        snapshot,
-        markdown: cached.markdown,
-        pendingActions: cached.pendingActions,
-      };
-    }
-
-    let {markdown, pendingActions} = invalidateUnreplayableGoogleDocActions(
-        this.#pendingActions,
-        snapshot.markdown,
-        pending,
-        "Pending Google Doc edit could not be replayed against the current document");
-    this.#simulationCache.current = {
-      baseRevisionId: snapshot.revisionId,
-      pendingFingerprint: googleDocPendingFingerprint(this.#pendingActions.list()),
-      markdown,
-      pendingActions,
-      computedAt: Date.now(),
-    };
-    return {snapshot, markdown, pendingActions};
-  }
-
   async getMetadata(): Promise<DocMetadata> {
-    let {snapshot, pendingActions} = await this.#getSimulatedContent();
+    let snapshot = await this.#getSnapshot();
 
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: "Read Google Doc metadata",
       description: "Read the title and modification time of the document.",
     });
@@ -2439,23 +2091,28 @@ class GoogleDocSessionImpl extends RpcTarget implements GoogleDocSession {
     // The Docs API doesn't return lastModified directly (that's a Drive API field).
     // For now, use the fetch timestamp as an approximation.
     // TODO: Use Drive API files.get for actual modifiedTime.
-    let lastModified = pendingActions.reduce(
-        (latest, action) => Math.max(latest, action.submittedAt), snapshot.fetchedAt);
     return {
       title: snapshot.title ?? "Untitled document",
-      lastModified: new Date(lastModified),
+      lastModified: new Date(snapshot.fetchedAt),
     };
   }
 
   async getContent(): Promise<string> {
-    let {markdown} = await this.#getSimulatedContent();
+    let snapshot = await this.#getSnapshot();
 
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: "Read Google Doc content",
-      description: "Read the full simulated content of the document as Markdown.",
+      description: "Read the full content of the document as Markdown.",
     });
 
-    return markdown;
+    return snapshot.markdown;
+  }
+
+  /** Send `requests` to Docs, dropping the cached snapshot so the next read re-fetches. */
+  async #batchUpdate(snapshot: DocSnapshot, requests: any[]): Promise<void> {
+    if (requests.length === 0) return;
+    await this.#docsApi.batchUpdate(this.#documentId, requests, snapshot.revisionId);
+    await this.#storage.delete("docSnapshot");
   }
 
   async replaceText(oldMarkdown: string, newMarkdown: string): Promise<void> {
@@ -2463,71 +2120,41 @@ class GoogleDocSessionImpl extends RpcTarget implements GoogleDocSession {
       return;
     }
 
-    let {snapshot, markdown} = await this.#getSimulatedContent();
-    findUniqueMarkdown(markdown, oldMarkdown, "replaceText");
+    let snapshot = await this.#getSnapshot();
+    let matchStart = findUniqueMarkdown(snapshot.markdown, oldMarkdown, "replaceText");
+    let {requests} = computeReplaceOperations(
+        snapshot.sourceMap,
+        snapshot.markdown,
+        matchStart,
+        matchStart + oldMarkdown.length,
+        newMarkdown);
 
-    let action: GoogleDocAction = {
-      type: "replaceText",
-      documentId: this.#documentId,
-      submittedAt: Date.now(),
-      baseRevisionId: snapshot.revisionId,
-      oldMarkdown,
-      newMarkdown,
-    };
-
-    let oldPreview = previewMarkdown(oldMarkdown, 80);
-    let newPreview = previewMarkdown(newMarkdown, 80);
-    let actionId = this.#pendingActions.submit(action);
-    this.#simulationCache.current = undefined;
-
-    try {
-      await this.#approvalQueue.submitAction(actionId, {
+    await performAction(
+      this.#recorder,
+      {
         title: "Edit Google Doc",
         description:
           `Replace text in the document.\n\n` +
-          `**Old:** ${oldPreview}\n\n` +
-          `**New:** ${newPreview}`,
-        implementsRevert: false,
-        // Group all document edits under one tag
+          `**Old:** ${previewMarkdown(oldMarkdown, 80)}\n\n` +
+          `**New:** ${previewMarkdown(newMarkdown, 80)}`,
         actionKind: EDIT_DOCUMENT_ACTION,
-        autoApprovable: true,
-      });
-    } catch (error) {
-      this.#pendingActions.remove(actionId);
-      this.#simulationCache.current = undefined;
-      throw error;
-    }
+      },
+      () => this.#batchUpdate(snapshot, requests));
   }
 
   async appendText(markdown: string): Promise<void> {
-    let {snapshot} = await this.#getSimulatedContent();
+    let snapshot = await this.#getSnapshot();
+    let requests = markdownToDocRequests("\n" + markdown, snapshot.bodyEndIndex - 1);
 
-    let action: GoogleDocAction = {
-      type: "appendText",
-      documentId: this.#documentId,
-      submittedAt: Date.now(),
-      baseRevisionId: snapshot.revisionId,
-      markdown,
-    };
-
-    let preview = previewMarkdown(markdown, 100);
-    let actionId = this.#pendingActions.submit(action);
-    this.#simulationCache.current = undefined;
-
-    try {
-      await this.#approvalQueue.submitAction(actionId, {
+    await performAction(
+      this.#recorder,
+      {
         title: "Append to Google Doc",
-        description: `Append content to the end of the document:\n\n${preview}`,
-        implementsRevert: false,
-        // Same "editDocument" tag as replaceText
+        description:
+          `Append content to the end of the document:\n\n${previewMarkdown(markdown, 100)}`,
         actionKind: EDIT_DOCUMENT_ACTION,
-        autoApprovable: true,
-      });
-    } catch (error) {
-      this.#pendingActions.remove(actionId);
-      this.#simulationCache.current = undefined;
-      throw error;
-    }
+      },
+      () => this.#batchUpdate(snapshot, requests));
   }
 }
 
@@ -2571,26 +2198,16 @@ export class GoogleSheetsGatekeeperImpl
     return SHEETS_TYPES_CODE;
   }
 
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
+  /** Read-only: this session never writes to the spreadsheet. */
+  async getActionCatalog(): Promise<ActionCapability[]> {
     return [];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<GoogleSpreadsheetSession> {
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<GoogleSpreadsheetSession> {
     let api = new GoogleSheetsApi(opts => this.#getAccessToken(opts));
     return new GoogleSpreadsheetSessionImpl(
-      api, this.ctx.props.spreadsheetId, approvalQueue.dup(),
+      api, this.ctx.props.spreadsheetId, recorder.dup(),
     );
-  }
-
-  /** Read-only — no side-effecting actions. */
-  async applyAction(_action: number): Promise<void> {
-    throw new Error("Google Sheets is read-only and implements no actions.");
-  }
-  async rejectAction(_action: number): Promise<void> {
-    throw new Error("Google Sheets is read-only and implements no actions.");
-  }
-  revertAction(_action: number): Promise<void> {
-    throw new Error("Google Sheets is read-only and implements no actions.");
   }
 
   /**
@@ -2615,26 +2232,26 @@ export class GoogleSheetsGatekeeperImpl
 class GoogleSpreadsheetSessionImpl extends RpcTarget implements GoogleSpreadsheetSession {
   #api: GoogleSheetsApi;
   #spreadsheetId: string;
-  #approvalQueue: RpcStub<ApprovalQueue>;
+  #recorder: RpcStub<ActionRecorder>;
 
   constructor(
     api: GoogleSheetsApi,
     spreadsheetId: string,
-    approvalQueue: RpcStub<ApprovalQueue>,
+    recorder: RpcStub<ActionRecorder>,
   ) {
     super();
     this.#api = api;
     this.#spreadsheetId = spreadsheetId;
-    this.#approvalQueue = approvalQueue;
+    this.#recorder = recorder;
   }
 
   [Symbol.dispose](): void {
-    this.#approvalQueue[Symbol.dispose]();
+    this.#recorder[Symbol.dispose]();
   }
 
   async getSpreadsheet(): Promise<SpreadsheetInfo> {
     let spreadsheet = await this.#api.getSpreadsheet(this.#spreadsheetId);
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: "Read Google spreadsheet metadata",
       description:
         `Read metadata for "${spreadsheet.title}", including its ${spreadsheet.sheets.length} ` +
@@ -2668,7 +2285,7 @@ class GoogleSpreadsheetSessionImpl extends RpcTarget implements GoogleSpreadshee
       (total, range) => total + range.values.reduce((sum, row) => sum + row.length, 0),
       0,
     );
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: result.length === 1
         ? `Read Google Sheets range ${result[0].range}`
         : `Read ${result.length} Google Sheets ranges`,
@@ -2684,111 +2301,25 @@ class GoogleSpreadsheetSessionImpl extends RpcTarget implements GoogleSpreadshee
 // Google Calendar Gatekeeper
 // =======================================================================================
 
-type GoogleCalendarActionBase = {
-  calendarId: string;
-  submittedAt: number;
-  sendUpdates: CalendarSendUpdates;
-}
-
-type GoogleCalendarCreateAction = GoogleCalendarActionBase & {
-  type: "createEvent";
-  event: CalendarEventDraft;
-}
-
-type GoogleCalendarUpdateAction = GoogleCalendarActionBase & {
-  type: "updateEvent";
-  eventId: string;
-  patch: CalendarEventPatch;
-}
-
-type GoogleCalendarAction = GoogleCalendarCreateAction | GoogleCalendarUpdateAction;
-
-type GoogleCalendarRevertInfo =
-  | {
-      type: "createdEvent";
-      calendarId: string;
-      eventId: string;
-      sendUpdates: CalendarSendUpdates;
-    }
-  | {
-      type: "updatedEvent";
-      calendarId: string;
-      eventId: string;
-      // Prior values of exactly the fields that were changed, so the edit can be patched back.
-      previous: CalendarEventPatch;
-      sendUpdates: CalendarSendUpdates;
-    };
-
 type GoogleCalendarGatekeeperImplProps = {
   userObjectId: string;
   calendarId: string;
   availabilityMode: CalendarAvailabilityMode;
 }
 
+/** Adding an event to the calendar, which invites whoever the draft names. */
+const CREATE_EVENT_KIND: ActionKind = {
+  tag: "google.calendar.event.create", label: "Create calendar events",
+};
+
+/** Changing an event already on the calendar, which notifies its attendees. */
+const UPDATE_EVENT_KIND: ActionKind = {
+  tag: "google.calendar.event.update", label: "Update calendar events",
+};
+
 function previewCalendarTime(time: CalendarTime): string {
   if (time.kind === "date") return time.date;
   return time.dateTime.toISOString();
-}
-
-function pendingCalendarEventFromDraft(
-  id: number,
-  action: GoogleCalendarCreateAction,
-  opts: CalendarListEventsOptions,
-): CalendarEvent {
-  return {
-    id: `pending:create:${id}`,
-    title: action.event.title,
-    start: action.event.start,
-    end: action.event.end,
-    status: "confirmed",
-    ...(action.event.location ? {location: action.event.location} : {}),
-    ...(opts.includeDescriptions && action.event.description ? {description: action.event.description} : {}),
-    ...(action.event.attendees ? {attendees: action.event.attendees} : {}),
-    ...(action.event.transparency ? {transparency: action.event.transparency} : {}),
-    ...(action.event.visibility ? {visibility: action.event.visibility} : {}),
-    pending: true,
-  };
-}
-
-// Apply a pending updateEvent's patch onto a fetched event in place, so listEvents() reflects the
-// edit before it's approved.
-function applyCalendarPatchToEvent(
-  event: CalendarEvent,
-  patch: CalendarEventPatch,
-  opts: CalendarListEventsOptions,
-): void {
-  if (patch.title !== undefined) event.title = patch.title;
-  if (patch.start !== undefined) event.start = patch.start;
-  if (patch.end !== undefined) event.end = patch.end;
-  if (patch.location !== undefined) event.location = patch.location;
-  if (patch.transparency !== undefined) event.transparency = patch.transparency;
-  if (patch.visibility !== undefined) event.visibility = patch.visibility;
-  if (patch.description !== undefined && opts.includeDescriptions) {
-    event.description = patch.description;
-  }
-  if (patch.attendees !== undefined) {
-    event.attendees = patch.attendees;
-  }
-}
-
-// Build the undo patch for an updateEvent.
-function priorCalendarPatch(oldEvent: CalendarEvent, patch: CalendarEventPatch): CalendarEventPatch {
-  let previous: CalendarEventPatch = {};
-  if (patch.title !== undefined) previous.title = oldEvent.title;
-  if (patch.start !== undefined) previous.start = oldEvent.start;
-  if (patch.end !== undefined) previous.end = oldEvent.end;
-  if (patch.location !== undefined) previous.location = oldEvent.location ?? "";
-  if (patch.description !== undefined) previous.description = oldEvent.description ?? "";
-  if (patch.transparency !== undefined) previous.transparency = oldEvent.transparency ?? "opaque";
-  if (patch.visibility !== undefined) previous.visibility = oldEvent.visibility ?? "default";
-  if (patch.attendees !== undefined) {
-    previous.attendees = (oldEvent.attendees ?? []).map(a => ({
-      email: a.email,
-      ...(a.displayName ? {displayName: a.displayName} : {}),
-      ...(a.optional ? {optional: a.optional} : {}),
-    }));
-  }
-  return previous;
 }
 
 function summarizeCalendarPatch(patch: CalendarEventPatch): string {
@@ -2804,37 +2335,6 @@ function summarizeCalendarPatch(patch: CalendarEventPatch): string {
   if (patch.transparency !== undefined) parts.push(`transparency \u2192 ${patch.transparency}`);
   if (patch.visibility !== undefined) parts.push(`visibility \u2192 ${patch.visibility}`);
   return parts.length ? parts.join("; ") : "(no changes)";
-}
-
-function applyPendingCalendarActions(
-  events: CalendarEvent[],
-  pending: {id: number, action: GoogleCalendarAction}[],
-  opts: CalendarListEventsOptions,
-): CalendarEvent[] {
-  let byId = new Map(events.map(event => [event.id, {...event}]));
-  let added: CalendarEvent[] = [];
-
-  for (let {id, action} of pending) {
-    if (action.type === "createEvent") {
-      let event = pendingCalendarEventFromDraft(id, action, opts);
-      if (calendarEventOverlaps(event, opts.timeMin, opts.timeMax)) added.push(event);
-    } else if (action.type === "updateEvent") {
-      let existing = byId.get(action.eventId);
-      if (existing) {
-        applyCalendarPatchToEvent(existing, action.patch, opts);
-        existing.pending = true;
-        if (!calendarEventOverlaps(existing, opts.timeMin, opts.timeMax)) {
-          byId.delete(action.eventId);
-        }
-      }
-    } else {
-      const _exhaustive: never = action;
-      void _exhaustive;
-    }
-  }
-
-  return [...byId.values(), ...added]
-      .toSorted((a, b) => calendarEventSortKey(a) - calendarEventSortKey(b));
 }
 
 function validateEventTimes(start: CalendarTime, end: CalendarTime): void {
@@ -2860,12 +2360,6 @@ export class GoogleCalendarGatekeeperImpl
     return stub.getAccessToken(opts);
   });
 
-  // Revert data for already-applied actions, keyed by action id. The overseer no longer round-trips
-  // revert info through applyAction()/revertAction(), so we persist it in our own storage.
-  #revertKey(actionId: number): string {
-    return `revert:info:${actionId}`;
-  }
-
   async #getAccessToken(opts?: AccessTokenRequest): Promise<string> {
     return this.#tokens.get(opts);
   }
@@ -2889,99 +2383,45 @@ export class GoogleCalendarGatekeeperImpl
     return CALENDAR_TYPES_CODE;
   }
 
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
-    return [];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return [
+      {
+        kind: CREATE_EVENT_KIND,
+        summary: "Add events to the connected calendar and invite the people they name",
+        risk: {
+          // The event can be deleted afterwards, but only by a person, and invitations reach
+          // attendees as soon as it is created.
+          reversible: "manual",
+          reach: "creates-content",
+          audience: "external",
+          freeform: true,
+        },
+      },
+      {
+        kind: UPDATE_EVENT_KIND,
+        summary: "Change events already on the connected calendar",
+        risk: {
+          // Google Calendar keeps no accessible history of an event's previous field values,
+          // and every attendee is notified of the change.
+          reversible: "no",
+          reach: "modifies-content",
+          audience: "external",
+          freeform: true,
+        },
+      },
+    ];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>)
+  async startSession(recorder: RpcStub<ActionRecorder>)
       : Promise<GoogleCalendarSession> {
     let api = new GoogleCalendarApi(opts => this.#getAccessToken(opts));
-    let pendingActions = new PendingActionStore<GoogleCalendarAction>(this.ctx.storage.kv);
     return new GoogleCalendarSessionImpl(
       api,
       this.ctx.props.calendarId,
       this.ctx.props.availabilityMode,
-      approvalQueue.dup(),
-      pendingActions,
+      recorder.dup(),
       calendarIds => this.#prepareAvailabilityCalendarObservation(calendarIds),
     );
-  }
-
-  async applyAction(actionId: number): Promise<void> {
-    let pendingActions = new PendingActionStore<GoogleCalendarAction>(this.ctx.storage.kv);
-    let action = pendingActions.get(actionId);
-    if (!action) {
-      throw new Error(`Unknown pending Google Calendar action: ${actionId}`);
-    }
-
-    let api = new GoogleCalendarApi(opts => this.#getAccessToken(opts));
-    switch (action.type) {
-      case "createEvent": {
-        let created = await api.createEvent(action.calendarId, action.event, action.sendUpdates);
-        pendingActions.remove(actionId);
-        this.ctx.storage.kv.put<GoogleCalendarRevertInfo>(this.#revertKey(actionId), {
-          type: "createdEvent",
-          calendarId: action.calendarId,
-          eventId: created.id,
-          sendUpdates: action.sendUpdates,
-        });
-        return;
-      }
-      case "updateEvent": {
-        let oldEvent = await api.getEvent(action.calendarId, action.eventId);
-        let previous = priorCalendarPatch(oldEvent, action.patch);
-        await api.patchEvent(
-          action.calendarId, action.eventId,
-          eventPatchToGoogle(action.patch), action.sendUpdates);
-        pendingActions.remove(actionId);
-        this.ctx.storage.kv.put<GoogleCalendarRevertInfo>(this.#revertKey(actionId), {
-          type: "updatedEvent",
-          calendarId: action.calendarId,
-          eventId: action.eventId,
-          previous,
-          sendUpdates: action.sendUpdates,
-        });
-        return;
-      }
-      default: {
-        const _exhaustive: never = action;
-        throw new Error(`unknown action type: ${String(_exhaustive)}`);
-      }
-    }
-  }
-
-  async rejectAction(actionId: number): Promise<void | {restart?: boolean}> {
-    let pendingActions = new PendingActionStore<GoogleCalendarAction>(this.ctx.storage.kv);
-    pendingActions.remove(actionId);
-  }
-
-  async revertAction(actionId: number)
-      : Promise<void | {message?: string, canRetry?: boolean, restart?: boolean}> {
-    let revertInfo =
-        this.ctx.storage.kv.get<GoogleCalendarRevertInfo>(this.#revertKey(actionId));
-    if (!revertInfo) {
-      return {
-        message: "This Google Calendar action can no longer be reverted automatically. " +
-            "Undo it manually from Google Calendar.",
-      };
-    }
-
-    let api = new GoogleCalendarApi(opts => this.#getAccessToken(opts));
-    switch (revertInfo.type) {
-      case "createdEvent":
-        await api.deleteEvent(revertInfo.calendarId, revertInfo.eventId, revertInfo.sendUpdates);
-        break;
-      case "updatedEvent":
-        await api.patchEvent(
-          revertInfo.calendarId, revertInfo.eventId,
-          eventPatchToGoogle(revertInfo.previous), revertInfo.sendUpdates);
-        break;
-      default: {
-        const _exhaustive: never = revertInfo;
-        void _exhaustive;
-      }
-    }
-    this.ctx.storage.kv.delete(this.#revertKey(actionId));
   }
 
   async setHook(_hook: Fetcher | null): Promise<void> {
@@ -3089,24 +2529,21 @@ class GoogleCalendarSessionImpl extends RpcTarget implements GoogleCalendarSessi
   #api: GoogleCalendarApi;
   #calendarId: string;
   #availabilityMode: CalendarAvailabilityMode;
-  #approvalQueue: RpcStub<ApprovalQueue>;
-  #pendingActions: PendingActionStore<GoogleCalendarAction>;
+  #recorder: RpcStub<ActionRecorder>;
   #observeAvailabilityCalendars: (calendarIds: string[]) => Promise<ObserverCheck<string>>;
 
   constructor(
     api: GoogleCalendarApi,
     calendarId: string,
     availabilityMode: CalendarAvailabilityMode,
-    approvalQueue: RpcStub<ApprovalQueue>,
-    pendingActions: PendingActionStore<GoogleCalendarAction>,
+    recorder: RpcStub<ActionRecorder>,
     observeAvailabilityCalendars: (calendarIds: string[]) => Promise<ObserverCheck<string>>,
   ) {
     super();
     this.#api = api;
     this.#calendarId = calendarId;
     this.#availabilityMode = availabilityMode;
-    this.#approvalQueue = approvalQueue;
-    this.#pendingActions = pendingActions;
+    this.#recorder = recorder;
     this.#observeAvailabilityCalendars = observeAvailabilityCalendars;
   }
 
@@ -3116,7 +2553,7 @@ class GoogleCalendarSessionImpl extends RpcTarget implements GoogleCalendarSessi
 
   async getCalendar(): Promise<GoogleCalendarInfo> {
     let calendar = await this.#api.getCalendar(this.#calendarId);
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: "Read Google Calendar metadata",
       description: `Read metadata for Google Calendar ${calendar.summary} (${calendar.id}).`,
     });
@@ -3126,17 +2563,16 @@ class GoogleCalendarSessionImpl extends RpcTarget implements GoogleCalendarSessi
   async listEvents(opts: CalendarListEventsOptions): Promise<CalendarEvent[]> {
     validateCalendarTimeWindow(opts.timeMin, opts.timeMax, 366);
     let events = await this.#api.listEvents(this.#calendarId, opts);
-    let simulated = applyPendingCalendarActions(events, this.#pendingActions.list(), opts);
 
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: "List Google Calendar events",
       description:
-          `List ${simulated.length} event(s) on calendar ${this.#calendarId} from ` +
+          `List ${events.length} event(s) on calendar ${this.#calendarId} from ` +
           `${opts.timeMin.toISOString()} to ${opts.timeMax.toISOString()}.` +
           (opts.includeDescriptions ? " Event descriptions are included." : ""),
     });
 
-    return simulated;
+    return events;
   }
 
   async checkAvailability(opts: {
@@ -3170,7 +2606,7 @@ class GoogleCalendarSessionImpl extends RpcTarget implements GoogleCalendarSessi
         ? await this.#observeAvailabilityCalendars(successfulForeign)
         : {pendingSets: [], commit() {}};
 
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: "Check Google Calendar availability",
       description:
           `Check free/busy availability for ${summarizePeople(people)} from ` +
@@ -3189,29 +2625,21 @@ class GoogleCalendarSessionImpl extends RpcTarget implements GoogleCalendarSessi
   ): Promise<void> {
     if (!event.title.trim()) throw new Error("Event title is required.");
     validateEventTimes(event.start, event.end);
-    let action: GoogleCalendarAction = {
-      type: "createEvent",
-      calendarId: this.#calendarId,
-      submittedAt: Date.now(),
-      sendUpdates: opts?.sendUpdates ?? "all",
-      event,
-    };
-    let actionId = this.#pendingActions.submit(action);
+    let sendUpdates = opts?.sendUpdates ?? "all";
 
-    try {
-      await this.#approvalQueue.submitAction(actionId, {
+    await performAction(
+      this.#recorder,
+      {
         title: `Create calendar event: ${event.title}`,
         description:
             `Create event **${event.title}** on calendar ${this.#calendarId} from ` +
             `${previewCalendarTime(event.start)} to ${previewCalendarTime(event.end)}.` +
             (event.attendees?.length ? ` Attendees: ${event.attendees.map(a => a.email).join(", ")}.` : "") +
-            ` Send updates: ${action.sendUpdates}.`,
-        implementsRevert: true,
-      });
-    } catch (error) {
-      this.#pendingActions.remove(actionId);
-      throw error;
-    }
+            ` Send updates: ${sendUpdates}.`,
+        actionKind: CREATE_EVENT_KIND,
+      },
+      () => this.#api.createEvent(this.#calendarId, event, sendUpdates),
+      created => `Event id: ${created.id}`);
   }
 
   async updateEvent(
@@ -3233,29 +2661,20 @@ class GoogleCalendarSessionImpl extends RpcTarget implements GoogleCalendarSessi
       }
       validateEventTimes(start, end);
     }
-    let action: GoogleCalendarAction = {
-      type: "updateEvent",
-      calendarId: this.#calendarId,
-      submittedAt: Date.now(),
-      sendUpdates: opts?.sendUpdates ?? "all",
-      eventId,
-      patch,
-    };
-    let actionId = this.#pendingActions.submit(action);
+    let sendUpdates = opts?.sendUpdates ?? "all";
 
-    try {
-      await this.#approvalQueue.submitAction(actionId, {
+    await performAction(
+      this.#recorder,
+      {
         title: `Update calendar event ${eventId}`,
         description:
             `Update event ${eventId} on calendar ${this.#calendarId}: ` +
             `${summarizeCalendarPatch(patch)}. ` +
-            `Send updates: ${action.sendUpdates}.`,
-        implementsRevert: true,
-      });
-    } catch (error) {
-      this.#pendingActions.remove(actionId);
-      throw error;
-    }
+            `Send updates: ${sendUpdates}.`,
+        actionKind: UPDATE_EVENT_KIND,
+      },
+      () => this.#api.patchEvent(
+          this.#calendarId, eventId, eventPatchToGoogle(patch), sendUpdates));
   }
 }
 
@@ -3314,27 +2733,21 @@ export class BigQueryGatekeeperImpl
     return BIGQUERY_TYPES_CODE;
   }
 
-  async getAutoApprovableActions() {
+  /** Read-only: every query is dry-run first and refused unless it is a plain SELECT. */
+  async getActionCatalog(): Promise<ActionCapability[]> {
     return [];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<BigQuerySession> {
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<BigQuerySession> {
     let api = new BigQueryApi(opts => this.#getAccessToken(opts));
     return new BigQuerySessionImpl(
       api,
-      approvalQueue.dup(),
+      recorder.dup(),
       this.ctx.props.scopedProjectId,
       this.ctx.props.scopedDatasetId,
       this.ctx.props.scopedTableId,
       datasets => this.#prepareDatasetObservation(datasets),
     );
-  }
-
-  /** Read-only — no side-effecting actions. */
-  async applyAction(_action: number): Promise<void> {}
-  async rejectAction(_action: number): Promise<void> {}
-  revertAction(_action: number): Promise<void> {
-    throw new Error("BigQuery gatekeeper has no writable actions to revert");
   }
 
   // -------------------------------------------------------------------------
@@ -3445,7 +2858,7 @@ export class BigQueryGatekeeperImpl
 @validateRpc()
 class BigQuerySessionImpl extends RpcTarget implements BigQuerySession {
   #api: BigQueryApi;
-  #approvalQueue: RpcStub<ApprovalQueue>;
+  #recorder: RpcStub<ActionRecorder>;
   #scopedProjectId?: string;
   #scopedDatasetId?: string;
   #scopedTableId?: string;
@@ -3456,7 +2869,7 @@ class BigQuerySessionImpl extends RpcTarget implements BigQuerySession {
 
   constructor(
     api: BigQueryApi,
-    approvalQueue: RpcStub<ApprovalQueue>,
+    recorder: RpcStub<ActionRecorder>,
     scopedProjectId: string | undefined,
     scopedDatasetId: string | undefined,
     scopedTableId: string | undefined,
@@ -3465,7 +2878,7 @@ class BigQuerySessionImpl extends RpcTarget implements BigQuerySession {
   ) {
     super();
     this.#api = api;
-    this.#approvalQueue = approvalQueue;
+    this.#recorder = recorder;
     this.#scopedProjectId = scopedProjectId;
     this.#scopedDatasetId = scopedDatasetId;
     this.#scopedTableId = scopedTableId;
@@ -3480,7 +2893,7 @@ class BigQuerySessionImpl extends RpcTarget implements BigQuerySession {
     description: ObservationDescription,
   ): Promise<void> {
     let check = datasets.length > 0 ? await this.#observe(datasets) : {pendingSets: [], commit() {}};
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       ...description, excludeObservers: check.excludeObservers,
     });
     check.commit();

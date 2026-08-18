@@ -10,7 +10,8 @@ import {
   HookInitiator,
   HookTargetMetadata,
   ResourceDescription,
-  ApprovalQueue,
+  ActionCapability,
+  ActionRecorder,
   VendorDescription,
   GatekeeperConnectCallback,
   AccountDescription,
@@ -484,20 +485,20 @@ class EmailSessionImpl extends RpcTarget implements EmailSession {
   #emailName: string;
   #emailHost: string;
   #ctx: DurableObjectState<EmailGatekeeperImplProps>;
-  #approvalQueue: RpcStub<ApprovalQueue>;
+  #recorder: RpcStub<ActionRecorder>;
 
   constructor(emailName: string, emailHost: string,
       ctx: DurableObjectState<EmailGatekeeperImplProps>,
-      approvalQueue: RpcStub<ApprovalQueue>) {
+      recorder: RpcStub<ActionRecorder>) {
     super();
     this.#emailName = emailName;
     this.#emailHost = emailHost;
     this.#ctx = ctx;
-    this.#approvalQueue = approvalQueue;
+    this.#recorder = recorder;
   }
 
   [Symbol.dispose]() {
-    this.#approvalQueue[Symbol.dispose]();
+    this.#recorder[Symbol.dispose]();
   }
 
   async getAddress(): Promise<string> {
@@ -511,7 +512,7 @@ class EmailSessionImpl extends RpcTarget implements EmailSession {
         this.#ctx.exports.EmailHookControllerImpl({props: this.#ctx.props});
 
     // @ts-ignore TS insists hookController is the wrong type... why? It looks identical to me.
-    await this.#approvalQueue.bindHook(hookController, callback, {
+    await this.#recorder.bindHook(hookController, callback, {
       title: `Receive email`,
       description: `Receive emails sent to ${this.#emailName}@${this.#emailHost}`,
     });
@@ -550,29 +551,14 @@ export class EmailGatekeeperImpl extends DurableObject<Env, EmailGatekeeperImplP
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions() {
+  async getActionCatalog(): Promise<ActionCapability[]> {
     return [];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<EmailSession> {
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<EmailSession> {
     let emailName = this.ctx.props.emailName;
     let host = getEmailHost(this.env);
-    return new EmailSessionImpl(emailName, host, this.ctx, approvalQueue.dup());
-  }
-
-  // ---------------------------------------------------------------------------
-
-  async applyAction(action: number): Promise<void> {
-    throw new Error("Email gatekeeper has no actions");
-  }
-
-  async rejectAction(action: number): Promise<void> {
-    // No actions to reject.
-  }
-
-  revertAction(action: number):
-      Promise<void | {message?: string, canRetry?: boolean, restart?: boolean}> {
-    throw new Error("Email gatekeeper has no actions to revert");
+    return new EmailSessionImpl(emailName, host, this.ctx, recorder.dup());
   }
 
   /**
@@ -667,16 +653,16 @@ export class EmailAddress extends DurableObject<Env> {
     }
 
     // The stored Fetcher is a HookInitiator. Call startHook() to get the actual hook entrypoint
-    // and an ApprovalQueue for logging observations. Use `using` to dispose the result (and its
-    // contained stubs, including approvalQueue) at end of scope.
+    // and an ActionRecorder for logging observations. Use `using` to dispose the result (and its
+    // contained stubs, including the recorder) at end of scope.
     // @ts-ignore TODO: TS doesn't understand that the returned promise is disposable?
     using startHookResult = hookInitiator.startHook();
 
-    // Pipeline: access approvalQueue on the not-yet-resolved promise and call through it.
+    // Pipeline: access the recorder on the not-yet-resolved promise and call through it.
     let sender = email.from.name
         ? `${email.from.name} <${email.from.address}>`
         : email.from.address;
-    await startHookResult.approvalQueue.authorizeObservation({
+    await startHookResult.recorder.authorizeObservation({
       title: `Email from ${email.from.address}: ${email.subject}`,
       description: `Received email from ${sender}\n\n`
           + `**Subject:** ${email.subject}\n`

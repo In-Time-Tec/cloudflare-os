@@ -83,7 +83,7 @@ function calendarTimeToGoogle(value: CalendarTime): GoogleCalendarTime {
 
 export function calendarEventFromGoogle(
   event: GoogleCalendarEvent,
-  opts?: { includeDescriptions?: boolean; pending?: boolean },
+  opts?: { includeDescriptions?: boolean },
 ): CalendarEvent {
   return {
     id: event.id,
@@ -98,7 +98,6 @@ export function calendarEventFromGoogle(
     ...(event.transparency ? { transparency: event.transparency } : {}),
     ...(event.visibility ? { visibility: event.visibility } : {}),
     ...(event.recurringEventId ? { recurringEventId: event.recurringEventId } : {}),
-    ...(opts?.pending ? { pending: true } : {}),
   };
 }
 
@@ -136,19 +135,6 @@ export function eventPatchToGoogle(patch: CalendarEventPatch): Partial<GoogleCal
   if (patch.transparency !== undefined) body.transparency = patch.transparency;
   if (patch.visibility !== undefined) body.visibility = patch.visibility;
   return body;
-}
-
-function eventTimeMillis(value: CalendarTime): number {
-  if (value.kind === "date") return Date.parse(value.date + "T00:00:00Z");
-  return value.dateTime.valueOf();
-}
-
-export function calendarEventOverlaps(event: CalendarEvent, timeMin: Date, timeMax: Date): boolean {
-  return eventTimeMillis(event.end) > timeMin.valueOf() && eventTimeMillis(event.start) < timeMax.valueOf();
-}
-
-export function calendarEventSortKey(event: CalendarEvent): number {
-  return eventTimeMillis(event.start);
 }
 
 export function validateCalendarTimeWindow(timeMin: Date, timeMax: Date, maxDays: number) {

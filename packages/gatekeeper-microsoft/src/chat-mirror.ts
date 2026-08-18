@@ -9,7 +9,7 @@
 //   - Web Push subscriptions for closed-tab notification.
 //
 // The human sends through here act directly under the user's delegated token — deliberately NOT
-// through the agent approval queue (a person pressing Send is the user acting, as in Teams).
+// recorded as agent actions (a person pressing Send is the user acting, as in Teams).
 
 import { DurableObject } from "cloudflare:workers";
 import { Effect, Result } from "effect";

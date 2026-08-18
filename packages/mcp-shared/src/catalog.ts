@@ -10,8 +10,7 @@ import { fetchTools, type ConnectionAccount, type ConnectionEnv } from "./connec
 import { looksLikePortal } from "./portal.js";
 import { scopeAllows, type ToolScope } from "./scope.js";
 import type { McpLog } from "./log.js";
-import { catalogRevision, classifyTool, type ClassifiedTool, type ServerTrust }
-  from "./tools.js";
+import { catalogRevision, classifyTool, type ClassifiedTool } from "./tools.js";
 
 /** How long a fetched tool catalog is reused before the server is asked again. */
 export const CATALOG_TTL_MS = 5 * 60 * 1000;
@@ -45,11 +44,6 @@ export type CatalogRequest = {
   endpoint: string;
   /** How much of the endpoint this binding may call. */
   scope: ToolScope;
-  /**
-   * Read from the deployment's current configuration on every call, never from stored account
-   * state, so withdrawing the tier takes effect without a reconnect. See `ServerTrust`.
-   */
-  trust: ServerTrust;
 };
 
 /**
@@ -103,5 +97,5 @@ export async function scopedTools(request: CatalogRequest): Promise<ClassifiedTo
   const isPortal = looksLikePortal(all, truncated);
   return all
     .filter(tool => scopeAllows(request.scope, tool.name, isPortal))
-    .map(tool => classifyTool(tool, request.trust));
+    .map(classifyTool);
 }

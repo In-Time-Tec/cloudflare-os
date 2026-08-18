@@ -1,7 +1,9 @@
 import { DurableObject, RpcStub, RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
 import {
-  ApprovalQueue,
+  ActionCapability,
+  ActionKind,
+  ActionRecorder,
   stripTrailingSlashes,
   type AccountDescription,
   type Gatekeeper,
@@ -80,14 +82,6 @@ type StoredNonce = {
 type StoredToken = {
   token: string;
   expiresAt: number;
-};
-
-// A mutating SQL statement queued for human approval and applied once approved.
-type StoredExecuteAction = {
-  ref: string;
-  sql: string;
-  params?: SupabaseValue[];
-  submittedAt: number;
 };
 
 type Cached<T> = {
@@ -739,35 +733,25 @@ export class SupabaseVerifier extends WorkerEntrypoint<Env, SupabaseVerifierProp
 }
 
 // ---------------------------------------------------------------------------
-// Action queue storage. Mutating SQL statements are stored here when submitted for approval and
-// removed once applied or rejected.
+// Actions. This gatekeeper's one side-effecting operation is running a mutating SQL statement.
 
-class PendingActionStore {
-  #kv: DurableObjectStorage["kv"];
+const EXECUTE_SQL_ACTION_KIND: ActionKind = {
+  tag: "supabase.database.execute",
+  label: "Run mutating SQL",
+};
 
-  constructor(kv: DurableObjectStorage["kv"]) {
-    this.#kv = kv;
-  }
-
-  #key(id: number): string {
-    return `pending:action:${id}`;
-  }
-
-  submit(action: StoredExecuteAction): number {
-    const id = this.#kv.get<number>("pending:nextActionId") ?? 1;
-    this.#kv.put("pending:nextActionId", id + 1);
-    this.#kv.put(this.#key(id), action);
-    return id;
-  }
-
-  get(id: number): StoredExecuteAction | undefined {
-    return this.#kv.get<StoredExecuteAction>(this.#key(id));
-  }
-
-  remove(id: number): void {
-    this.#kv.delete(this.#key(id));
-  }
-}
+const EXECUTE_SQL_CAPABILITY: ActionCapability = {
+  kind: EXECUTE_SQL_ACTION_KIND,
+  summary: "Run a mutating SQL statement against a Supabase project's database",
+  risk: {
+    // Arbitrary SQL has no general inverse.
+    reversible: "no",
+    reach: "modifies-content",
+    // A project database backs whatever applications read it, inside the workspace and out.
+    audience: "external",
+    freeform: true,
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Cache for stable, read-only metadata (project info, schema introspection, etc.). Backed by the
@@ -808,18 +792,17 @@ class SupabaseCache {
 // ---------------------------------------------------------------------------
 // Session context shared by a session's RpcTargets.
 //
-// Holds the API client, error handling, the approval queue, the cache, and the pending-action
-// store. It is NOT an RpcTarget — it is captured privately by the session objects.
+// Holds the API client, error handling, the action recorder, and the cache. It is NOT an
+// RpcTarget — it is captured privately by the session objects.
 
 class SupabaseSessionContext {
-  // A .dup() of the queue passed to startSession (so it outlives that call). We deliberately do not
-  // dispose it ourselves: disposing a stub schedules an RPC release, and doing that during isolate
-  // shutdown trips a fatal workerd assertion. Like the reference gatekeepers, we let the session's
-  // RPC connection teardown reclaim it.
-  readonly approvalQueue: RpcStub<ApprovalQueue>;
+  // A .dup() of the recorder passed to startSession (so it outlives that call). We deliberately do
+  // not dispose it ourselves: disposing a stub schedules an RPC release, and doing that during
+  // isolate shutdown trips a fatal workerd assertion. Like the reference gatekeepers, we let the
+  // session's RPC connection teardown reclaim it.
+  readonly recorder: RpcStub<ActionRecorder>;
   #api: SupabaseApi;
   #cache: SupabaseCache;
-  #pending: PendingActionStore;
   #noteExpired: () => Promise<void>;
   // Set only for organization bindings (data-set tracking). Given the project ref a project-scoped
   // observation is about to reveal, records it as an observed data set and returns the observer ids
@@ -829,16 +812,14 @@ class SupabaseSessionContext {
 
   constructor(
     api: SupabaseApi,
-    approvalQueue: RpcStub<ApprovalQueue>,
+    recorder: RpcStub<ActionRecorder>,
     cache: SupabaseCache,
-    pending: PendingActionStore,
     noteExpired: () => Promise<void>,
     projectObservationHook?: (ref: string) => Promise<ProjectObservationCheck>,
   ) {
     this.#api = api;
-    this.approvalQueue = approvalQueue;
+    this.recorder = recorder;
     this.#cache = cache;
-    this.#pending = pending;
     this.#noteExpired = noteExpired;
     this.#projectObservationHook = projectObservationHook;
   }
@@ -846,7 +827,7 @@ class SupabaseSessionContext {
   // Authorize an observation that reveals data belonging to a specific project. For organization
   // bindings this also tracks the project as an observed data set and excludes any observers who
   // lack access to it; for project bindings it is a plain authorizeObservation. Use this (rather
-  // than approvalQueue.authorizeObservation directly) for every read that exposes project data.
+  // than recorder.authorizeObservation directly) for every read that exposes project data.
   async authorizeProjectObservation(
     ref: string,
     description: { title: string; description: string },
@@ -854,7 +835,7 @@ class SupabaseSessionContext {
     const check = this.#projectObservationHook
       ? await this.#projectObservationHook(ref)
       : {pendingProjects: [], commit() {}};
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
       ...description, excludeObservers: check.excludeObservers,
     });
     check.commit();
@@ -886,29 +867,26 @@ class SupabaseSessionContext {
     return value;
   }
 
-  // Submits a mutating SQL statement for approval. The statement is NOT run here; it runs in
-  // SupabaseGatekeeperImpl.applyAction() once approved. (The approval contract is between this
-  // gatekeeper and the Workshop/approver and is intentionally invisible to the calling Gadget.)
-  async submitExecute(ref: string, sql: string, params?: SupabaseValue[]): Promise<void> {
-    const action: StoredExecuteAction = { ref, sql, params, submittedAt: Date.now() };
-    const actionId = this.#pending.submit(action);
+  // Authorizes and runs a mutating SQL statement, then invalidates cached schema metadata (the
+  // database may have changed).
+  async execute(ref: string, sql: string, params?: SupabaseValue[]): Promise<void> {
+    const handle = await this.recorder.authorizeAction({
+      title: "Run SQL on Supabase",
+      description:
+          `Execute a mutating SQL statement against Supabase project \`${ref}\`.\n\n` +
+          "```sql\n" + sql + "\n```" +
+          (params && params.length > 0 ? `\n\nParameters: \`${JSON.stringify(params)}\`` : ""),
+      actionKind: EXECUTE_SQL_ACTION_KIND,
+    });
     try {
-      await this.approvalQueue.submitAction(actionId, {
-        title: "Run SQL on Supabase",
-        description:
-            `Execute a mutating SQL statement against Supabase project \`${ref}\`.\n\n` +
-            "```sql\n" + sql + "\n```" +
-            (params && params.length > 0 ? `\n\nParameters: \`${JSON.stringify(params)}\`` : ""),
-        // Arbitrary SQL cannot be automatically reverted.
-        implementsRevert: false,
-        // This gatekeeper doesn't simulate writes, so the agent shouldn't continue (and read back
-        // un-applied state) until the user decides on this statement.
-        awaitDecision: true,
-      });
+      await this.run(api => api.runQuery(ref, sql, params));
     } catch (error) {
-      this.#pending.remove(actionId);
+      // The statement reached Supabase, so a failure here may still have committed some of it.
+      await handle.failed(error instanceof Error ? error.message : String(error), true);
       throw error;
     }
+    this.#cache.bumpGeneration();
+    await handle.succeeded();
   }
 }
 
@@ -954,7 +932,7 @@ export class SupabaseGatekeeperImpl extends DurableObject<Env, SupabaseGatekeepe
     return new SupabaseApi(this.#getAccessToken);
   }
 
-  #makeContext(approvalQueue: RpcStub<ApprovalQueue>): SupabaseSessionContext {
+  #makeContext(recorder: RpcStub<ActionRecorder>): SupabaseSessionContext {
     // Organization bindings track which projects' data has actually been observed and exclude
     // observers who lack access to them; project bindings are a single ACL unit with nothing to
     // exclude, so they get no hook.
@@ -963,9 +941,8 @@ export class SupabaseGatekeeperImpl extends DurableObject<Env, SupabaseGatekeepe
       : undefined;
     return new SupabaseSessionContext(
       this.#makeApi(),
-      approvalQueue.dup(),
+      recorder.dup(),
       new SupabaseCache(this.ctx.storage.kv),
-      new PendingActionStore(this.ctx.storage.kv),
       async () => { await this.#userAccount().noteCredentialsExpired(); },
       projectObservationHook,
     );
@@ -1071,59 +1048,18 @@ export class SupabaseGatekeeperImpl extends DurableObject<Env, SupabaseGatekeepe
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions() {
-    return [];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return [EXECUTE_SQL_CAPABILITY];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<SupabaseProject | SupabaseOrganization> {
-    const context = this.#makeContext(approvalQueue);
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<SupabaseProject | SupabaseOrganization> {
+    const context = this.#makeContext(recorder);
     if (this.ctx.props.resourceKind === "project") {
       return new SupabaseProjectImpl(context, this.#requireRef());
     }
     return new SupabaseOrganizationImpl(context, this.#requireSlug());
   }
 
-  /**
-   * Approved: run the queued SQL statement for real, then drop it and invalidate cached schema
-   * metadata (the database may have changed).
-   */
-  async applyAction(actionId: number): Promise<void> {
-    const pending = new PendingActionStore(this.ctx.storage.kv);
-    const action = pending.get(actionId);
-    if (!action) {
-      throw new Error(`Unknown pending Supabase action: ${actionId}`);
-    }
-    try {
-      await this.#makeApi().runQuery(action.ref, action.sql, action.params);
-    } catch (error) {
-      // On expired/revoked credentials, signal the account so the user is prompted to reconnect.
-      // The action stays queued (we don't remove it) so it can be retried after reconnecting.
-      if (error instanceof SupabaseApiError && error.isAuthError) {
-        await this.#userAccount().noteCredentialsExpired();
-        throw new Error("Supabase credentials have expired or been revoked. Reconnect the account, then retry.", { cause: error });
-      }
-      throw error;
-    }
-    pending.remove(actionId);
-    new SupabaseCache(this.ctx.storage.kv).bumpGeneration();
-  }
-
-  /** Rejected: discard the queued statement. There is no simulation state to roll back. */
-  async rejectAction(actionId: number): Promise<void> {
-    new PendingActionStore(this.ctx.storage.kv).remove(actionId);
-  }
-
-  /**
-   * Arbitrary SQL changes can't be reliably undone, so we don't offer automatic revert
-   * (submitAction sets implementsRevert: false, so this is not normally reached).
-   */
-  async revertAction(_action: number): Promise<void | { message?: string; canRetry?: boolean }> {
-    return {
-      message:
-          "This SQL change can't be reverted automatically. To undo it, run a compensating " +
-          "statement (e.g. a corresponding `DELETE`, `UPDATE`, or `DROP`).",
-    };
-  }
 
   /**
    * Observer tracking. Strategy depends on the binding's granularity:
@@ -1226,7 +1162,7 @@ class SupabaseOrganizationImpl extends RpcTarget implements SupabaseOrganization
       return { slug: org.slug, name: org.name, url: organizationUrl(org.slug) };
     });
 
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "Read Supabase organization",
       description: `Read metadata for the Supabase organization \`${this.#slug}\`.`,
     });
@@ -1239,7 +1175,7 @@ class SupabaseOrganizationImpl extends RpcTarget implements SupabaseOrganization
       return all.filter(project => project.organization_slug === this.#slug).map(projectSummary);
     });
 
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "List Supabase projects",
       description:
           `List the ${projects.length} project(s) in the Supabase organization \`${this.#slug}\`.`,
@@ -1392,7 +1328,7 @@ class SupabaseDatabaseImpl extends RpcTarget implements SupabaseDatabase {
     if (withoutComments.trim().length === 0) {
       throw new Error("execute() requires a non-empty SQL statement.");
     }
-    return await this.#ctx.submitExecute(this.#ref, sql, params);
+    return await this.#ctx.execute(this.#ref, sql, params);
   }
 
   async listSchemas(): Promise<string[]> {

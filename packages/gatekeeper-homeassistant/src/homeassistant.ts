@@ -1,9 +1,11 @@
 import { DurableObject, RpcStub, RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
 import {
-  ApprovalQueue,
   stripTrailingSlashes,
   type AccountDescription,
+  type ActionCapability,
+  type ActionKind,
+  type ActionRecorder,
   type AvatarImage,
   type Gatekeeper,
   type GatekeeperConnectCallback,
@@ -37,21 +39,7 @@ import {
   type HomeAssistantCredentials,
   type RegistrySnapshot,
 } from "./homeassistant-api";
-import {
-  applyRevertForEntity,
-  canRevert,
-  describeAction,
-  executeAction,
-  fetchDashboardConfig,
-  resolveTargets,
-} from "./approvals";
-import {
-  indexPendingByEntity,
-  overlayDashboardConfig,
-  overlayEntityState,
-  overlayEntityStates,
-  type HAStateRecord,
-} from "./simulation";
+import { ACTION_CATALOG, describeAction, executeAction } from "./actions";
 import type {
   Area,
   AreaInfo,
@@ -963,8 +951,8 @@ export type HATarget = {
 };
 
 /**
- * "Where the write came from" — used to author meaningful action descriptions and (later)
- * to drive simulation overlays. The receiving session may be whole-instance or scoped.
+ * "Where the write came from" — used to author meaningful action descriptions. The receiving
+ * session may be whole-instance or scoped.
  */
 export type ActionOrigin =
   | { kind: "session" }
@@ -974,10 +962,9 @@ export type ActionOrigin =
   | { kind: "device"; deviceId: string }
   | { kind: "dashboard"; urlPath: string };
 
-/** All side-effecting actions go through the approval queue as one of these. */
+/** Every side-effecting operation is authorized and performed as one of these. */
 export type HomeAssistantAction =
   | {
-      id: number;
       type: "callService";
       domain: string;
       service: string;
@@ -986,56 +973,18 @@ export type HomeAssistantAction =
       origin: ActionOrigin;
     }
   | {
-      id: number;
       type: "fireEvent";
       eventType: string;
       data?: Record<string, unknown>;
       origin: ActionOrigin;
     }
   | {
-      id: number;
       type: "saveDashboard";
       /** null = the default "lovelace" dashboard. */
       urlPath: string | null;
       config: unknown;
       origin: ActionOrigin;
     };
-
-/** Captured at apply time so we can later restore the prior state via revertAction(). */
-export type HomeAssistantRevertInfo =
-  | {
-      type: "stateSnapshot";
-      previous: Array<{
-        entityId: string;
-        state: string;
-        attributes: Record<string, unknown>;
-      }>;
-      originalAction: HomeAssistantAction & { type: "callService" };
-    }
-  | {
-      type: "dashboardSnapshot";
-      urlPath: string | null;
-      previousConfig: unknown;
-    }
-  | { type: "noRevert" };
-
-// Internal storage row for pending (submitted but not yet applied) actions.
-type PendingActionRow = {
-  id: number;
-  action: HomeAssistantAction;
-  submittedAt: number;
-};
-
-// Internal storage row for actions that have been applied. Retained so that revertAction() can
-// look up the information needed to undo the action. The overseer only passes back the action ID,
-// so all revert information lives here in DO storage rather than being round-tripped through the
-// overseer.
-type AppliedActionRow = {
-  id: number;
-  action: HomeAssistantAction;
-  revertInfo: HomeAssistantRevertInfo;
-  appliedAt: number;
-};
 
 @validateRpc()
 export class HomeAssistantGatekeeperImpl
@@ -1125,14 +1074,14 @@ export class HomeAssistantGatekeeperImpl
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions() {
-    return [];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return ACTION_CATALOG;
   }
 
   async startSession(
-    approvalQueue: RpcStub<ApprovalQueue>,
+    recorder: RpcStub<ActionRecorder>,
   ): Promise<HomeAssistantSession | Area | Label | Device | Entity> {
-    const ctx = await this.#sessionContext(approvalQueue.dup());
+    const ctx = await this.#sessionContext(recorder.dup());
     const { resourceKind, resourceId } = this.ctx.props;
     switch (resourceKind) {
       case "instance":
@@ -1145,95 +1094,6 @@ export class HomeAssistantGatekeeperImpl
         return new DeviceImpl(ctx, resourceId!);
       case "entity":
         return new EntityImpl(ctx, resourceId!);
-    }
-  }
-
-  async applyAction(actionId: number): Promise<void> {
-    // The overseer only knows the numeric action ID; the full action lives in DO storage.
-    const pending = this.#getPending(actionId);
-    if (!pending) {
-      throw new Error(`No queued Home Assistant action exists with id ${actionId}.`);
-    }
-    const action = pending.action;
-    const creds = await this.#getCreds();
-
-    let revertInfo: HomeAssistantRevertInfo;
-    try {
-      revertInfo = await this.#snapshotForRevert(action, creds);
-    } catch {
-      // If we can't snapshot, proceed without revert.
-      revertInfo = { type: "noRevert" };
-    }
-
-    try {
-      await executeAction(action, creds);
-    } catch (e) {
-      if (e instanceof HomeAssistantError && e.isAuthError) {
-        await this.#userAccount().noteCredentialsExpired();
-      }
-      throw e;
-    }
-
-    // Action succeeded: move the row from "pending" to "applied", storing the revert info so a
-    // later revertAction() can find it (the overseer passes back only the action ID).
-    this.#storeApplied(action, revertInfo);
-    this.#deletePending(actionId);
-  }
-
-  async rejectAction(actionId: number): Promise<void | { restart?: boolean }> {
-    this.#deletePending(actionId);
-    // No simulation state to clean up yet; once Phase 2 (caching/simulation) lands this may
-    // need to invalidate overlays. For now, rejection is a no-op apart from clearing storage.
-  }
-
-  async revertAction(
-    actionId: number,
-  ): Promise<void | { message?: string; canRetry?: boolean; restart?: boolean }> {
-    // The overseer passes back only the action ID; we stored everything we need (including the
-    // original action, inside `stateSnapshot.originalAction` / `dashboardSnapshot`) under
-    // `applied:<id>` when the action was applied.
-    const applied = this.#getApplied(actionId);
-    if (!applied) {
-      throw new Error(`No applied Home Assistant action exists with id ${actionId}.`);
-    }
-    const revertInfo = applied.revertInfo;
-    const creds = await this.#getCreds();
-    switch (revertInfo.type) {
-      case "noRevert":
-        throw new Error("This action cannot be reverted.");
-      case "stateSnapshot": {
-        // Open one WebSocket for the whole batch.
-        const failures: string[] = [];
-        await withWebSocket(creds, async (ws) => {
-          for (const prev of revertInfo.previous) {
-            try {
-              await applyRevertForEntity(prev, revertInfo.originalAction, ws);
-            } catch (e: any) {
-              failures.push(`${prev.entityId}: ${e?.message ?? e}`);
-            }
-          }
-        });
-        if (failures.length > 0) {
-          return {
-            message:
-              failures.length === revertInfo.previous.length
-                ? `Failed to revert: ${failures.join("; ")}`
-                : `Reverted ${revertInfo.previous.length - failures.length} of ${revertInfo.previous.length} entities. Failures: ${failures.join("; ")}`,
-            canRetry: failures.length < revertInfo.previous.length,
-          };
-        }
-        return;
-      }
-      case "dashboardSnapshot": {
-        await withWebSocket(creds, async (ws) => {
-          await ws.send({
-            type: "lovelace/config/save",
-            url_path: revertInfo.urlPath,
-            config: revertInfo.previousConfig,
-          });
-        });
-        return;
-      }
     }
   }
 
@@ -1251,207 +1111,77 @@ export class HomeAssistantGatekeeperImpl
   // Internal helpers
 
   async #sessionContext(
-    approvalQueue: RpcStub<ApprovalQueue>,
+    recorder: RpcStub<ActionRecorder>,
   ): Promise<SessionContext> {
     const creds = await this.#getCreds();
-    return this.#buildSessionContext(creds, approvalQueue);
+    return this.#buildSessionContext(creds, recorder);
   }
 
   /** Synchronous helper used by `#sessionContext` and `SessionContext.fork()` to construct a
-   * SessionContext given already-resolved credentials and an already-dup'd approvalQueue. */
+   * SessionContext given already-resolved credentials and an already-dup'd recorder. */
   #buildSessionContext(
     creds: HomeAssistantCredentials,
-    approvalQueue: RpcStub<ApprovalQueue>,
+    recorder: RpcStub<ActionRecorder>,
   ): SessionContext {
     const self = this;
     let disposed = false;
     const ctx: SessionContext = {
       creds,
-      approvalQueue,
+      recorder,
       noteAuthError: () => self.#userAccount().noteCredentialsExpired(),
       dispose() {
         if (disposed) return;
         disposed = true;
-        // Release the server-side RpcStub for our dup'd approvalQueue. We cast through
+        // Release the server-side RpcStub for our dup'd recorder. We cast through
         // `unknown` because RpcStub's TS type doesn't expose Symbol.dispose in workshop-shared's
         // capnweb dependency, but the runtime object does implement it (see gatekeeper-github
         // for the same pattern).
         try {
-          (approvalQueue as unknown as { [Symbol.dispose](): void })[Symbol.dispose]();
+          (recorder as unknown as { [Symbol.dispose](): void })[Symbol.dispose]();
         } catch {
           // Already-disposed / runtime-missing dispose: ignore.
         }
       },
-      async submitWrite(body) {
-        // Validate body up front so malformed calls fail immediately with a clear message
-        // (rather than ending up in the approval queue or hitting Home Assistant later).
-        validateWriteBody(body);
+      async performWrite(action) {
+        // Validate the action up front so malformed calls fail immediately with a clear message
+        // rather than reaching Home Assistant.
+        validateWriteBody(action);
 
-        const id = self.#nextActionId();
-        const action = { ...body, id } as HomeAssistantAction;
-        const row: PendingActionRow = { id, action, submittedAt: Date.now() };
-        self.ctx.storage.kv.put<PendingActionRow>(`pending:${id}`, row);
-
-        let description;
+        let registry: RegistrySnapshot;
         try {
-          const registry = await fetchRegistrySnapshot(creds);
-          description = describeAction(action, registry);
+          registry = await fetchRegistrySnapshot(creds);
         } catch {
-          // If registry fetch fails, fall back to a minimal description.
-          const emptyRegistry: RegistrySnapshot = {
-            areas: [],
-            floors: [],
-            labels: [],
-            devices: [],
-            entities: [],
-            states: new Map(),
+          // Without the registry the description loses its friendly names, but the action itself
+          // is still well-defined, so describe it against an empty one rather than failing.
+          registry = {
+            areas: [], floors: [], labels: [], devices: [], entities: [], states: new Map(),
           };
-          description = describeAction(action, emptyRegistry);
         }
 
+        const handle = await recorder.authorizeAction(describeAction(action, registry));
         try {
-          await approvalQueue.submitAction(id, description);
+          await executeAction(action, creds);
         } catch (e) {
-          // The submit failed (e.g., the approval queue stub is gone). Drop the pending row.
-          self.#deletePending(id);
+          if (e instanceof HomeAssistantError && e.isAuthError) {
+            await self.#userAccount().noteCredentialsExpired();
+          }
+          // The command reached Home Assistant, so a failure here leaves the outcome unknown.
+          await handle.failed(e instanceof Error ? e.message : String(e), true);
           throw e;
         }
+        await handle.succeeded();
       },
       async registrySnapshot() {
         return await fetchRegistrySnapshot(creds);
       },
-      listPendingActions() {
-        return self.#listPendingActions();
-      },
-      async registrySnapshotWithOverlay() {
-        const snapshot = await fetchRegistrySnapshot(creds);
-        const pending = self.#listPendingActions();
-        if (pending.length === 0) {
-          return { snapshot, appliedCount: 0 };
-        }
-        const index = indexPendingByEntity(pending, snapshot);
-        if (index.size === 0) {
-          return { snapshot, appliedCount: 0 };
-        }
-        // Build a new states map with overlays applied.
-        const newStates = new Map<string, any>(snapshot.states);
-        let totalApplied = 0;
-        const stateRecords: HAStateRecord[] = [];
-        const seenIds: string[] = [];
-        for (const entityId of index.keys()) {
-          const real = snapshot.states.get(entityId);
-          if (!real) continue;
-          stateRecords.push(real as HAStateRecord);
-          seenIds.push(entityId);
-        }
-        if (stateRecords.length > 0) {
-          const { states: overlaid, totalApplied: applied } = overlayEntityStates(
-            stateRecords,
-            index,
-          );
-          totalApplied = applied;
-          for (let i = 0; i < overlaid.length; i++) {
-            newStates.set(seenIds[i], overlaid[i]);
-          }
-        }
-        return {
-          snapshot: { ...snapshot, states: newStates },
-          appliedCount: totalApplied,
-        };
-      },
       fork() {
-        // Wrap the parent's `approvalQueue` in a fresh `dup()` so the child session can be
+        // Wrap the parent's `recorder` in a fresh `dup()` so the child session can be
         // disposed independently of the parent. Synchronous: reuses `creds` rather than
         // re-running `#getCreds`.
-        return self.#buildSessionContext(creds, approvalQueue.dup());
+        return self.#buildSessionContext(creds, recorder.dup());
       },
     };
     return ctx;
-  }
-
-  /** List currently-pending actions, in chronological order. Reads from DO storage's KV
-   * `pending:*` rows. */
-  #listPendingActions(): HomeAssistantAction[] {
-    const rows = [...this.ctx.storage.kv.list<PendingActionRow>({ prefix: "pending:" })];
-    return rows
-      .map(([_, row]) => row.action)
-      .toSorted((a, b) => a.id - b.id);
-  }
-
-  // Action storage (KV layout):
-  //   counter:nextActionId  → number
-  //   pending:<id>          → PendingActionRow  (submitted, awaiting approval)
-  //   applied:<id>          → AppliedActionRow  (approved + applied; retains revert info)
-
-  #nextActionId(): number {
-    const v = (this.ctx.storage.kv.get<number>("counter:nextActionId") ?? 0) + 1;
-    this.ctx.storage.kv.put("counter:nextActionId", v);
-    return v;
-  }
-
-  #getPending(id: number): PendingActionRow | undefined {
-    return this.ctx.storage.kv.get<PendingActionRow>(`pending:${id}`);
-  }
-
-  #deletePending(id: number): void {
-    this.ctx.storage.kv.delete(`pending:${id}`);
-  }
-
-  /** Record an applied action along with the info needed to revert it later. Keyed by the
-   * action's numeric ID so revertAction() can look it up (the overseer passes back only the ID). */
-  #storeApplied(action: HomeAssistantAction, revertInfo: HomeAssistantRevertInfo): void {
-    const row: AppliedActionRow = {
-      id: action.id,
-      action,
-      revertInfo,
-      appliedAt: Date.now(),
-    };
-    this.ctx.storage.kv.put<AppliedActionRow>(`applied:${action.id}`, row);
-  }
-
-  #getApplied(id: number): AppliedActionRow | undefined {
-    return this.ctx.storage.kv.get<AppliedActionRow>(`applied:${id}`);
-  }
-
-  async #snapshotForRevert(
-    action: HomeAssistantAction,
-    creds: HomeAssistantCredentials,
-  ): Promise<HomeAssistantRevertInfo> {
-    if (!canRevert(action)) return { type: "noRevert" };
-
-    if (action.type === "saveDashboard") {
-      const previousConfig = await fetchDashboardConfig(action.urlPath, creds);
-      return { type: "dashboardSnapshot", urlPath: action.urlPath, previousConfig };
-    }
-
-    if (action.type === "callService") {
-      // The registry snapshot already includes the current states for every entity (it's
-      // built from /api/states + the WS registries), so we can read prior state directly
-      // from it instead of issuing one REST round-trip per targeted entity.
-      const registry = await fetchRegistrySnapshot(creds);
-      const targets = resolveTargets(action.target, registry);
-      const previous: Array<{
-        entityId: string;
-        state: string;
-        attributes: Record<string, unknown>;
-      }> = [];
-      for (const entityId of targets) {
-        const state = registry.states.get(entityId);
-        if (!state) continue;
-        previous.push({
-          entityId: state.entity_id,
-          state: state.state,
-          attributes: state.attributes ?? {},
-        });
-      }
-      return {
-        type: "stateSnapshot",
-        previous,
-        originalAction: action,
-      };
-    }
-
-    return { type: "noRevert" };
   }
 
   async #snapshotMaps(): Promise<{
@@ -1482,51 +1212,32 @@ export class HomeAssistantGatekeeperImpl
 
 interface SessionContext {
   creds: HomeAssistantCredentials;
-  approvalQueue: RpcStub<ApprovalQueue>;
+  recorder: RpcStub<ActionRecorder>;
   noteAuthError: () => Promise<void>;
 
-  /** Dispose the dup'd approvalQueue RpcStub held in this context. Idempotent: safe to call
+  /** Dispose the dup'd recorder RpcStub held in this context. Idempotent: safe to call
    * more than once. The corresponding Session/capability calls this from its `[Symbol.dispose]`
    * to release the server-side stub when the session is no longer needed. */
   dispose(): void;
 
-  /** Create a fork of this context with its own freshly-`dup()`'d approvalQueue, suitable for
+  /** Create a fork of this context with its own freshly-`dup()`'d recorder, suitable for
    * passing to a child Session/capability (e.g. the EntityImpl returned by AreaImpl.getEntity).
    * The fork's `dispose()` is independent: disposing the child does NOT dispose the parent.
    * Use this whenever a parent capability hands out a sub-capability that lives independently. */
   fork(): SessionContext;
 
-  /** Submit a side-effecting action to the approval queue. Stores a pending row in DO storage
-   * and awaits the approval queue. The action body is enriched with a fresh `id`. */
-  submitWrite(body: SubmitWriteBody): Promise<void>;
+  /** Authorize a side-effecting action, perform it against Home Assistant, and record its
+   * outcome. Throws if the action is not permitted, or if Home Assistant rejects it. */
+  performWrite(action: HomeAssistantAction): Promise<void>;
 
-  /** Fetch a fresh registry snapshot (no caching yet). Used both to enrich action descriptions
-   * and to power simulation overlays. */
+  /** Fetch a fresh registry snapshot (no caching yet). Used to enrich action descriptions. */
   registrySnapshot(): Promise<RegistrySnapshot>;
-
-  /** Return the current set of pending (submitted-but-not-yet-applied) actions for this
-   * gatekeeper, in chronological (submit) order. Used by reads to overlay simulated state on
-   * top of real HA state. Synchronous: pending rows live in DO storage's KV. */
-  listPendingActions(): HomeAssistantAction[];
-
-  /** Fetch a registry snapshot AND apply pending-action overlays to its `states` map. Returns
-   * the per-entity count of pending changes applied (the sum across all entities). Used by
-   * read methods that derive from the states map (listEntities, describe, etc.) so simulation
-   * is consistent regardless of which path the read takes. */
-  registrySnapshotWithOverlay(): Promise<{ snapshot: RegistrySnapshot; appliedCount: number }>;
 }
-
-// The fields of a HomeAssistantAction that the caller fills in (everything except `id`, which
-// the gatekeeper assigns).
-type SubmitWriteBody =
-  | Omit<HomeAssistantAction & { type: "callService" }, "id">
-  | Omit<HomeAssistantAction & { type: "fireEvent" }, "id">
-  | Omit<HomeAssistantAction & { type: "saveDashboard" }, "id">;
 
 // Defensive runtime validation of action bodies. Catches the common mistake of passing a
 // single options object where positional arguments were expected, and produces an error
 // message that includes a corrected positional call when possible.
-function validateWriteBody(body: SubmitWriteBody): void {
+function validateWriteBody(body: HomeAssistantAction): void {
   if (!body || typeof body !== "object") {
     throw new TypeError(
       `Internal error: gatekeeper received a non-object action body (got ${typeof body}).`,
@@ -1959,11 +1670,6 @@ function coerceDate(value: string | Date): Date {
 
 /** Render a parenthetical suffix noting how many pending changes were folded into the result.
  * Used in ObservationDescription text. Returns the empty string if no overlay was applied. */
-function pendingSuffix(appliedCount: number): string {
-  if (appliedCount <= 0) return "";
-  return ` (includes ${appliedCount} pending change${appliedCount === 1 ? "" : "s"})`;
-}
-
 function buildTarget(target?: ServiceCallTarget): HATarget | undefined {
   if (!target) return undefined;
   const out: HATarget = {};
@@ -1993,7 +1699,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
 
   async getConfig(): Promise<HomeAssistantConfig> {
     const config = normalizeConfig(await callApi(this.#ctx, (r) => r.getConfig()));
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "Read Home Assistant configuration",
       description:
         `Fetched the HA instance configuration ` +
@@ -2008,7 +1714,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
       ws.send<any[]>({ type: "config/area_registry/list" }),
     );
     const result = list.map(normalizeArea);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "List Home Assistant areas",
       description: `Listed ${result.length} area${result.length === 1 ? "" : "s"}.`,
     });
@@ -2024,7 +1730,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
       }
     });
     const result = list.map(normalizeFloor);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "List Home Assistant floors",
       description: `Listed ${result.length} floor${result.length === 1 ? "" : "s"}.`,
     });
@@ -2040,7 +1746,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
       }
     });
     const result = list.map(normalizeLabel);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "List Home Assistant labels",
       description: `Listed ${result.length} label${result.length === 1 ? "" : "s"}.`,
     });
@@ -2052,7 +1758,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
       ws.send<any[]>({ type: "config/device_registry/list" }),
     );
     const result = list.map(normalizeDevice);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "List Home Assistant devices",
       description: `Listed ${result.length} device${result.length === 1 ? "" : "s"}.`,
     });
@@ -2060,7 +1766,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
   }
 
   async listEntities(filter?: EntityFilter): Promise<EntitySummary[]> {
-    const { snapshot, appliedCount } = await this.#ctx.registrySnapshotWithOverlay();
+    const snapshot = await this.#ctx.registrySnapshot();
     const summaries: EntitySummary[] = [];
     const seen = new Set<string>();
     for (const reg of snapshot.entities) {
@@ -2073,12 +1779,11 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
       summaries.push(buildSummary(undefined, state, snapshot.devices));
     }
     const filtered = applyEntityFilter(summaries, filter);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "List Home Assistant entities",
       description:
         `Listed ${filtered.length} entit${filtered.length === 1 ? "y" : "ies"}` +
         (filter ? ` (filter: ${JSON.stringify(filter)})` : "") +
-        pendingSuffix(appliedCount) +
         ".",
     });
     return filtered;
@@ -2093,7 +1798,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
       if (idx > 0) set.add(id.slice(0, idx));
     }
     const result = [...set].toSorted();
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "List Home Assistant integration domains",
       description: `Listed ${result.length} domain${result.length === 1 ? "" : "s"}.`,
     });
@@ -2104,7 +1809,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
     const raw = await callApi(this.#ctx, (r) => r.getServices());
     let services = normalizeServices(raw);
     if (domain) services = services.filter((s) => s.domain === domain);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "List Home Assistant services",
       description:
         `Listed ${services.length} service${services.length === 1 ? "" : "s"}` +
@@ -2118,12 +1823,12 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
     const snapshot = await this.#ctx.registrySnapshot();
     const area = snapshot.areas.find((a: any) => a.area_id === id);
     if (!area) throw new Error(`Area not found: ${id}`);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Open area capability`,
       description: `Opened a capability for area "${area.name}" (\`${id}\`).`,
     });
-    // Fork the context: the returned AreaImpl is a separate stub with its own approvalQueue
-    // dup, so disposing it doesn't release ours.
+    // Fork the context: the returned AreaImpl is a separate stub with its own recorder dup, so
+    // disposing it doesn't release ours.
     return new AreaImpl(this.#ctx.fork(), id);
   }
 
@@ -2131,7 +1836,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
     const snapshot = await this.#ctx.registrySnapshot();
     const label = snapshot.labels.find((l: any) => l.label_id === id);
     if (!label) throw new Error(`Label not found: ${id}`);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Open label capability`,
       description: `Opened a capability for label "${label.name}" (\`${id}\`).`,
     });
@@ -2143,7 +1848,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
     const device = snapshot.devices.find((d: any) => d.id === id);
     if (!device) throw new Error(`Device not found: ${id}`);
     const name = device.name_by_user ?? device.name ?? id;
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Open device capability`,
       description: `Opened a capability for device "${name}" (\`${id}\`).`,
     });
@@ -2152,7 +1857,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
 
   async getEntity(entityId: string): Promise<Entity> {
     const state = await callApi(this.#ctx, (r) => r.getState(entityId));
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Open entity capability`,
       description: `Opened a capability for entity \`${entityId}\` (current state: ${state.state}).`,
     });
@@ -2162,9 +1867,9 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
   async getDashboard(urlPath: string): Promise<Dashboard> {
     // We don't make a round-trip to HA here, but for consistency with the other `get*`
     // capability accessors (`getArea`, `getEntity`, etc.) we still record the act of obtaining
-    // the capability in the approval queue. Actual dashboard reads (describe / getConfig) and
-    // writes (saveConfig) authorize / submit themselves separately.
-    await this.#ctx.approvalQueue.authorizeObservation({
+    // the capability. Actual dashboard reads (describe / getConfig) and writes (saveConfig)
+    // authorize themselves separately.
+    await this.#ctx.recorder.authorizeObservation({
       title: `Open dashboard capability`,
       description: `Opened a capability for Lovelace dashboard \`${urlPath}\`.`,
     });
@@ -2177,7 +1882,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
     data?: Record<string, unknown>,
     target?: ServiceCallTarget,
   ): Promise<void> {
-    await this.#ctx.submitWrite({
+    await this.#ctx.performWrite({
       type: "callService",
       domain,
       service,
@@ -2188,7 +1893,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
   }
 
   async fireEvent(eventType: string, data?: Record<string, unknown>): Promise<void> {
-    await this.#ctx.submitWrite({
+    await this.#ctx.performWrite({
       type: "fireEvent",
       eventType,
       data,
@@ -2199,7 +1904,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
   async renderTemplate(template: string, variables?: Record<string, unknown>): Promise<string> {
     const result = await callApi(this.#ctx, (r) => r.renderTemplate(template, variables));
     const preview = template.length > 80 ? template.slice(0, 77) + "..." : template;
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "Render Jinja template",
       description:
         `Rendered template \`${preview}\`. Templates can read every entity in the instance, ` +
@@ -2217,7 +1922,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
       r.getHistory(entityIds, coerceDate(start), end ? coerceDate(end) : undefined, false),
     );
     const histories = normalizeHistoryBundle(bundle);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "Read entity history",
       description:
         `Read state history for ${entityIds.length} entit${entityIds.length === 1 ? "y" : "ies"} ` +
@@ -2235,7 +1940,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
       r.getLogbook(coerceDate(start), end ? coerceDate(end) : undefined, entityId),
     );
     const result = normalizeLogbook(items);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "Read Home Assistant logbook",
       description:
         `Read ${result.length} logbook entr${result.length === 1 ? "y" : "ies"} ` +
@@ -2258,7 +1963,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
       showInSidebar: d.show_in_sidebar ?? true,
       requireAdmin: d.require_admin ?? false,
     }));
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "List Lovelace dashboards",
       description: `Listed ${result.length} dashboard${result.length === 1 ? "" : "s"}.`,
     });
@@ -2270,7 +1975,7 @@ class HomeAssistantSessionImpl extends RpcTarget implements HomeAssistantSession
       ws.send<any[]>({ type: "lovelace/resources" }),
     );
     const result = list.map((r: any) => ({ id: r.id, url: r.url, type: r.type }));
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: "List Lovelace resources",
       description: `Listed ${result.length} custom Lovelace resource${result.length === 1 ? "" : "s"}.`,
     });
@@ -2306,7 +2011,7 @@ class AreaImpl extends RpcTarget implements Area {
     const area = snap.areas.find((a: any) => a.area_id === this.#areaId);
     if (!area) throw new Error(`Area not found: ${this.#areaId}`);
     const info = normalizeArea(area);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Describe area: ${info.name}`,
       description: `Read metadata for area "${info.name}" (\`${info.id}\`).`,
     });
@@ -2317,7 +2022,7 @@ class AreaImpl extends RpcTarget implements Area {
     const snap = await this.#snapshot();
     const area = snap.areas.find((a: any) => a.area_id === this.#areaId);
     if (!area?.floor_id) {
-      await this.#ctx.approvalQueue.authorizeObservation({
+      await this.#ctx.recorder.authorizeObservation({
         title: `Read area floor`,
         description: `Area \`${this.#areaId}\` is not assigned to a floor.`,
       });
@@ -2325,7 +2030,7 @@ class AreaImpl extends RpcTarget implements Area {
     }
     const floor = snap.floors.find((f: any) => f.floor_id === area.floor_id);
     const info = floor ? normalizeFloor(floor) : null;
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read area floor`,
       description: `Area \`${this.#areaId}\` is on floor "${info?.name ?? area.floor_id}".`,
     });
@@ -2333,19 +2038,18 @@ class AreaImpl extends RpcTarget implements Area {
   }
 
   async listEntities(filter?: Omit<EntityFilter, "areaId">): Promise<EntitySummary[]> {
-    const { snapshot: snap, appliedCount } = await this.#ctx.registrySnapshotWithOverlay();
+    const snap = await this.#ctx.registrySnapshot();
     // `buildSummary()` already resolves an entity's area via its device, so a single pass
     // through `applyEntityFilter` with `areaId: this.#areaId` is sufficient.
     const summaries: EntitySummary[] = snap.entities.map((reg: any) =>
       buildSummary(reg, snap.states.get(reg.entity_id), snap.devices),
     );
     const filtered = applyEntityFilter(summaries, { ...filter, areaId: this.#areaId });
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `List entities in area`,
       description:
         `Listed ${filtered.length} entit${filtered.length === 1 ? "y" : "ies"} ` +
         `in area \`${this.#areaId}\`` +
-        pendingSuffix(appliedCount) +
         `.`,
     });
     return filtered;
@@ -2354,7 +2058,7 @@ class AreaImpl extends RpcTarget implements Area {
   async listDevices(): Promise<DeviceInfo[]> {
     const snap = await this.#snapshot();
     const result = snap.devices.filter((d: any) => d.area_id === this.#areaId).map(normalizeDevice);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `List devices in area`,
       description:
         `Listed ${result.length} device${result.length === 1 ? "" : "s"} ` +
@@ -2380,7 +2084,7 @@ class AreaImpl extends RpcTarget implements Area {
     if (!inArea) {
       throw new Error(`Entity ${entityId} is not part of area ${this.#areaId}.`);
     }
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Open entity capability (in area)`,
       description: `Opened capability for entity \`${entityId}\` within area \`${this.#areaId}\`.`,
     });
@@ -2393,7 +2097,7 @@ class AreaImpl extends RpcTarget implements Area {
     if (!device) {
       throw new Error(`Device ${deviceId} is not part of area ${this.#areaId}.`);
     }
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Open device capability (in area)`,
       description: `Opened capability for device \`${deviceId}\` within area \`${this.#areaId}\`.`,
     });
@@ -2401,7 +2105,7 @@ class AreaImpl extends RpcTarget implements Area {
   }
 
   async callService(domain: string, service: string, data?: Record<string, unknown>): Promise<void> {
-    await this.#ctx.submitWrite({
+    await this.#ctx.performWrite({
       type: "callService",
       domain,
       service,
@@ -2423,7 +2127,7 @@ class AreaImpl extends RpcTarget implements Area {
       if (inArea) entityIds.push(reg.entity_id);
     }
     if (entityIds.length === 0) {
-      await this.#ctx.approvalQueue.authorizeObservation({
+      await this.#ctx.recorder.authorizeObservation({
         title: `Read area history`,
         description: `Area \`${this.#areaId}\` has no entities to fetch history for.`,
       });
@@ -2433,7 +2137,7 @@ class AreaImpl extends RpcTarget implements Area {
       r.getHistory(entityIds, coerceDate(start), end ? coerceDate(end) : undefined, false),
     );
     const histories = normalizeHistoryBundle(bundle);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read area history`,
       description:
         `Read history for ${entityIds.length} entit${entityIds.length === 1 ? "y" : "ies"} ` +
@@ -2472,7 +2176,7 @@ class LabelImpl extends RpcTarget implements Label {
     const label = snap.labels.find((l: any) => l.label_id === this.#labelId);
     if (!label) throw new Error(`Label not found: ${this.#labelId}`);
     const info = normalizeLabel(label);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Describe label: ${info.name}`,
       description: `Read metadata for label "${info.name}" (\`${info.id}\`).`,
     });
@@ -2480,7 +2184,7 @@ class LabelImpl extends RpcTarget implements Label {
   }
 
   async listEntities(filter?: Omit<EntityFilter, "labelId">): Promise<EntitySummary[]> {
-    const { snapshot: snap, appliedCount } = await this.#ctx.registrySnapshotWithOverlay();
+    const snap = await this.#ctx.registrySnapshot();
     const summaries: EntitySummary[] = [];
     for (const reg of snap.entities) {
       const labels: string[] = reg.labels ?? [];
@@ -2488,12 +2192,11 @@ class LabelImpl extends RpcTarget implements Label {
       summaries.push(buildSummary(reg, snap.states.get(reg.entity_id), snap.devices));
     }
     const filtered = applyEntityFilter(summaries, { ...filter, labelId: this.#labelId });
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `List entities with label`,
       description:
         `Listed ${filtered.length} entit${filtered.length === 1 ? "y" : "ies"} ` +
         `carrying label \`${this.#labelId}\`` +
-        pendingSuffix(appliedCount) +
         `.`,
     });
     return filtered;
@@ -2506,7 +2209,7 @@ class LabelImpl extends RpcTarget implements Label {
     if (!labels.includes(this.#labelId)) {
       throw new Error(`Entity ${entityId} does not carry label ${this.#labelId}.`);
     }
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Open entity capability (by label)`,
       description: `Opened capability for entity \`${entityId}\` carrying label \`${this.#labelId}\`.`,
     });
@@ -2514,7 +2217,7 @@ class LabelImpl extends RpcTarget implements Label {
   }
 
   async callService(domain: string, service: string, data?: Record<string, unknown>): Promise<void> {
-    await this.#ctx.submitWrite({
+    await this.#ctx.performWrite({
       type: "callService",
       domain,
       service,
@@ -2532,7 +2235,7 @@ class LabelImpl extends RpcTarget implements Label {
       if (labels.includes(this.#labelId)) entityIds.push(reg.entity_id);
     }
     if (entityIds.length === 0) {
-      await this.#ctx.approvalQueue.authorizeObservation({
+      await this.#ctx.recorder.authorizeObservation({
         title: `Read label history`,
         description: `Label \`${this.#labelId}\` has no entities.`,
       });
@@ -2542,7 +2245,7 @@ class LabelImpl extends RpcTarget implements Label {
       r.getHistory(entityIds, coerceDate(start), end ? coerceDate(end) : undefined, false),
     );
     const histories = normalizeHistoryBundle(bundle);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read label history`,
       description:
         `Read history for ${entityIds.length} entit${entityIds.length === 1 ? "y" : "ies"} ` +
@@ -2579,7 +2282,7 @@ class DeviceImpl extends RpcTarget implements Device {
     const device = snap.devices.find((d: any) => d.id === this.#deviceId);
     if (!device) throw new Error(`Device not found: ${this.#deviceId}`);
     const info = normalizeDevice(device);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Describe device: ${info.name}`,
       description: `Read metadata for device "${info.name}" (\`${this.#deviceId}\`).`,
     });
@@ -2590,7 +2293,7 @@ class DeviceImpl extends RpcTarget implements Device {
     const snap = await this.#snapshot();
     const device = snap.devices.find((d: any) => d.id === this.#deviceId);
     if (!device?.area_id) {
-      await this.#ctx.approvalQueue.authorizeObservation({
+      await this.#ctx.recorder.authorizeObservation({
         title: `Read device area`,
         description: `Device \`${this.#deviceId}\` is not assigned to an area.`,
       });
@@ -2598,7 +2301,7 @@ class DeviceImpl extends RpcTarget implements Device {
     }
     const area = snap.areas.find((a: any) => a.area_id === device.area_id);
     const info = area ? normalizeArea(area) : null;
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read device area`,
       description: `Device \`${this.#deviceId}\` is in area "${info?.name ?? device.area_id}".`,
     });
@@ -2606,19 +2309,18 @@ class DeviceImpl extends RpcTarget implements Device {
   }
 
   async listEntities(filter?: Omit<EntityFilter, "deviceId">): Promise<EntitySummary[]> {
-    const { snapshot: snap, appliedCount } = await this.#ctx.registrySnapshotWithOverlay();
+    const snap = await this.#ctx.registrySnapshot();
     const summaries: EntitySummary[] = [];
     for (const reg of snap.entities) {
       if (reg.device_id !== this.#deviceId) continue;
       summaries.push(buildSummary(reg, snap.states.get(reg.entity_id), snap.devices));
     }
     const filtered = applyEntityFilter(summaries, { ...filter, deviceId: this.#deviceId });
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `List entities for device`,
       description:
         `Listed ${filtered.length} entit${filtered.length === 1 ? "y" : "ies"} ` +
         `provided by device \`${this.#deviceId}\`` +
-        pendingSuffix(appliedCount) +
         `.`,
     });
     return filtered;
@@ -2630,7 +2332,7 @@ class DeviceImpl extends RpcTarget implements Device {
     if (!reg || reg.device_id !== this.#deviceId) {
       throw new Error(`Entity ${entityId} does not belong to device ${this.#deviceId}.`);
     }
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Open entity capability (on device)`,
       description: `Opened capability for entity \`${entityId}\` on device \`${this.#deviceId}\`.`,
     });
@@ -2638,7 +2340,7 @@ class DeviceImpl extends RpcTarget implements Device {
   }
 
   async callService(domain: string, service: string, data?: Record<string, unknown>): Promise<void> {
-    await this.#ctx.submitWrite({
+    await this.#ctx.performWrite({
       type: "callService",
       domain,
       service,
@@ -2655,7 +2357,7 @@ class DeviceImpl extends RpcTarget implements Device {
       if (reg.device_id === this.#deviceId) entityIds.push(reg.entity_id);
     }
     if (entityIds.length === 0) {
-      await this.#ctx.approvalQueue.authorizeObservation({
+      await this.#ctx.recorder.authorizeObservation({
         title: `Read device history`,
         description: `Device \`${this.#deviceId}\` has no entities.`,
       });
@@ -2665,7 +2367,7 @@ class DeviceImpl extends RpcTarget implements Device {
       r.getHistory(entityIds, coerceDate(start), end ? coerceDate(end) : undefined, false),
     );
     const histories = normalizeHistoryBundle(bundle);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read device history`,
       description:
         `Read history for ${entityIds.length} entit${entityIds.length === 1 ? "y" : "ies"} ` +
@@ -2698,43 +2400,24 @@ class EntityImpl extends RpcTarget implements Entity {
   }
 
   async describe(): Promise<EntitySummary> {
-    const { snapshot, appliedCount } = await this.#ctx.registrySnapshotWithOverlay();
+    const snapshot = await this.#ctx.registrySnapshot();
     const summary = summarizeEntity(snapshot, this.#entityId);
     if (!summary) throw new Error(`Entity not found: ${this.#entityId}`);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Describe entity: ${summary.name}`,
       description:
         `Read metadata for entity \`${this.#entityId}\` (state: ${summary.state})` +
-        pendingSuffix(appliedCount) +
         `.`,
     });
     return summary;
   }
 
   async getState(): Promise<EntityState> {
-    // Short-circuit: if no pending actions are queued, we don't need the full registry
-    // snapshot just to resolve overlay targets — a single REST round-trip suffices. When
-    // there ARE pending actions, fetch state + registry in parallel.
-    const pending = this.#ctx.listPendingActions();
-    let raw: HAStateRecord;
-    let appliedCount = 0;
-    if (pending.length === 0) {
-      raw = (await callApi(this.#ctx, (r) => r.getState(this.#entityId))) as HAStateRecord;
-    } else {
-      const [rawState, registry] = await Promise.all([
-        callApi(this.#ctx, (r) => r.getState(this.#entityId)),
-        this.#ctx.registrySnapshot(),
-      ]);
-      const result = overlayEntityState(rawState as HAStateRecord, pending, registry);
-      raw = result.state;
-      appliedCount = result.appliedCount;
-    }
-    const state = normalizeState(raw);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    const state = normalizeState(await callApi(this.#ctx, (r) => r.getState(this.#entityId)));
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read entity state`,
       description:
         `Read state of \`${this.#entityId}\` (current: ${state.state})` +
-        pendingSuffix(appliedCount) +
         `.`,
     });
     return state;
@@ -2744,7 +2427,7 @@ class EntityImpl extends RpcTarget implements Entity {
     const snap = await this.#ctx.registrySnapshot();
     const reg = snap.entities.find((e: any) => e.entity_id === this.#entityId);
     if (!reg?.device_id) {
-      await this.#ctx.approvalQueue.authorizeObservation({
+      await this.#ctx.recorder.authorizeObservation({
         title: `Read entity device`,
         description: `Entity \`${this.#entityId}\` is not provided by a device.`,
       });
@@ -2752,7 +2435,7 @@ class EntityImpl extends RpcTarget implements Entity {
     }
     const device = snap.devices.find((d: any) => d.id === reg.device_id);
     const info = device ? normalizeDevice(device) : null;
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read entity device`,
       description: `Entity \`${this.#entityId}\` is provided by device "${info?.name ?? reg.device_id}".`,
     });
@@ -2763,7 +2446,7 @@ class EntityImpl extends RpcTarget implements Entity {
     const snap = await this.#ctx.registrySnapshot();
     const summary = summarizeEntity(snap, this.#entityId);
     if (!summary?.areaId) {
-      await this.#ctx.approvalQueue.authorizeObservation({
+      await this.#ctx.recorder.authorizeObservation({
         title: `Read entity area`,
         description: `Entity \`${this.#entityId}\` is not assigned to an area.`,
       });
@@ -2771,7 +2454,7 @@ class EntityImpl extends RpcTarget implements Entity {
     }
     const area = snap.areas.find((a: any) => a.area_id === summary.areaId);
     const info = area ? normalizeArea(area) : null;
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read entity area`,
       description: `Entity \`${this.#entityId}\` is in area "${info?.name ?? summary.areaId}".`,
     });
@@ -2785,7 +2468,7 @@ class EntityImpl extends RpcTarget implements Entity {
     const result = snap.labels
       .filter((l: any) => labelIds.includes(l.label_id))
       .map(normalizeLabel);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read entity labels`,
       description: `Entity \`${this.#entityId}\` carries ${result.length} label${result.length === 1 ? "" : "s"}.`,
     });
@@ -2797,7 +2480,7 @@ class EntityImpl extends RpcTarget implements Entity {
       r.getHistory([this.#entityId], coerceDate(start), end ? coerceDate(end) : undefined, false),
     );
     const histories = normalizeHistoryBundle(bundle);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read entity history`,
       description:
         `Read history for \`${this.#entityId}\` from ${coerceDate(start).toISOString()}` +
@@ -2812,7 +2495,7 @@ class EntityImpl extends RpcTarget implements Entity {
       r.getLogbook(coerceDate(start), end ? coerceDate(end) : undefined, this.#entityId),
     );
     const result = normalizeLogbook(items);
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read entity logbook`,
       description: `Read ${result.length} logbook entr${result.length === 1 ? "y" : "ies"} for \`${this.#entityId}\`.`,
     });
@@ -2822,7 +2505,7 @@ class EntityImpl extends RpcTarget implements Entity {
   // ---- Writes ---------------------------------------------------------
 
   #submitServiceCall(service: string, data?: Record<string, unknown>): Promise<void> {
-    return this.#ctx.submitWrite({
+    return this.#ctx.performWrite({
       type: "callService",
       domain: this.#domain,
       service,
@@ -3094,7 +2777,7 @@ class DashboardImpl extends RpcTarget implements Dashboard {
 
   async describe(): Promise<DashboardInfo> {
     const info = await this.#describeRaw();
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Describe dashboard: ${info.title}`,
       description: `Read metadata for dashboard \`${this.#urlPath}\` (mode: ${info.mode}).`,
     });
@@ -3102,37 +2785,27 @@ class DashboardImpl extends RpcTarget implements Dashboard {
   }
 
   async getConfig(): Promise<DashboardConfig> {
-    const real = await callWs(this.#ctx, async (ws) =>
+    const config = await callWs(this.#ctx, async (ws) =>
       ws.send<DashboardConfig>({
         type: "lovelace/config",
         url_path: this.#urlPath === "lovelace" ? null : this.#urlPath,
       }),
     );
-    // Overlay any pending saveDashboard actions for this dashboard so the reader sees a
-    // simulated post-write configuration.
-    const pending = this.#ctx.listPendingActions();
-    const urlPathArg = this.#urlPath === "lovelace" ? null : this.#urlPath;
-    const { config: overlaid, appliedCount } = overlayDashboardConfig(real, urlPathArg, pending);
-    const config = overlaid as DashboardConfig;
     const viewCount = Array.isArray(config?.views) ? config.views.length : 0;
-    await this.#ctx.approvalQueue.authorizeObservation({
+    await this.#ctx.recorder.authorizeObservation({
       title: `Read dashboard config: ${this.#urlPath}`,
       description:
         `Read Lovelace configuration for dashboard \`${this.#urlPath}\` ` +
         `(${viewCount} view${viewCount === 1 ? "" : "s"})` +
-        pendingSuffix(appliedCount) +
         `.`,
     });
     return config;
   }
 
   async saveConfig(config: DashboardConfig): Promise<void> {
-    // We don't preflight-check YAML-mode dashboards here — doing so would require opening a
-    // WebSocket connection at submit time just to read the dashboard list. Instead, executeAction
-    // performs the check at apply time, where a WebSocket is already open for the save itself,
-    // and HA itself returns an error for YAML-mode dashboards (which propagates as an action
-    // failure that the user sees in the approval queue).
-    await this.#ctx.submitWrite({
+    // We don't preflight-check YAML-mode dashboards: HA returns an error for one, which
+    // propagates as an action failure.
+    await this.#ctx.performWrite({
       type: "saveDashboard",
       urlPath: this.#urlPath === "lovelace" ? null : this.#urlPath,
       config: config as unknown,

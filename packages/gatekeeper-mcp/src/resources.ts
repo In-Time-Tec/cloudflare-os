@@ -1,7 +1,8 @@
 import type { SupportedResource } from "@gadgets/workshop-shared/gatekeeper";
 
 const DESCRIPTION =
-  "An MCP endpoint you supply. Tools are discovered automatically, and writes need approval.";
+  "An MCP endpoint you supply. Tools are discovered automatically; anything that is not read-only " +
+  "is recorded as an action.";
 
 const HTTPS_RESOURCE: SupportedResource = {
   urlPattern: "https://*",

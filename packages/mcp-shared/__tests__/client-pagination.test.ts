@@ -58,7 +58,7 @@ describe("McpClient.listTools", () => {
   });
 
   it("drops a description the server did not send as a string", async () => {
-    // A non-string passed the length cap untouched and reached the approval prompt, where
+    // A non-string passed the length cap untouched and reached the log entry, where
     // `quoteUntrusted` called `.replace` on it and took down every action call for the connection.
     stubPages([{ tools: [{ name: "odd", description: 42, title: { nested: true } }] }]);
     const client = new McpClient("https://mcp.example.com/mcp", async () => null);
@@ -66,7 +66,7 @@ describe("McpClient.listTools", () => {
     expect(tool.description).toBeUndefined();
     expect(tool.title).toBeUndefined();
 
-    // The prompt every non-read call passes through.
+    // The rendering every non-read call passes through.
     expect(() => describeCall({
       serverName: "Acme", endpoint: "https://mcp.example.com/mcp", tool,
       toolArgs: {}, mode: "action", classifiedBy: "default",

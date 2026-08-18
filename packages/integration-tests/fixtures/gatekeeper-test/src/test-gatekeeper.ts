@@ -22,7 +22,7 @@
 
 import { DurableObject, WorkerEntrypoint, type RpcStub } from "cloudflare:workers";
 import type {
-  AccountDescription, ActionKind, ApprovalQueue, Gatekeeper, GatekeeperConnectCallback,
+  AccountDescription, ActionCapability, ActionRecorder, Gatekeeper, GatekeeperConnectCallback,
   GatekeeperUser, GatekeeperUserVerifier, ResourceDescription, ResourceConfiguratorFrame,
   SupportedResource, VendorDescription, AuthenticatedIdentity,
 } from "@gadgets/workshop-shared/gatekeeper";
@@ -247,11 +247,11 @@ export class TestGatekeeper
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
+  async getActionCatalog(): Promise<ActionCapability[]> {
     return [];
   }
 
-  async startSession(_approvalQueue: RpcStub<ApprovalQueue>): Promise<TestSession> {
+  async startSession(_recorder: RpcStub<ActionRecorder>): Promise<TestSession> {
     return {};
   }
 
@@ -278,15 +278,6 @@ export class TestGatekeeper
     this.ctx.storage.kv.delete(`observer:${id}`);
   }
 
-  async applyAction(_action: number): Promise<void> {
-    throw new Error("The test gatekeeper submits no actions.");
-  }
-
-  async rejectAction(_action: number): Promise<void> {}
-
-  async revertAction(_action: number): Promise<void> {
-    throw new Error("The test gatekeeper submits no actions.");
-  }
 }
 
 // ---------------------------------------------------------------------------

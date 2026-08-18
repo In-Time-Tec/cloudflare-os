@@ -69,7 +69,7 @@ export type McpContentBlock = ContentBlock;
 /**
  * Per-tool behaviour hints from the server (MCP `ToolAnnotations`). Claims the server makes about
  * itself, not guarantees: `readOnlyHint` classifies reads on every server, but the remaining hints
- * influence auto-approval only for an administrator-configured endpoint. See `classifyTool()`.
+ * are not read at all. See `classifyTool()`.
  */
 export type McpToolAnnotations = ToolAnnotations;
 
@@ -145,7 +145,7 @@ export class McpCallNotDispatchedError extends Error {
  * server that answered with a 401 or 403 told us it did not act. A generic HTTP or tools/call error,
  * connection that dropped, a reply that would not parse, or a body too large to read leaves no way
  * to tell whether the request arrived and was carried out before the failure. Retrying the second
- * kind is how one approval becomes two writes.
+ * kind is how one authorized call becomes two writes.
  */
 export type CallOutcome = "declined" | "unknown";
 

@@ -1,16 +1,16 @@
 // Shared mechanics of an MCP gatekeeper facet. Connector-owned subclasses retain their Wrangler
-// identity, props, labels, trust source, and account lookup.
+// identity, props, labels, and account lookup.
 
 import { DurableObject, type RpcStub } from "cloudflare:workers";
 import type {
+  ActionCapability,
   ActionKind,
-  ApprovalQueue,
+  ActionRecorder,
   Gatekeeper,
   GatekeeperUserVerifier,
   ResourceDescription,
 } from "@gadgets/workshop-shared/gatekeeper";
 
-import { ActionStore, REVERT_UNSUPPORTED_MESSAGE } from "./action-store.js";
 import { CATALOG_TTL_MS, scopedTools } from "./catalog.js";
 import type { McpClient } from "./client.js";
 import {
@@ -21,10 +21,10 @@ import {
 } from "./connection.js";
 import type { McpLog } from "./log.js";
 import { formatToolScope, type ToolScope } from "./scope.js";
-import { McpSessionBase, type McpSessionHost, type StoredAction } from "./session.js";
+import { McpSessionBase, type McpSessionHost } from "./session.js";
 import { installToolMethods } from "./session-methods.js";
 import { observerRefusalMessage } from "./sharing-policy.js";
-import { actionKindFor, type ClassifiedTool, type ServerTrust } from "./tools.js";
+import { actionKindFor, type ClassifiedTool } from "./tools.js";
 
 type FacetProps = {
   endpoint: string;
@@ -33,7 +33,7 @@ type FacetProps = {
 
 type SessionConstructor<Session extends McpSessionBase> = new (
   host: McpSessionHost,
-  queue: RpcStub<ApprovalQueue>,
+  recorder: RpcStub<ActionRecorder>,
 ) => Session;
 
 /** Common session, catalog, action, and sharing behavior for connector-owned MCP facets. */
@@ -44,23 +44,14 @@ export abstract class McpFacetBase<
 > extends DurableObject<Env, Props> implements Gatekeeper<Session>, McpSessionHost {
   #toolsPromise: Promise<ClassifiedTool[]> | undefined;
   #toolsFetchedAt = 0;
-  #toolsTrust: ServerTrust | undefined;
-  #actionStore: ActionStore | undefined;
-
-  #actions(): ActionStore {
-    return this.#actionStore ??= new ActionStore(this.ctx.storage.sql);
-  }
 
   /** Connector-owned logger carrying the facet's safe identifying fields. */
   protected abstract get log(): McpLog;
 
-  /** Current trust tier, read whenever catalog classification is used. */
-  protected abstract get trust(): ServerTrust;
-
   /** Connector-decorated session class exposed through RPC. */
   protected abstract get sessionClass(): SessionConstructor<Session>;
 
-  /** Namespace preventing approval policy from crossing resource boundaries. */
+  /** Namespace preventing action policy from crossing resource boundaries. */
   protected abstract get actionScopeTag(): string;
 
   /** Human-readable resource named when refusing an observer. */
@@ -95,11 +86,8 @@ export abstract class McpFacetBase<
 
   /** Returns this facet's scoped and classified tool catalog. */
   tools(): Promise<ClassifiedTool[]> {
-    const trust = this.trust;
-    if (!this.#toolsPromise || this.#toolsTrust !== trust
-        || Date.now() - this.#toolsFetchedAt > CATALOG_TTL_MS) {
+    if (!this.#toolsPromise || Date.now() - this.#toolsFetchedAt > CATALOG_TTL_MS) {
       this.#toolsFetchedAt = Date.now();
-      this.#toolsTrust = trust;
       this.#toolsPromise = scopedTools({
         store: this.ctx.storage.kv,
         log: this.log,
@@ -107,7 +95,6 @@ export abstract class McpFacetBase<
         account: this.account(),
         endpoint: this.endpoint,
         scope: this.scope,
-        trust,
       }).catch(err => {
         this.#toolsPromise = undefined;
         throw err;
@@ -116,15 +103,31 @@ export abstract class McpFacetBase<
     return this.#toolsPromise;
   }
 
-  /** Returns action kinds that this facet's current catalog permits auto-approving. */
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
+  /**
+   * One capability per non-read tool in the current catalog. The server's own tool description is
+   * the only summary available, so it is the summary; the risk profile is the honest floor for an
+   * arbitrary tool on a server this deployment does not model.
+   */
+  async getActionCatalog(): Promise<ActionCapability[]> {
     return (await this.tools())
-      .filter(entry => entry.autoApprovable)
-      .map(entry => actionKindFor(this.actionScopeTag, entry.tool.name));
+      .filter(entry => entry.mode === "action")
+      .map(entry => ({
+        kind: actionKindFor(this.actionScopeTag, entry.tool.name),
+        summary: entry.tool.title ?? entry.tool.description ?? entry.tool.name,
+        risk: {
+          // MCP describes no inverse operation for a tool call, gives no way to check what one
+          // did, and says nothing about who can see the result. The arguments are whatever the
+          // agent composed.
+          reversible: "no",
+          reach: "acts-on-world",
+          audience: "external",
+          freeform: true,
+        },
+      }));
   }
 
   /** Starts a session with generated per-tool methods when the catalog is available. */
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<Session> {
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<Session> {
     let SessionClass = this.sessionClass;
     try {
       SessionClass = installToolMethods(SessionClass, await this.tools());
@@ -133,7 +136,7 @@ export abstract class McpFacetBase<
         event: "session.tool-methods.unavailable", error: err,
       });
     }
-    return new SessionClass(this, approvalQueue.dup());
+    return new SessionClass(this, recorder.dup());
   }
 
   /** Refuses observers so MCP bindings can only be opened by their owner. */
@@ -144,43 +147,12 @@ export abstract class McpFacetBase<
   /** Removes no observer state because observers are never admitted. */
   async removeObserver(_id: string): Promise<void> {}
 
-  /** Stages an MCP action for approval. */
-  stageAction(toolName: string, args: Record<string, unknown>): StoredAction {
-    return this.#actions().stage(toolName, args);
-  }
-
-  /** Discards an action whose approval submission failed. */
-  discardStagedAction(id: number): void {
-    this.#actions().discard(id);
-  }
-
-  /** Looks up a staged or completed action. */
-  lookupAction(id: number): StoredAction | undefined {
-    return this.#actions().get(id);
-  }
-
-  /** Applies an approved action without retrying an outcome-unknown write. */
-  async applyAction(action: number): Promise<void> {
-    await this.#actions().apply(
-      action, fn => this.call(fn, { retryOnExpiry: false }), this.log);
-  }
-
-  /** Rejects a pending action. */
-  async rejectAction(action: number): Promise<void> {
-    this.#actions().reject(action);
-  }
-
-  /** Reports that MCP actions cannot be reverted. */
-  async revertAction(_action: number): Promise<{ message: string }> {
-    return { message: REVERT_UNSUPPORTED_MESSAGE };
-  }
-
   /** Runs a call against this facet's endpoint and account. */
   call<T>(fn: (client: McpClient) => Promise<T>, options?: WithClientOptions): Promise<T> {
     return withClient(this.env, this.account(), this.endpoint, fn, options);
   }
 
-  /** Namespaces one tool's approval kind to this facet. */
+  /** Namespaces one tool's action kind to this facet. */
   actionKindFor(toolName: string): ActionKind {
     return actionKindFor(this.actionScopeTag, toolName);
   }

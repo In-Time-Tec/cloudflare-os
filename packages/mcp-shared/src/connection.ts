@@ -4,7 +4,7 @@
 // A lapsed transport session is re-established and the call retried once, but only for reads. The
 // MCP spec says a 404 on a session-bearing request means the session is gone, implying the request
 // was never dispatched, but a 404 from something in front of the server could arrive after the call
-// landed. A write is left to fail as outcome-unknown; its approved action is closed, and a person
+// landed. A write is left to fail as outcome-unknown; its action is recorded as such, and a person
 // must deliberately stage a new one after checking whether the first took effect.
 
 import {

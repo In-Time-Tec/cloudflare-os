@@ -36,8 +36,8 @@ export function connectFormHtml(path: string, error?: string): string {
   <form method="POST" action="${escapeHtml(path)}">
     <label for="url">Server URL</label>
     <input id="url" type="url" name="url" placeholder="https://example.com/mcp" required autofocus>
-    <p class="hint">Only connect a server you trust. Its own annotations decide which of its tools
-    run without asking you and which wait for your approval, and an annotation is only as
+    <p class="hint">Only connect a server you trust. Its own annotation decides which of its tools
+    count as reads and which are recorded as actions you are granting, and an annotation is only as
     trustworthy as the server that sent it.</p>
     <button type="submit">Continue</button>
   </form>

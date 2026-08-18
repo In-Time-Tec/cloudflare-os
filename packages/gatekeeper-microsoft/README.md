@@ -3,7 +3,7 @@
 Microsoft Entra ID sign-in plus delegated Microsoft 365 capabilities for Cloudflare OS:
 Outlook Mail, Outlook Calendar, OneDrive/SharePoint files, and Microsoft Teams. Graph access
 is implemented in `@gadgets/microsoft-graph` (an Effect v4 client); this Worker owns Entra
-OAuth, token lifecycle, resource grants, observations, and approval-gated actions.
+OAuth, token lifecycle, resource grants, observations, and recorded actions.
 
 ## Two account modes, one Entra app
 
@@ -29,9 +29,9 @@ or browser.
 ## Security model
 
 - Every read is authorized through `authorizeObservation()` before data is returned.
-- Every write is staged in DO storage and submitted through the approval queue; the Graph call
-  happens only in `applyAction()`. Writes are not simulated, so their descriptions set
-  `awaitDecision` and the agent pauses until the user decides. Write action kinds:
+- Every write is authorized through `authorizeAction()`, performed against Graph inline, and its
+  outcome reported on the returned handle, so a session returns real provider ids. Write action
+  kinds, each declared in `getActionCatalog()` with its risk:
 
   | Kind | Covers |
   |---|---|
@@ -45,9 +45,8 @@ or browser.
   | `microsoft.teams.message.post` | postToChat, postToChannel |
   | `microsoft.teams.chat.create` | createChat |
 
-  Every kind is offered for **opt-in** auto-approval through the deployment's existing
-  approvals UI; all default to manual review. Deletes are a separate kind so users can allow
-  edits without allowing deletion.
+  Deletes are a separate kind from other file writes so a deployment can disable deletion while
+  allowing edits.
 - All four capabilities expose broad personal data, so `addObserver` always throws: a
   workspace bound to a Microsoft resource cannot be shared.
 - Bounded content: attachments and binary downloads ≤ 3 MB, text reads ≤ 512 KB, uploads

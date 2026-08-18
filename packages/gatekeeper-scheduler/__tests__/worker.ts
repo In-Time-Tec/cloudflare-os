@@ -20,7 +20,7 @@ let events: string[] = [];
 let callbackScheduleIds: string[] = [];
 let activeCallbacks = 0;
 let maxActiveCallbacks = 0;
-let disposedApprovalQueues = 0;
+let disposedRecorders = 0;
 let disposedCallbacks = 0;
 let blockPoint: BlockPoint | null = null;
 let blockedPoint: BlockPoint | null = null;
@@ -33,7 +33,7 @@ async function pauseIfBlocked(point: BlockPoint): Promise<void> {
   while (blockPoint === point) await new Promise((resolve) => setTimeout(resolve, 1));
 }
 
-class TestApprovalQueue extends RpcTarget {
+class TestActionRecorder extends RpcTarget {
   async authorizeObservation(): Promise<void> {
     events.push("authorize");
     await pauseIfBlocked("authorization");
@@ -41,7 +41,7 @@ class TestApprovalQueue extends RpcTarget {
   }
 
   [Symbol.dispose](): void {
-    disposedApprovalQueues++;
+    disposedRecorders++;
   }
 }
 
@@ -67,11 +67,11 @@ class TestCallback extends RpcTarget {
 
 /** Test-only persistent hook initiator. */
 export class TestHooks extends WorkerEntrypoint {
-  async startHook(): Promise<{ callback: TestCallback; approvalQueue: TestApprovalQueue }> {
+  async startHook(): Promise<{ callback: TestCallback; recorder: TestActionRecorder }> {
     events.push("start");
     await pauseIfBlocked("start");
     if (mode === "start-reject") throw new Error("opaque admission rejection");
-    return { callback: new TestCallback(), approvalQueue: new TestApprovalQueue() };
+    return { callback: new TestCallback(), recorder: new TestActionRecorder() };
   }
 
   configure(nextMode: TestMode): void {
@@ -97,7 +97,7 @@ export class TestHooks extends WorkerEntrypoint {
       events: [...events],
       callbackScheduleIds: [...callbackScheduleIds],
       maxActiveCallbacks,
-      disposedApprovalQueues,
+      disposedRecorders,
       disposedCallbacks,
     };
   }
@@ -109,7 +109,7 @@ export class TestHooks extends WorkerEntrypoint {
     callbackScheduleIds = [];
     activeCallbacks = 0;
     maxActiveCallbacks = 0;
-    disposedApprovalQueues = 0;
+    disposedRecorders = 0;
     disposedCallbacks = 0;
     blockedPoint = null;
   }

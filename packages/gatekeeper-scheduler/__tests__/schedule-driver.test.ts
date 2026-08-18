@@ -25,7 +25,7 @@ type TestHooks = HookInitiator<ScheduleHookTarget> & {
     events: string[];
     callbackScheduleIds: string[];
     maxActiveCallbacks: number;
-    disposedApprovalQueues: number;
+    disposedRecorders: number;
     disposedCallbacks: number;
   }>;
   release(): Promise<void>;
@@ -320,7 +320,7 @@ describe("ScheduleDriver", () => {
     ).toHaveLength(2);
     await vi.waitFor(async () => {
       expect(await testEnv.TEST_HOOKS.read()).toMatchObject({
-        disposedApprovalQueues: 2,
+        disposedRecorders: 2,
         disposedCallbacks: 2,
       });
     }, { timeout: 5_000 });
@@ -542,7 +542,7 @@ describe("ScheduleDriver", () => {
     ]);
     await vi.waitFor(async () => {
       expect(await testEnv.TEST_HOOKS.read()).toMatchObject({
-        disposedApprovalQueues: 2,
+        disposedRecorders: 2,
         disposedCallbacks: 2,
       });
     }, { timeout: 5_000 });

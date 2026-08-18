@@ -57,10 +57,7 @@ export type CalendarReminder = {
 
 /** A Google Calendar event. */
 export type CalendarEvent = {
-  /**
-   * Google Calendar event ID. Newly created events that have not yet been committed to Google
-   * Calendar use a temporary ID of the form `pending:create:{n}`.
-   */
+  /** Google Calendar event ID. */
   id: string;
   /** Event title. */
   title: string;
@@ -84,8 +81,6 @@ export type CalendarEvent = {
   visibility?: "default" | "public" | "private" | "confidential";
   /** Whether this event is part of a recurring series. */
   recurringEventId?: string;
-  /** True for events that have been submitted but not yet committed to Google Calendar. */
-  pending?: boolean;
 };
 
 /** Event fields accepted when creating a new event. */

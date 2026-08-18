@@ -10,13 +10,12 @@ import type { ConnectedServer, ServerAuthKind } from "@gadgets/mcp-shared/accoun
 import type { ToolScope } from "@gadgets/mcp-shared/scope";
 import { fetchOptions } from "@gadgets/mcp-shared/fetch";
 import { sameEndpoint } from "@gadgets/mcp-shared/scope";
-import type { ServerTrust } from "@gadgets/mcp-shared/tools";
 
 /** The configured portal, once the deployment's vars have been read and validated. */
 export type PortalConfig = {
   /** The portal's MCP endpoint URL (Streamable HTTP). */
   endpoint: string;
-  /** Display name shown in the connector list and in every approval prompt. */
+  /** Display name shown in the connector list and on every recorded call. */
   name: string;
   /** How to authenticate. */
   auth: ServerAuthKind;
@@ -24,18 +23,6 @@ export type PortalConfig = {
 
 /** Stable id used in binding names, action kinds, and generated type names. */
 export const PORTAL_SERVER_ID = "portal";
-
-/**
- * Whether this portal's tool annotations may drive auto-approval. Off unless a deployment asserts
- * that the upstreams are trusted, since a portal relays annotations written by servers the
- * administrator never reviewed.
- *
- * Call it at the point of use, every time. Persisting the answer would leave accounts vetted after
- * an administrator withdrew the assertion, until each one reconnected.
- */
-export function portalTrust(env: Env): ServerTrust {
-  return (env.MCP_PORTAL_TRUST_ANNOTATIONS ?? "").toLowerCase() === "true" ? "vetted" : "byo";
-}
 
 /**
  * Reads the deployment's portal configuration, or null when it is not configured. A missing or
@@ -102,14 +89,15 @@ export function portalResource(config: PortalConfig): SupportedResource {
     urlPattern: `${new URL(config.endpoint).origin}/*`,
     title: config.name,
     description:
-      "Tools from the servers behind this portal. Writes need approval.",
+      "Tools from the servers behind this portal. Every call that is not read-only is recorded " +
+      "as an action.",
   };
 }
 
 /**
  * The connected-server record stored on an account, derived entirely from configuration.
  * `provenance` is what keeps the far side from renaming itself over `MCP_PORTAL_NAME` in every
- * approval prompt (see `McpAccountBase.complete`).
+ * recorded call (see `McpAccountBase.complete`).
  */
 export function portalServer(config: PortalConfig): ConnectedServer {
   return {

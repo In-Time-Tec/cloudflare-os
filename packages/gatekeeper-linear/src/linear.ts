@@ -7,7 +7,10 @@ import {
   GatekeeperVendor as GatekeeperVendorIface,
   Gatekeeper,
   ResourceDescription,
-  ApprovalQueue,
+  ActionCapability,
+  ActionDescription,
+  ActionKind,
+  ActionRecorder,
   ObservationDescription,
   VendorDescription,
   GatekeeperConnectCallback,
@@ -63,7 +66,6 @@ import {
   type RawOrganization,
   type RawConnection,
   type IssueCreateInput,
-  type IssueUpdateInput,
 } from "./linear-api";
 import {
   LinearWorkspaceConfiguratorUI,
@@ -196,7 +198,7 @@ function snippet(text: string | null | undefined, fallback = ""): string {
   return trimmed.length > 140 ? `${trimmed.slice(0, 137)}...` : trimmed;
 }
 
-function disposeStub(stub: RpcStub<ApprovalQueue>): void {
+function disposeStub(stub: RpcStub<ActionRecorder>): void {
   (stub as unknown as Disposable)[Symbol.dispose]();
 }
 
@@ -900,44 +902,72 @@ export class LinearVerifier extends WorkerEntrypoint<Env, LinearVerifierProps>
 }
 
 // ---------------------------------------------------------------------------
-// Action records — stored in the gatekeeper DO and applied/reverted on approval.
+// Actions. Every write this gatekeeper performs lands in a Linear workspace, which its members and
+// any of their integrations can see, so nothing here is private.
 
-type ActionStatus = "pending" | "applied";
-
-// A display-level patch merged into a RawIssue when simulating a pending updateIssue action.
-// Captured at submit time (with resolved display objects) so reads need no extra lookups.
-type IssueOverlayPatch = {
-  title?: string;
-  description?: string;
-  priority?: number;
-  dueDate?: string | null;
-  state?: RawWorkflowState;
-  assignee?: RawUser | null;
-  project?: RawProject | null;
-  parent?: RawIssue["parent"];
+const ISSUE_CREATE: ActionKind = { tag: "linear.issue.create", label: "Create an issue" };
+const ISSUE_EDIT: ActionKind = { tag: "linear.issue.edit", label: "Edit an issue's text" };
+const ISSUE_TRIAGE: ActionKind = {
+  tag: "linear.issue.triage", label: "Change an issue's state, assignee, priority, or scheduling",
 };
+const ISSUE_LABEL: ActionKind = { tag: "linear.issue.label", label: "Change an issue's labels" };
+const ISSUE_ARCHIVE: ActionKind = { tag: "linear.issue.archive", label: "Archive or restore an issue" };
+const ISSUE_COMMENT: ActionKind = { tag: "linear.issue.comment", label: "Comment on an issue" };
+const LABEL_CREATE: ActionKind = { tag: "linear.label.create", label: "Create a team label" };
 
-type StoredAction =
-  | { id: number; status: ActionStatus; kind: "createIssue"; input: IssueCreateInput;
-      provisionalId: string; createdIssueId?: string; synthetic: RawIssue; title: string }
-  | { id: number; status: ActionStatus; kind: "updateIssue"; issueRef: string;
-      input: IssueUpdateInput; previous: IssueUpdateInput; patch: IssueOverlayPatch; title: string }
-  | { id: number; status: ActionStatus; kind: "addLabels"; issueRef: string;
-      labelIds: string[]; labels: RawLabel[]; title: string }
-  | { id: number; status: ActionStatus; kind: "removeLabels"; issueRef: string;
-      labelIds: string[]; title: string }
-  | { id: number; status: ActionStatus; kind: "postComment"; issueRef: string; body: string;
-      createdCommentId?: string; synthetic: RawComment; title: string }
-  | { id: number; status: ActionStatus; kind: "createLabel"; teamId: string; name: string;
-      color?: string; description?: string; createdLabelId?: string; synthetic: RawLabel; title: string }
-  | { id: number; status: ActionStatus; kind: "archive"; issueRef: string; archived: boolean; title: string };
-
-// Distributive Omit so the union's variant-specific fields survive; enqueue assigns id + status.
-type StoredActionDraft = StoredAction extends infer T
-  ? T extends { id: number } ? Omit<T, "id" | "status"> : never
-  : never;
-
-type ActionDescriptionDraft = { title: string; body: string; implementsRevert: boolean };
+const ACTION_CATALOG: ActionCapability[] = [
+  {
+    kind: ISSUE_CREATE,
+    summary: "Create issues in the workspace",
+    risk: {
+      // Linear issues are archived rather than deleted, which is a human decision.
+      reversible: "manual", reach: "creates-content", audience: "shared", freeform: true,
+    },
+  },
+  {
+    kind: ISSUE_EDIT,
+    summary: "Rewrite the title or description of an existing issue",
+    risk: {
+      reversible: "manual", reach: "modifies-content", audience: "shared", freeform: true,
+    },
+  },
+  {
+    kind: ISSUE_TRIAGE,
+    summary: "Move an issue between states, reassign it, or change its priority, project, parent, or due date",
+    risk: {
+      // A state change notifies the assignee and can trip Linear automations.
+      reversible: "manual", reach: "modifies-content", audience: "shared", freeform: false,
+    },
+  },
+  {
+    kind: ISSUE_LABEL,
+    summary: "Add or remove labels on an issue",
+    risk: {
+      reversible: "manual", reach: "modifies-content", audience: "shared", freeform: false,
+    },
+  },
+  {
+    kind: ISSUE_ARCHIVE,
+    summary: "Archive an issue, or restore an archived one",
+    risk: {
+      reversible: "manual", reach: "modifies-content", audience: "shared", freeform: false,
+    },
+  },
+  {
+    kind: ISSUE_COMMENT,
+    summary: "Post a comment on an issue, notifying its subscribers",
+    risk: {
+      reversible: "manual", reach: "creates-content", audience: "shared", freeform: true,
+    },
+  },
+  {
+    kind: LABEL_CREATE,
+    summary: "Create a label in a team's shared label set",
+    risk: {
+      reversible: "manual", reach: "creates-content", audience: "shared", freeform: true,
+    },
+  },
+];
 
 type LinearGatekeeperImplProps = {
   userObjectId: string;
@@ -976,22 +1006,7 @@ export class LinearGatekeeperImpl extends DurableObject<Env, LinearGatekeeperImp
     }
   }
 
-  #nextCounter(name: string): number {
-    const key = `counter:${name}`;
-    const value = (this.ctx.storage.kv.get<number>(key) ?? 0) + 1;
-    this.ctx.storage.kv.put(key, value);
-    return value;
-  }
-
   // ---- helpers used by session impls (local, same-DO calls; non-generic, no token) ----
-
-  nextProvisionalIssueId(): string {
-    return `~${this.#nextCounter("provisional")}`;
-  }
-
-  nextProvisionalCommentId(): string {
-    return `~comment:${this.#nextCounter("comment")}`;
-  }
 
   /** The workspace url key (first path segment of linear.app URLs), used to build canonical URLs. */
   workspaceKey(): string {
@@ -1058,195 +1073,41 @@ export class LinearGatekeeperImpl extends DurableObject<Env, LinearGatekeeperImp
    * this also tracks those teams as observed data sets and excludes any observers lacking access to a
    * newly-seen one; for team/issue bindings it is a plain authorizeObservation (the bound resource is
    * a single ACL unit verified up front). Every team-scoped read should go through this rather than
-   * calling approvalQueue.authorizeObservation directly. `teamIds` may be empty for workspace-level
+   * calling recorder.authorizeObservation directly. `teamIds` may be empty for workspace-level
    * reads (org metadata, member directory) that any workspace member may see.
    */
   async authorizeTeamObservation(
-    queue: RpcStub<ApprovalQueue>,
+    recorder: RpcStub<ActionRecorder>,
     teamIds: string[],
     description: ObservationDescription,
   ): Promise<void> {
     const check = this.ctx.props.resourceKind === "workspace" && teamIds.length > 0
       ? await this.#prepareTeamObservation(teamIds)
       : {pendingTeams: [], commit() {}};
-    await queue.authorizeObservation({
+    await recorder.authorizeObservation({
       ...description, excludeObservers: check.excludeObservers,
     });
     check.commit();
   }
 
   /**
-   * Resolve an issue reference (real identifier/UUID, or provisional id) to the id usable against
-   * Linear. Throws if a provisional issue's create has not actually been applied yet (used by
-   * applyAction/revertAction, which must hit the real API).
+   * Authorize an action, run it against Linear, and record its outcome. A failure after the request
+   * was sent leaves the outcome unknown, so it is reported as possibly having taken effect.
    */
-  resolveIssueRef(ref: string): string {
-    if (!ref.startsWith("~")) return ref;
-    const real = this.ctx.storage.kv.get<string>(`provisional:${ref}`);
-    if (!real) {
-      throw new Error(
-        `Issue ${ref} has not been created on Linear yet — its create action has not been applied.`);
+  async performAction<T>(
+    recorder: RpcStub<ActionRecorder>,
+    description: ActionDescription,
+    perform: (api: LinearApi) => Promise<T>,
+  ): Promise<T> {
+    const handle = await recorder.authorizeAction(description);
+    try {
+      const result = await this.#run(perform);
+      await handle.succeeded();
+      return result;
+    } catch (error) {
+      await handle.failed(error instanceof Error ? error.message : String(error), true);
+      throw error;
     }
-    return real;
-  }
-
-  // Resolve a label id that may be a provisional `~label:` id (from a pending createLabel) to the
-  // real label id its create produced. Returns the id unchanged if already real; undefined for a
-  // provisional label whose create hasn't been applied yet.
-  #resolveLabelId(id: string): string | undefined {
-    if (!id.startsWith("~label:")) return id;
-    return this.ctx.storage.kv.get<string>(`provisionalLabel:${id}`);
-  }
-
-  // Like #resolveLabelId, but throws if a provisional label hasn't been created yet (used by
-  // applyAction, where the create must have been applied first).
-  #requireLabelId(id: string): string {
-    const real = this.#resolveLabelId(id);
-    if (!real) {
-      throw new Error(`Label ${id} has not been created on Linear yet — its create action has not been applied.`);
-    }
-    return real;
-  }
-
-  async enqueue(
-    approvalQueue: RpcStub<ApprovalQueue>,
-    action: StoredActionDraft,
-    description: ActionDescriptionDraft,
-  ): Promise<void> {
-    const id = this.#nextCounter("action");
-    this.ctx.storage.kv.put<StoredAction>(`action:${id}`, { ...action, id, status: "pending" } as StoredAction);
-    this.#invalidatePendingActions();
-    await approvalQueue.submitAction(id, {
-      title: description.title,
-      description: description.body,
-      implementsRevert: description.implementsRevert,
-    });
-  }
-
-  // ---- simulation: overlay pending (submitted-but-not-applied) actions onto reads ----
-
-  // Memoized within a DO instance; invalidated by #invalidatePendingActions() whenever any action
-  // record changes. Avoids re-scanning storage once per issue during a page overlay.
-  #pendingActionsCache?: StoredAction[];
-
-  #pendingActions(): StoredAction[] {
-    if (!this.#pendingActionsCache) {
-      this.#pendingActionsCache = [...this.ctx.storage.kv.list<StoredAction>({ prefix: "action:" })]
-        .map(([, value]) => value)
-        .filter(a => a.status === "pending")
-        .toSorted((a, b) => a.id - b.id);
-    }
-    return this.#pendingActionsCache;
-  }
-
-  #invalidatePendingActions(): void {
-    this.#pendingActionsCache = undefined;
-  }
-
-  // Real UUID for a provisional ref, if its create has been applied.
-  #provisionalRealId(ref: string): string | undefined {
-    return ref.startsWith("~") ? this.ctx.storage.kv.get<string>(`provisional:${ref}`) : ref;
-  }
-
-  // Does this action target the given issue? Matches on the issue's UUID, human identifier, or the
-  // provisional ref it was created under.
-  #actionTargetsIssue(actionRef: string, issue: RawIssue): boolean {
-    if (actionRef === issue.id || actionRef === issue.identifier) return true;
-    if (actionRef.startsWith("~")) {
-      // Either the synthetic provisional issue itself, or a real issue this ref now resolves to.
-      if (issue.id === actionRef) return true;
-      const real = this.ctx.storage.kv.get<string>(`provisional:${actionRef}`);
-      return real !== undefined && real === issue.id;
-    }
-    return false;
-  }
-
-  // Apply pending field/label edits for an issue to a copy. Does not consider archive state
-  // (that's handled separately by #isPendingArchived, so direct reads still return the issue).
-  #overlayIssue(issue: RawIssue): RawIssue {
-    const result: RawIssue = { ...issue };
-    let labels = [...(issue.labels?.nodes ?? [])];
-    for (const action of this.#pendingActions()) {
-      if (!("issueRef" in action) || !this.#actionTargetsIssue(action.issueRef, issue)) continue;
-      switch (action.kind) {
-        case "updateIssue": {
-          const p = action.patch;
-          if (p.title !== undefined) result.title = p.title;
-          if (p.description !== undefined) result.description = p.description;
-          if (p.priority !== undefined) result.priority = p.priority;
-          if (p.dueDate !== undefined) result.dueDate = p.dueDate;
-          if (p.state !== undefined) result.state = p.state;
-          if (p.assignee !== undefined) result.assignee = p.assignee;
-          if (p.project !== undefined) result.project = p.project;
-          if (p.parent !== undefined) result.parent = p.parent;
-          break;
-        }
-        case "addLabels": {
-          const have = new Set(labels.map(l => l.id));
-          labels = [...labels, ...action.labels.filter(l => !have.has(l.id))];
-          break;
-        }
-        case "removeLabels": {
-          const drop = new Set(action.labelIds);
-          labels = labels.filter(l => !drop.has(l.id));
-          break;
-        }
-      }
-    }
-    result.labels = { nodes: labels, pageInfo: { hasNextPage: false, endCursor: null } };
-    return result;
-  }
-
-  // True if the most recent pending archive action for this issue archives it.
-  #isPendingArchived(issue: RawIssue): boolean {
-    let archived = false;
-    let seen = false;
-    for (const action of this.#pendingActions()) {
-      if (action.kind === "archive" && this.#actionTargetsIssue(action.issueRef, issue)) {
-        archived = action.archived;
-        seen = true;
-      }
-    }
-    return seen && archived;
-  }
-
-  // Synthetic issues for pending creates that haven't been applied, after overlaying any pending
-  // edits queued against them. Optionally filtered to a team.
-  #pendingCreatedIssues(teamId: string | null): RawIssue[] {
-    const out: RawIssue[] = [];
-    for (const action of this.#pendingActions()) {
-      if (action.kind !== "createIssue" || action.createdIssueId) continue;
-      if (teamId && action.synthetic.team.id !== teamId) continue;
-      if (this.#isPendingArchived(action.synthetic)) continue;
-      out.push(this.#overlayIssue(action.synthetic));
-    }
-    return out;
-  }
-
-  // Match pending comments to an issue by the exact ref used, by the resolved real id (so a
-  // comment posted on a now-applied provisional issue still shows), or via #actionTargetsIssue
-  // when the full issue is available.
-  #pendingCommentsFor(issueRef: string, realId: string | undefined, issue: RawIssue | null): RawComment[] {
-    const out: RawComment[] = [];
-    for (const action of this.#pendingActions()) {
-      if (action.kind !== "postComment") continue;
-      const matches =
-        action.issueRef === issueRef ||
-        (realId !== undefined && this.#provisionalRealId(action.issueRef) === realId) ||
-        (issue !== null && this.#actionTargetsIssue(action.issueRef, issue));
-      if (matches) out.push(action.synthetic);
-    }
-    return out;
-  }
-
-  #pendingCreatedLabels(teamId: string): RawLabel[] {
-    const out: RawLabel[] = [];
-    for (const action of this.#pendingActions()) {
-      if (action.kind === "createLabel" && !action.createdLabelId && action.teamId === teamId) {
-        out.push(action.synthetic);
-      }
-    }
-    return out;
   }
 
   // ---- concrete observation methods (return raw data; sessions normalize + authorize) ----
@@ -1269,58 +1130,24 @@ export class LinearGatekeeperImpl extends DurableObject<Env, LinearGatekeeperImp
     return await this.#run(api => api.listProjects(teamId ? { teamId } : {}, { first, after, includeArchived }));
   }
 
-  // Overlay pending edits onto a fetched page, drop pending-archived issues, and (on the first
-  // page) inject pending-created issues for this scope.
-  #simulatePage(conn: RawConnection<RawIssue>, after: string | undefined, teamId: string | null,
-                includeArchived: boolean | undefined, inject: boolean): RawConnection<RawIssue> {
-    const nodes = conn.nodes
-      .filter(n => includeArchived || !this.#isPendingArchived(n))
-      .map(n => this.#overlayIssue(n));
-    const injected = inject && after === undefined ? this.#pendingCreatedIssues(teamId) : [];
-    return { nodes: [...injected, ...nodes], pageInfo: conn.pageInfo };
-  }
-
   async issuesPage(args: IssuePageArgs, after: string | undefined, first: number): Promise<RawConnection<RawIssue>> {
     const { filter, orderBy } = buildIssueFilter(args);
-    const conn = await this.#run(api => api.listIssues({ first, after, filter, orderBy, includeArchived: args.includeArchived }));
-    return this.#simulatePage(conn, after, args.teamId ?? null, args.includeArchived, true);
+    return await this.#run(api => api.listIssues({ first, after, filter, orderBy, includeArchived: args.includeArchived }));
   }
 
   async searchPage(term: string, args: IssuePageArgs, after: string | undefined, first: number): Promise<RawConnection<RawIssue>> {
     const { filter } = buildIssueFilter(args);
-    const conn = await this.#run(api => api.searchIssues({ term, first, after, filter, includeArchived: args.includeArchived }));
-    // No injection for search: synthetic issues can't be meaningfully matched against the query.
-    return this.#simulatePage(conn, after, args.teamId ?? null, args.includeArchived, false);
+    return await this.#run(api => api.searchIssues({ term, first, after, filter, includeArchived: args.includeArchived }));
   }
 
   async issueRaw(ref: string): Promise<RawIssue> {
-    // A provisional issue whose create hasn't been applied: return its synthetic, overlaid copy.
-    if (ref.startsWith("~") && !this.#provisionalRealId(ref)) {
-      const create = this.#pendingActions().find(
-        (a): a is Extract<StoredAction, { kind: "createIssue" }> =>
-          a.kind === "createIssue" && a.provisionalId === ref);
-      if (!create) throw new Error(`Linear issue not found: ${ref}`);
-      return this.#overlayIssue(create.synthetic);
-    }
-    const issue = await this.#run(api => api.getIssue(this.resolveIssueRef(ref)));
+    const issue = await this.#run(api => api.getIssue(ref));
     if (!issue) throw new Error(`Linear issue not found: ${ref}`);
-    return this.#overlayIssue(issue);
+    return issue;
   }
 
   async commentsPage(ref: string, after: string | undefined, first: number): Promise<RawConnection<RawComment>> {
-    // A provisional issue whose create hasn't been applied: only pending comments exist.
-    if (ref.startsWith("~") && !this.#provisionalRealId(ref)) {
-      const nodes = after === undefined ? this.#pendingCommentsFor(ref, undefined, null) : [];
-      return { nodes, pageInfo: { hasNextPage: false, endCursor: null } };
-    }
-    const id = this.resolveIssueRef(ref);
-    const conn = await this.#run(api => api.listComments(id, { first, after }));
-    // Comments are oldest-first, so append pending comments once the real pages are exhausted.
-    if (!conn.pageInfo.hasNextPage) {
-      const pending = this.#pendingCommentsFor(ref, id, null);
-      if (pending.length > 0) return { nodes: [...conn.nodes, ...pending], pageInfo: conn.pageInfo };
-    }
-    return conn;
+    return await this.#run(api => api.listComments(ref, { first, after }));
   }
 
   // Short-TTL cache in DO storage for rarely-changing team metadata that sits on hot paths
@@ -1338,16 +1165,14 @@ export class LinearGatekeeperImpl extends DurableObject<Env, LinearGatekeeperImp
       () => this.#run(api => api.listWorkflowStates(teamId)));
   }
 
-  /** Real labels only — used internally to resolve label names to real ids. */
   async labelsRaw(teamId: string): Promise<RawLabel[]> {
     return await this.#cachedFetch(`cache:labels:${teamId}`, METADATA_CACHE_TTL_MS,
       () => this.#run(api => api.listLabels(teamId)));
   }
 
-  /** Labels for display to the gadget: real labels plus pending-created ones. */
-  async labelsForDisplay(teamId: string): Promise<RawLabel[]> {
-    const real = await this.labelsRaw(teamId);
-    return [...real, ...this.#pendingCreatedLabels(teamId)];
+  /** Drops the cached label set for a team, after a create changed it. */
+  invalidateLabels(teamId: string): void {
+    this.ctx.storage.kv.delete(`cache:labels:${teamId}`);
   }
 
   async cyclesPage(teamId: string, after: string | undefined, first: number): Promise<RawConnection<RawCycle>> {
@@ -1439,18 +1264,18 @@ export class LinearGatekeeperImpl extends DurableObject<Env, LinearGatekeeperImp
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions() {
-    return [];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return ACTION_CATALOG;
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<LinearWorkspace | LinearTeam | LinearIssue> {
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<LinearWorkspace | LinearTeam | LinearIssue> {
     switch (this.ctx.props.resourceKind) {
       case "team":
-        return new LinearTeamSessionImpl(this, approvalQueue.dup(), this.ctx.props.teamKeyOrId!);
+        return new LinearTeamSessionImpl(this, recorder.dup(), this.ctx.props.teamKeyOrId!);
       case "issue":
-        return new LinearIssueImpl(this, approvalQueue.dup(), this.ctx.props.issueRef!);
+        return new LinearIssueImpl(this, recorder.dup(), this.ctx.props.issueRef!);
       default:
-        return new LinearWorkspaceSessionImpl(this, approvalQueue.dup());
+        return new LinearWorkspaceSessionImpl(this, recorder.dup());
     }
   }
 
@@ -1522,175 +1347,6 @@ export class LinearGatekeeperImpl extends DurableObject<Env, LinearGatekeeperImp
   async removeObserver(id: string): Promise<void> {
     this.ctx.storage.kv.delete(this.#observerKey(id));
   }
-
-  async applyAction(actionId: number): Promise<void> {
-    const action = this.ctx.storage.kv.get<StoredAction>(`action:${actionId}`);
-    if (!action) throw new Error(`Unknown action: ${actionId}`);
-
-    await this.#run(async api => {
-      switch (action.kind) {
-        case "createIssue": {
-          // A parent that was itself a pending create may now be real — resolve its provisional id.
-          if (action.input.parentId) action.input.parentId = this.resolveIssueRef(action.input.parentId);
-          // Resolve any provisional `~label:` ids (labels created earlier in the batch).
-          if (action.input.labelIds) action.input.labelIds = action.input.labelIds.map(id => this.#requireLabelId(id));
-          const issue = await api.createIssue(action.input);
-          action.createdIssueId = issue.id;
-          this.ctx.storage.kv.put<StoredAction>(`action:${actionId}`, action);
-          this.ctx.storage.kv.put<string>(`provisional:${action.provisionalId}`, issue.id);
-          break;
-        }
-        case "updateIssue": {
-          // Resolve a provisional parent id (set via setParent against a pending-created issue).
-          if (action.input.parentId) action.input.parentId = this.resolveIssueRef(action.input.parentId);
-          await api.updateIssue(this.resolveIssueRef(action.issueRef), action.input);
-          break;
-        }
-        case "addLabels": {
-          const issue = await api.getIssue(this.resolveIssueRef(action.issueRef));
-          if (!issue) break;
-          // Resolve any provisional `~label:` ids to the real labels their create actions produced.
-          const add = action.labelIds.map(id => this.#requireLabelId(id));
-          const current = (issue.labels?.nodes ?? []).map(l => l.id);
-          await api.updateIssue(issue.id, { labelIds: [...new Set([...current, ...add])] });
-          break;
-        }
-        case "removeLabels": {
-          const issue = await api.getIssue(this.resolveIssueRef(action.issueRef));
-          if (!issue) break;
-          // Skip unresolved provisional labels: they were never really attached, so nothing to remove.
-          const remove = new Set(action.labelIds.map(id => this.#resolveLabelId(id)).filter((id): id is string => !!id));
-          const next = (issue.labels?.nodes ?? []).map(l => l.id).filter(id => !remove.has(id));
-          await api.updateIssue(issue.id, { labelIds: next });
-          break;
-        }
-        case "postComment": {
-          const comment = await api.createComment(this.resolveIssueRef(action.issueRef), action.body);
-          action.createdCommentId = comment.id;
-          this.ctx.storage.kv.put<StoredAction>(`action:${actionId}`, action);
-          break;
-        }
-        case "createLabel": {
-          const label = await api.createLabel({
-            teamId: action.teamId, name: action.name, color: action.color, description: action.description,
-          });
-          action.createdLabelId = label.id;
-          this.ctx.storage.kv.put<StoredAction>(`action:${actionId}`, action);
-          // Map the provisional label id to the real one, so dependent addLabels can resolve it.
-          this.ctx.storage.kv.put<string>(`provisionalLabel:${action.synthetic.id}`, label.id);
-          // The team's real label set changed; drop the cache so the new label shows promptly.
-          this.ctx.storage.kv.delete(`cache:labels:${action.teamId}`);
-          break;
-        }
-        case "archive":
-          await api.setIssueArchived(this.resolveIssueRef(action.issueRef), action.archived);
-          break;
-      }
-    });
-
-    // Mark applied and keep the record (so revert can find it). The change is now real, so the
-    // simulation overlay (which only considers "pending" actions) stops applying it.
-    action.status = "applied";
-    this.ctx.storage.kv.put<StoredAction>(`action:${actionId}`, action);
-    this.#invalidatePendingActions();
-  }
-
-  // Recursively drop every pending action that depends on a rejected provisional issue: edits and
-  // comments targeting it (issueRef), and sub-issues / re-parents pointing at it (input.parentId).
-  // Sub-issues are themselves creates, so recurse into their provisional ids.
-  #cascadeRejectProvisional(provisionalId: string): void {
-    this.#invalidatePendingActions();
-    this.ctx.storage.kv.delete(`provisional:${provisionalId}`);
-    for (const dep of this.#pendingActions()) {
-      const targetsRef = "issueRef" in dep && dep.issueRef === provisionalId;
-      const targetsParent =
-        (dep.kind === "createIssue" || dep.kind === "updateIssue") && dep.input.parentId === provisionalId;
-      if (!targetsRef && !targetsParent) continue;
-      this.ctx.storage.kv.delete(`action:${dep.id}`);
-      if (dep.kind === "createIssue") this.#cascadeRejectProvisional(dep.provisionalId);
-    }
-    this.#invalidatePendingActions();
-  }
-
-  async rejectAction(actionId: number): Promise<void | { restart?: boolean }> {
-    const action = this.ctx.storage.kv.get<StoredAction>(`action:${actionId}`);
-    this.ctx.storage.kv.delete(`action:${actionId}`);
-    this.#invalidatePendingActions();
-    if (!action) return;
-
-    // Rejecting a create invalidates every action queued against its provisional id, which can
-    // never be applied. Drop them all and ask the Overseer to restart the gadget.
-    if (action.kind === "createIssue") {
-      this.#cascadeRejectProvisional(action.provisionalId);
-      return { restart: true };
-    }
-
-    // Rejecting a label create invalidates any pending addLabels/removeLabels that referenced its
-    // provisional id (they could never resolve to a real label). Drop them. No restart needed —
-    // createLabel returns no handle the gadget holds.
-    if (action.kind === "createLabel") {
-      const provisionalLabelId = action.synthetic.id;
-      for (const dep of this.#pendingActions()) {
-        if ((dep.kind === "addLabels" || dep.kind === "removeLabels") &&
-            dep.labelIds.includes(provisionalLabelId)) {
-          this.ctx.storage.kv.delete(`action:${dep.id}`);
-        }
-      }
-      this.#invalidatePendingActions();
-    }
-  }
-
-  async revertAction(actionId: number):
-      Promise<void | { message?: string; canRetry?: boolean; restart?: boolean }> {
-    const action = this.ctx.storage.kv.get<StoredAction>(`action:${actionId}`);
-    if (!action) throw new Error(`Unknown action: ${actionId}`);
-
-    await this.#run(async api => {
-      switch (action.kind) {
-        case "createIssue":
-          if (action.createdIssueId) {
-            await api.deleteIssue(action.createdIssueId);
-            this.ctx.storage.kv.delete(`provisional:${action.provisionalId}`);
-          }
-          break;
-        case "updateIssue":
-          await api.updateIssue(this.resolveIssueRef(action.issueRef), action.previous);
-          break;
-        case "addLabels": {
-          // Remove the labels we added (only those still present).
-          const issue = await api.getIssue(this.resolveIssueRef(action.issueRef));
-          if (!issue) break;
-          const added = new Set(action.labelIds.map(id => this.#resolveLabelId(id)).filter((id): id is string => !!id));
-          const next = (issue.labels?.nodes ?? []).map(l => l.id).filter(id => !added.has(id));
-          await api.updateIssue(issue.id, { labelIds: next });
-          break;
-        }
-        case "removeLabels": {
-          // Re-add the labels we removed.
-          const issue = await api.getIssue(this.resolveIssueRef(action.issueRef));
-          if (!issue) break;
-          const restore = action.labelIds.map(id => this.#resolveLabelId(id)).filter((id): id is string => !!id);
-          const current = (issue.labels?.nodes ?? []).map(l => l.id);
-          await api.updateIssue(issue.id, { labelIds: [...new Set([...current, ...restore])] });
-          break;
-        }
-        case "postComment":
-          if (action.createdCommentId) await api.deleteComment(action.createdCommentId);
-          break;
-        case "createLabel":
-          if (action.createdLabelId) await api.deleteLabel(action.createdLabelId);
-          break;
-        case "archive":
-          await api.setIssueArchived(this.resolveIssueRef(action.issueRef), !action.archived);
-          break;
-      }
-    });
-
-    // The action has been undone; drop its record so it can't be reverted twice. (Reverting an
-    // applied action doesn't affect the pending set, but keep the cache honest regardless.)
-    this.ctx.storage.kv.delete(`action:${actionId}`);
-    this.#invalidatePendingActions();
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1700,7 +1356,7 @@ class StreamingCursor<TRaw, TOut> extends RpcTarget implements Cursor<TOut> {
   #gk: LinearGatekeeperImpl;
   #fetchPage: (after: string | undefined) => Promise<RawConnection<TRaw>>;
   #normalize: (raw: TRaw) => TOut;
-  #queue: RpcStub<ApprovalQueue>;
+  #recorder: RpcStub<ActionRecorder>;
   #describe: (items: TOut[]) => ObservationDescription;
   // The team(s) whose data a given raw page reveals, for workspace-binding observer tracking (see
   // LinearGatekeeperImpl.authorizeTeamObservation). Empty for workspace-level pages any member sees.
@@ -1710,7 +1366,7 @@ class StreamingCursor<TRaw, TOut> extends RpcTarget implements Cursor<TOut> {
 
   constructor(
     gk: LinearGatekeeperImpl,
-    queue: RpcStub<ApprovalQueue>,
+    recorder: RpcStub<ActionRecorder>,
     fetchPage: (after: string | undefined) => Promise<RawConnection<TRaw>>,
     normalize: (raw: TRaw) => TOut,
     describe: (items: TOut[]) => ObservationDescription,
@@ -1718,7 +1374,7 @@ class StreamingCursor<TRaw, TOut> extends RpcTarget implements Cursor<TOut> {
   ) {
     super();
     this.#gk = gk;
-    this.#queue = queue;
+    this.#recorder = recorder;
     this.#fetchPage = fetchPage;
     this.#normalize = normalize;
     this.#describe = describe;
@@ -1730,14 +1386,14 @@ class StreamingCursor<TRaw, TOut> extends RpcTarget implements Cursor<TOut> {
     const conn = await this.#fetchPage(this.#after);
     const items = conn.nodes.map(this.#normalize);
     // Authorize before advancing pagination state, so a denied page can be retried.
-    await this.#gk.authorizeTeamObservation(this.#queue, this.#teamIdsOf(conn.nodes), this.#describe(items));
+    await this.#gk.authorizeTeamObservation(this.#recorder, this.#teamIdsOf(conn.nodes), this.#describe(items));
     this.#after = conn.pageInfo.endCursor ?? undefined;
     if (!conn.pageInfo.hasNextPage) this.#done = true;
     return items;
   }
 
   [Symbol.dispose](): void {
-    disposeStub(this.#queue);
+    disposeStub(this.#recorder);
   }
 }
 
@@ -1747,24 +1403,24 @@ class StreamingCursor<TRaw, TOut> extends RpcTarget implements Cursor<TOut> {
 @validateRpc()
 class LinearWorkspaceSessionImpl extends RpcTarget implements LinearWorkspace {
   #gk: LinearGatekeeperImpl;
-  #queue: RpcStub<ApprovalQueue>;
+  #recorder: RpcStub<ActionRecorder>;
   #wsKey: string;
 
-  constructor(gk: LinearGatekeeperImpl, queue: RpcStub<ApprovalQueue>) {
+  constructor(gk: LinearGatekeeperImpl, recorder: RpcStub<ActionRecorder>) {
     super();
     this.#gk = gk;
-    this.#queue = queue;
+    this.#recorder = recorder;
     this.#wsKey = gk.workspaceKey();
   }
 
   [Symbol.dispose](): void {
-    disposeStub(this.#queue);
+    disposeStub(this.#recorder);
   }
 
   async getMetadata(): Promise<LinearWorkspaceMetadata> {
     const org = await this.#gk.orgRaw();
     // Workspace-level metadata is visible to any workspace member, so no team attribution is needed.
-    await this.#gk.authorizeTeamObservation(this.#queue, [], {
+    await this.#gk.authorizeTeamObservation(this.#recorder, [], {
       title: "Read workspace info",
       description: `Read metadata for the Linear workspace **${org.name}**.`,
     });
@@ -1775,7 +1431,7 @@ class LinearWorkspaceSessionImpl extends RpcTarget implements LinearWorkspace {
     const first = clampPageSize(options?.resultsPerPage);
     return new StreamingCursor<RawTeam, LinearTeamSummary>(
       this.#gk,
-      this.#queue.dup(),
+      this.#recorder.dup(),
       after => this.#gk.teamsPage(after, first, options?.includeArchived ?? false),
       raw => normTeamSummary(raw, this.#wsKey),
       items => ({ title: "List teams", description: `Listed ${items.length} team(s) in the workspace.` }),
@@ -1786,14 +1442,14 @@ class LinearWorkspaceSessionImpl extends RpcTarget implements LinearWorkspace {
   }
 
   async getTeam(teamKeyOrId: string): Promise<LinearTeam> {
-    return new LinearTeamSessionImpl(this.#gk, this.#queue.dup(), teamKeyOrId);
+    return new LinearTeamSessionImpl(this.#gk, this.#recorder.dup(), teamKeyOrId);
   }
 
   async listProjects(options?: LinearPageOptions): Promise<Cursor<LinearProjectSummary>> {
     const first = clampPageSize(options?.resultsPerPage);
     return new StreamingCursor<RawProject, LinearProjectSummary>(
       this.#gk,
-      this.#queue.dup(),
+      this.#recorder.dup(),
       after => this.#gk.projectsPage(null, after, first, options?.includeArchived ?? false),
       normProjectSummary,
       items => ({ title: "List projects", description: `Listed ${items.length} project(s) in the workspace.` }),
@@ -1808,7 +1464,7 @@ class LinearWorkspaceSessionImpl extends RpcTarget implements LinearWorkspace {
     const args = issueArgs(filter);
     return new StreamingCursor<RawIssue, LinearIssueSummary>(
       this.#gk,
-      this.#queue.dup(),
+      this.#recorder.dup(),
       after => this.#gk.issuesPage(args, after, first),
       raw => normIssueSummary(raw, this.#wsKey),
       items => ({ title: "List issues", description: `Listed ${items.length} issue(s) across the workspace.` }),
@@ -1821,7 +1477,7 @@ class LinearWorkspaceSessionImpl extends RpcTarget implements LinearWorkspace {
     const args = issueArgs(query);
     return new StreamingCursor<RawIssue, LinearIssueSummary>(
       this.#gk,
-      this.#queue.dup(),
+      this.#recorder.dup(),
       after => this.#gk.searchPage(query.text, args, after, first),
       raw => normIssueSummary(raw, this.#wsKey),
       items => ({ title: "Search issues", description: `Searched workspace issues for "${query.text}" (${items.length} result(s)).` }),
@@ -1830,17 +1486,17 @@ class LinearWorkspaceSessionImpl extends RpcTarget implements LinearWorkspace {
   }
 
   async getIssue(id: string): Promise<LinearIssue> {
-    return new LinearIssueImpl(this.#gk, this.#queue.dup(), id);
+    return new LinearIssueImpl(this.#gk, this.#recorder.dup(), id);
   }
 
   async createIssue(options: LinearCreateIssueOptions): Promise<LinearIssue> {
-    return await createIssueViaQueue(this.#gk, this.#queue, options, { requireTeam: true });
+    return await createIssue(this.#gk, this.#recorder, options, { requireTeam: true });
   }
 
   async findMembers(query?: string): Promise<LinearUser[]> {
     const users = await this.#gk.findMembersRaw(query);
     // The workspace member directory is visible to any workspace member, so no team attribution.
-    await this.#gk.authorizeTeamObservation(this.#queue, [], {
+    await this.#gk.authorizeTeamObservation(this.#recorder, [], {
       title: "Find members",
       description: `Looked up ${users.length} workspace member(s)${query ? ` matching "${query}"` : ""}.`,
     });
@@ -1854,21 +1510,21 @@ class LinearWorkspaceSessionImpl extends RpcTarget implements LinearWorkspace {
 @validateRpc()
 class LinearTeamSessionImpl extends RpcTarget implements LinearTeam {
   #gk: LinearGatekeeperImpl;
-  #queue: RpcStub<ApprovalQueue>;
+  #recorder: RpcStub<ActionRecorder>;
   #teamKeyOrId: string;
   #wsKey: string;
   #teamPromise?: Promise<RawTeam>;
 
-  constructor(gk: LinearGatekeeperImpl, queue: RpcStub<ApprovalQueue>, teamKeyOrId: string) {
+  constructor(gk: LinearGatekeeperImpl, recorder: RpcStub<ActionRecorder>, teamKeyOrId: string) {
     super();
     this.#gk = gk;
-    this.#queue = queue;
+    this.#recorder = recorder;
     this.#teamKeyOrId = teamKeyOrId;
     this.#wsKey = gk.workspaceKey();
   }
 
   [Symbol.dispose](): void {
-    disposeStub(this.#queue);
+    disposeStub(this.#recorder);
   }
 
   #team(): Promise<RawTeam> {
@@ -1883,7 +1539,7 @@ class LinearTeamSessionImpl extends RpcTarget implements LinearTeam {
 
   async getMetadata(): Promise<LinearTeamMetadata> {
     const team = await this.#team();
-    await this.#gk.authorizeTeamObservation(this.#queue, [team.id], {
+    await this.#gk.authorizeTeamObservation(this.#recorder, [team.id], {
       title: "Read team info",
       description: `Read metadata for team **${team.key} · ${team.name}**.`,
     });
@@ -1896,7 +1552,7 @@ class LinearTeamSessionImpl extends RpcTarget implements LinearTeam {
     const args = { ...issueArgs(filter), teamId: team.id };
     return new StreamingCursor<RawIssue, LinearIssueSummary>(
       this.#gk,
-      this.#queue.dup(),
+      this.#recorder.dup(),
       after => this.#gk.issuesPage(args, after, first),
       raw => normIssueSummary(raw, this.#wsKey),
       items => ({ title: "List team issues", description: `Listed ${items.length} issue(s) in team ${team.key}.` }),
@@ -1910,7 +1566,7 @@ class LinearTeamSessionImpl extends RpcTarget implements LinearTeam {
     const args = { ...issueArgs(query), teamId: team.id };
     return new StreamingCursor<RawIssue, LinearIssueSummary>(
       this.#gk,
-      this.#queue.dup(),
+      this.#recorder.dup(),
       after => this.#gk.searchPage(query.text, args, after, first),
       raw => normIssueSummary(raw, this.#wsKey),
       items => ({ title: "Search team issues", description: `Searched team ${team.key} for "${query.text}" (${items.length} result(s)).` }),
@@ -1920,18 +1576,18 @@ class LinearTeamSessionImpl extends RpcTarget implements LinearTeam {
 
   async getIssue(id: string): Promise<LinearIssue> {
     const team = await this.#team();
-    return new LinearIssueImpl(this.#gk, this.#queue.dup(), id, team.id);
+    return new LinearIssueImpl(this.#gk, this.#recorder.dup(), id, team.id);
   }
 
   async createIssue(options: LinearCreateIssueOptions): Promise<LinearIssue> {
     const team = await this.#team();
-    return await createIssueViaQueue(this.#gk, this.#queue, { ...options, teamId: team.id }, { requireTeam: false }, team.id);
+    return await createIssue(this.#gk, this.#recorder, { ...options, teamId: team.id }, { requireTeam: false }, team.id);
   }
 
   async listWorkflowStates(): Promise<LinearWorkflowState[]> {
     const team = await this.#team();
     const states = await this.#gk.workflowStatesRaw(team.id);
-    await this.#gk.authorizeTeamObservation(this.#queue, [team.id], {
+    await this.#gk.authorizeTeamObservation(this.#recorder, [team.id], {
       title: "List workflow states",
       description: `Listed ${states.length} workflow state(s) for team ${team.key}.`,
     });
@@ -1940,8 +1596,8 @@ class LinearTeamSessionImpl extends RpcTarget implements LinearTeam {
 
   async listLabels(): Promise<LinearLabel[]> {
     const team = await this.#team();
-    const labels = await this.#gk.labelsForDisplay(team.id);
-    await this.#gk.authorizeTeamObservation(this.#queue, [team.id], {
+    const labels = await this.#gk.labelsRaw(team.id);
+    await this.#gk.authorizeTeamObservation(this.#recorder, [team.id], {
       title: "List labels",
       description: `Listed ${labels.length} label(s) for team ${team.key}.`,
     });
@@ -1950,25 +1606,23 @@ class LinearTeamSessionImpl extends RpcTarget implements LinearTeam {
 
   async createLabel(name: string, options?: LinearCreateLabelOptions): Promise<LinearLabel> {
     const team = await this.#team();
-    // Check real labels and any pending-created ones, so two creates can't collide on the same
-    // name (which would also collide on the `~label:<name>` provisional id).
-    const existing = await this.#gk.labelsForDisplay(team.id);
+    const existing = await this.#gk.labelsRaw(team.id);
     if (existing.some(l => l.name.toLowerCase() === name.toLowerCase())) {
       throw new Error(`A label named "${name}" already exists in team ${team.key}.`);
     }
-    const synthetic: RawLabel = { id: `~label:${name}`, name, color: options?.color ?? null };
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "createLabel", teamId: team.id, name, color: options?.color, description: options?.description,
-        synthetic, title: `Create label "${name}"` },
+    const label = await this.#gk.performAction(
+      this.#recorder,
       {
         title: `Create label "${name}" in ${team.key}`,
-        body: `Create a new label named **${name}**${options?.color ? ` (color ${options.color})` : ""} in team ${team.key}.`,
-        implementsRevert: true,
+        description: `Create a new label named **${name}**${options?.color ? ` (color ${options.color})` : ""} in team ${team.key}.`,
+        actionKind: LABEL_CREATE,
       },
+      api => api.createLabel({
+        teamId: team.id, name, color: options?.color, description: options?.description,
+      }),
     );
-    // Pending approval — return the same provisional descriptor that listLabels will show.
-    return normLabel(synthetic);
+    this.#gk.invalidateLabels(team.id);
+    return normLabel(label);
   }
 
   async listProjects(options?: LinearPageOptions): Promise<Cursor<LinearProjectSummary>> {
@@ -1976,7 +1630,7 @@ class LinearTeamSessionImpl extends RpcTarget implements LinearTeam {
     const first = clampPageSize(options?.resultsPerPage);
     return new StreamingCursor<RawProject, LinearProjectSummary>(
       this.#gk,
-      this.#queue.dup(),
+      this.#recorder.dup(),
       after => this.#gk.projectsPage(team.id, after, first, options?.includeArchived ?? false),
       normProjectSummary,
       items => ({ title: "List team projects", description: `Listed ${items.length} project(s) for team ${team.key}.` }),
@@ -1990,7 +1644,7 @@ class LinearTeamSessionImpl extends RpcTarget implements LinearTeam {
     const first = clampPageSize(options?.resultsPerPage);
     return new StreamingCursor<RawCycle, LinearCycleSummary>(
       this.#gk,
-      this.#queue.dup(),
+      this.#recorder.dup(),
       after => this.#gk.cyclesPage(team.id, after, first),
       normCycle,
       items => ({ title: "List cycles", description: `Listed ${items.length} cycle(s) for team ${team.key}.` }),
@@ -2001,7 +1655,7 @@ class LinearTeamSessionImpl extends RpcTarget implements LinearTeam {
   async listMembers(): Promise<LinearUser[]> {
     const team = await this.#team();
     const members = await this.#gk.teamMembersRaw(team.id);
-    await this.#gk.authorizeTeamObservation(this.#queue, [team.id], {
+    await this.#gk.authorizeTeamObservation(this.#recorder, [team.id], {
       title: "List team members",
       description: `Listed ${members.length} member(s) of team ${team.key}.`,
     });
@@ -2015,24 +1669,24 @@ class LinearTeamSessionImpl extends RpcTarget implements LinearTeam {
 @validateRpc()
 class LinearIssueImpl extends RpcTarget implements LinearIssue {
   #gk: LinearGatekeeperImpl;
-  #queue: RpcStub<ApprovalQueue>;
+  #recorder: RpcStub<ActionRecorder>;
   #ref: string;
   #wsKey: string;
   // When set, this handle is limited to issues in this team (a team-scoped grant). Prevents a
   // team grant from reaching issues in other teams via getIssue / setParent.
   #teamScope?: string;
 
-  constructor(gk: LinearGatekeeperImpl, queue: RpcStub<ApprovalQueue>, ref: string, teamScope?: string) {
+  constructor(gk: LinearGatekeeperImpl, recorder: RpcStub<ActionRecorder>, ref: string, teamScope?: string) {
     super();
     this.#gk = gk;
-    this.#queue = queue;
+    this.#recorder = recorder;
     this.#ref = ref;
     this.#wsKey = gk.workspaceKey();
     this.#teamScope = teamScope;
   }
 
   [Symbol.dispose](): void {
-    disposeStub(this.#queue);
+    disposeStub(this.#recorder);
   }
 
   // Fetch this issue, enforcing the team scope (if any) so a team grant can't reach other teams.
@@ -2046,7 +1700,7 @@ class LinearIssueImpl extends RpcTarget implements LinearIssue {
 
   async getDetails(): Promise<LinearIssueDetails> {
     const issue = await this.#requireIssue();
-    await this.#gk.authorizeTeamObservation(this.#queue, [issue.team.id], {
+    await this.#gk.authorizeTeamObservation(this.#recorder, [issue.team.id], {
       title: `Read issue ${issue.identifier}`,
       description: `Read details of issue **${issue.identifier} ${issue.title}**.`,
     });
@@ -2055,26 +1709,23 @@ class LinearIssueImpl extends RpcTarget implements LinearIssue {
 
   async setTitle(title: string): Promise<void> {
     const issue = await this.#requireIssue();
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "updateIssue", issueRef: this.#ref, input: { title },
-        previous: { title: issue.title }, patch: { title }, title: `Set title of ${issue.identifier}` },
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `Rename ${issue.identifier}`,
-        body: `Change the title of **${issue.identifier}** from "${issue.title}" to "${title}".`,
-        implementsRevert: true },
+        description: `Change the title of **${issue.identifier}** from "${issue.title}" to "${title}".`,
+        actionKind: ISSUE_EDIT },
+      api => api.updateIssue(issue.id, { title }),
     );
   }
 
   async setDescription(descriptionMarkdown: string): Promise<void> {
     const issue = await this.#requireIssue();
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "updateIssue", issueRef: this.#ref, input: { description: descriptionMarkdown },
-        previous: { description: issue.description ?? "" }, patch: { description: descriptionMarkdown },
-        title: `Edit description of ${issue.identifier}` },
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `Edit description of ${issue.identifier}`,
-        body: `Replace the description of **${issue.identifier} ${issue.title}**.`,
-        implementsRevert: true },
+        description: `Replace the description of **${issue.identifier} ${issue.title}**.`,
+        actionKind: ISSUE_EDIT },
+      api => api.updateIssue(issue.id, { description: descriptionMarkdown }),
     );
   }
 
@@ -2085,48 +1736,41 @@ class LinearIssueImpl extends RpcTarget implements LinearIssue {
     if (!target) {
       throw new Error(`No workflow state named "${state}" in team ${issue.team.key}.`);
     }
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "updateIssue", issueRef: this.#ref, input: { stateId: target.id },
-        previous: { stateId: issue.state?.id }, patch: { state: target },
-        title: `Move ${issue.identifier} to ${target.name}` },
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `Move ${issue.identifier} to ${target.name}`,
-        body: `Change the state of **${issue.identifier} ${issue.title}** from "${issue.state?.name ?? "Unknown"}" to "${target.name}".`,
-        implementsRevert: true },
+        description: `Change the state of **${issue.identifier} ${issue.title}** from "${issue.state?.name ?? "Unknown"}" to "${target.name}".`,
+        actionKind: ISSUE_TRIAGE },
+      api => api.updateIssue(issue.id, { stateId: target.id }),
     );
   }
 
   async setAssignee(assignee: string | null): Promise<void> {
     const issue = await this.#requireIssue();
     let assigneeId: string | null = null;
-    let assigneeUser: RawUser | null = null;
     let label = "Unassign";
     if (assignee !== null) {
-      assigneeUser = await this.#gk.resolveMemberRaw(assignee);
+      const assigneeUser = await this.#gk.resolveMemberRaw(assignee);
       assigneeId = assigneeUser.id;
       label = `Assign to ${assigneeUser.displayName ?? assigneeUser.name}`;
     }
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "updateIssue", issueRef: this.#ref, input: { assigneeId },
-        previous: { assigneeId: issue.assignee?.id ?? null }, patch: { assignee: assigneeUser },
-        title: `${label} (${issue.identifier})` },
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `${label}: ${issue.identifier}`,
-        body: `${label} for issue **${issue.identifier} ${issue.title}**.`,
-        implementsRevert: true },
+        description: `${label} for issue **${issue.identifier} ${issue.title}**.`,
+        actionKind: ISSUE_TRIAGE },
+      api => api.updateIssue(issue.id, { assigneeId }),
     );
   }
 
   async setPriority(priority: LinearPriority): Promise<void> {
     const issue = await this.#requireIssue();
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "updateIssue", issueRef: this.#ref, input: { priority: PRIORITY_TO_NUM[priority] },
-        previous: { priority: issue.priority }, patch: { priority: PRIORITY_TO_NUM[priority] },
-        title: `Set priority of ${issue.identifier}` },
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `Set priority of ${issue.identifier} to ${priority}`,
-        body: `Change the priority of **${issue.identifier} ${issue.title}** to "${priority}".`,
-        implementsRevert: true },
+        description: `Change the priority of **${issue.identifier} ${issue.title}** to "${priority}".`,
+        actionKind: ISSUE_TRIAGE },
+      api => api.updateIssue(issue.id, { priority: PRIORITY_TO_NUM[priority] }),
     );
   }
 
@@ -2134,7 +1778,7 @@ class LinearIssueImpl extends RpcTarget implements LinearIssue {
     const issue = await this.#requireIssue();
     // Resolve against real labels *and* labels created earlier in this session that haven't been
     // applied yet — those are attachable too (their ids resolve to the real label at apply time).
-    const teamLabels = await this.#gk.labelsForDisplay(issue.team.id);
+    const teamLabels = await this.#gk.labelsRaw(issue.team.id);
     const byName = new Map(teamLabels.map(l => [l.name.toLowerCase(), l]));
     const resolved: RawLabel[] = [];
     for (const name of labels) {
@@ -2146,13 +1790,14 @@ class LinearIssueImpl extends RpcTarget implements LinearIssue {
       }
       resolved.push(found);
     }
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "addLabels", issueRef: this.#ref, labelIds: resolved.map(l => l.id), labels: resolved,
-        title: `Add labels to ${issue.identifier}` },
+    const current = (issue.labels?.nodes ?? []).map(l => l.id);
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `Add labels to ${issue.identifier}`,
-        body: `Add label(s) ${labels.map(l => `"${l}"`).join(", ")} to **${issue.identifier} ${issue.title}**.`,
-        implementsRevert: true },
+        description: `Add label(s) ${labels.map(l => `"${l}"`).join(", ")} to **${issue.identifier} ${issue.title}**.`,
+        actionKind: ISSUE_LABEL },
+      api => api.updateIssue(
+        issue.id, { labelIds: [...new Set([...current, ...resolved.map(l => l.id)])] }),
     );
   }
 
@@ -2160,72 +1805,65 @@ class LinearIssueImpl extends RpcTarget implements LinearIssue {
     const issue = await this.#requireIssue();
     const removeNames = new Set(labels.map(l => l.toLowerCase()));
     // Map the requested names to the label ids currently on the issue; ignore names not present.
-    const removeIds = (issue.labels?.nodes ?? [])
-      .filter(l => removeNames.has(l.name.toLowerCase()))
+    const remaining = (issue.labels?.nodes ?? [])
+      .filter(l => !removeNames.has(l.name.toLowerCase()))
       .map(l => l.id);
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "removeLabels", issueRef: this.#ref, labelIds: removeIds, title: `Remove labels from ${issue.identifier}` },
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `Remove labels from ${issue.identifier}`,
-        body: `Remove label(s) ${labels.map(l => `"${l}"`).join(", ")} from **${issue.identifier} ${issue.title}**.`,
-        implementsRevert: true },
+        description: `Remove label(s) ${labels.map(l => `"${l}"`).join(", ")} from **${issue.identifier} ${issue.title}**.`,
+        actionKind: ISSUE_LABEL },
+      api => api.updateIssue(issue.id, { labelIds: remaining }),
     );
   }
 
   async setProject(projectId: string | null): Promise<void> {
     const issue = await this.#requireIssue();
-    const project = projectId ? await this.#gk.getProjectRaw(projectId) : null;
-    if (projectId && !project) throw new Error(`Project not found: ${projectId}`);
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "updateIssue", issueRef: this.#ref, input: { projectId },
-        previous: { projectId: issue.project?.id ?? null }, patch: { project },
-        title: `Set project of ${issue.identifier}` },
+    if (projectId && !(await this.#gk.getProjectRaw(projectId))) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `${projectId ? "Move" : "Remove"} ${issue.identifier} ${projectId ? "into a project" : "from its project"}`,
-        body: projectId
+        description: projectId
           ? `Move **${issue.identifier} ${issue.title}** into project ${projectId}.`
           : `Remove **${issue.identifier} ${issue.title}** from its project.`,
-        implementsRevert: true },
+        actionKind: ISSUE_TRIAGE },
+      api => api.updateIssue(issue.id, { projectId }),
     );
   }
 
   async setDueDate(date: string | null): Promise<void> {
     const issue = await this.#requireIssue();
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "updateIssue", issueRef: this.#ref, input: { dueDate: date },
-        previous: { dueDate: issue.dueDate ?? null }, patch: { dueDate: date },
-        title: `Set due date of ${issue.identifier}` },
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `Set due date of ${issue.identifier}`,
-        body: date
+        description: date
           ? `Set the due date of **${issue.identifier} ${issue.title}** to ${date}.`
           : `Clear the due date of **${issue.identifier} ${issue.title}**.`,
-        implementsRevert: true },
+        actionKind: ISSUE_TRIAGE },
+      api => api.updateIssue(issue.id, { dueDate: date }),
     );
   }
 
   async setParent(parentId: string | null): Promise<void> {
     const issue = await this.#requireIssue();
     let resolvedParentId: string | null = null;
-    let parentOverlay: RawIssue["parent"] = null;
     if (parentId !== null) {
       const parent = await this.#gk.issueRaw(parentId);
       if (this.#teamScope && parent.team.id !== this.#teamScope) {
         throw new Error(`Parent issue ${parent.identifier} is not in the team this connection is limited to.`);
       }
       resolvedParentId = parent.id;
-      parentOverlay = { id: parent.id, identifier: parent.identifier, url: parent.url, title: parent.title };
     }
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "updateIssue", issueRef: this.#ref, input: { parentId: resolvedParentId },
-        previous: { parentId: issue.parent?.id ?? null }, patch: { parent: parentOverlay },
-        title: `Set parent of ${issue.identifier}` },
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `${parentId ? "Set" : "Clear"} parent of ${issue.identifier}`,
-        body: parentId
+        description: parentId
           ? `Make **${issue.identifier} ${issue.title}** a sub-issue of ${parentId}.`
           : `Detach **${issue.identifier} ${issue.title}** from its parent.`,
-        implementsRevert: true },
+        actionKind: ISSUE_TRIAGE },
+      api => api.updateIssue(issue.id, { parentId: resolvedParentId }),
     );
   }
 
@@ -2237,7 +1875,7 @@ class LinearIssueImpl extends RpcTarget implements LinearIssue {
     const first = clampPageSize(options?.resultsPerPage);
     return new StreamingCursor<RawComment, LinearComment>(
       this.#gk,
-      this.#queue.dup(),
+      this.#recorder.dup(),
       after => this.#gk.commentsPage(ref, after, first),
       normComment,
       items => ({ title: `Read comments on ${ref}`, description: `Read ${items.length} comment(s) on issue ${ref}.` }),
@@ -2247,19 +1885,12 @@ class LinearIssueImpl extends RpcTarget implements LinearIssue {
 
   async postComment(bodyMarkdown: string): Promise<void> {
     const issue = await this.#requireIssue();
-    const synthetic: RawComment = {
-      id: this.#gk.nextProvisionalCommentId(),
-      body: bodyMarkdown,
-      url: issue.url,
-      createdAt: new Date().toISOString(),
-      user: null,
-    };
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "postComment", issueRef: this.#ref, body: bodyMarkdown, synthetic, title: `Comment on ${issue.identifier}` },
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `Comment on ${issue.identifier}`,
-        body: `Post a comment on **${issue.identifier} ${issue.title}**:\n\n${bodyMarkdown}`,
-        implementsRevert: true },
+        description: `Post a comment on **${issue.identifier} ${issue.title}**:\n\n${bodyMarkdown}`,
+        actionKind: ISSUE_COMMENT },
+      api => api.createComment(issue.id, bodyMarkdown),
     );
   }
 
@@ -2267,8 +1898,8 @@ class LinearIssueImpl extends RpcTarget implements LinearIssue {
     const issue = await this.#requireIssue();
     // Always scope the sub-issue handle to the parent issue's team, so an issue-scoped grant (which
     // has no #teamScope of its own) can't use the returned handle to queue cross-team mutations.
-    return await createIssueViaQueue(
-      this.#gk, this.#queue,
+    return await createIssue(
+      this.#gk, this.#recorder,
       { ...options, teamId: issue.team.id, parentId: issue.id },
       { requireTeam: false },
       issue.team.id);
@@ -2276,21 +1907,23 @@ class LinearIssueImpl extends RpcTarget implements LinearIssue {
 
   async archive(): Promise<void> {
     const issue = await this.#requireIssue();
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "archive", issueRef: this.#ref, archived: true, title: `Archive ${issue.identifier}` },
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `Archive ${issue.identifier}`,
-        body: `Archive issue **${issue.identifier} ${issue.title}**.`, implementsRevert: true },
+        description: `Archive issue **${issue.identifier} ${issue.title}**.`,
+        actionKind: ISSUE_ARCHIVE },
+      api => api.setIssueArchived(issue.id, true),
     );
   }
 
   async unarchive(): Promise<void> {
     const issue = await this.#requireIssue();
-    await this.#gk.enqueue(
-      this.#queue,
-      { kind: "archive", issueRef: this.#ref, archived: false, title: `Unarchive ${issue.identifier}` },
+    await this.#gk.performAction(
+      this.#recorder,
       { title: `Unarchive ${issue.identifier}`,
-        body: `Restore archived issue **${issue.identifier} ${issue.title}**.`, implementsRevert: true },
+        description: `Restore archived issue **${issue.identifier} ${issue.title}**.`,
+        actionKind: ISSUE_ARCHIVE },
+      api => api.setIssueArchived(issue.id, false),
     );
   }
 }
@@ -2310,9 +1943,9 @@ function issueArgs(filter: LinearIssueFilter | undefined): IssuePageArgs {
   };
 }
 
-async function createIssueViaQueue(
+async function createIssue(
   gk: LinearGatekeeperImpl,
-  queue: RpcStub<ApprovalQueue>,
+  recorder: RpcStub<ActionRecorder>,
   options: LinearCreateIssueOptions,
   opts: { requireTeam: boolean },
   teamScope?: string,
@@ -2334,72 +1967,35 @@ async function createIssueViaQueue(
     dueDate: options.dueDate,
   };
 
-  // Resolve display objects alongside the ids so the pending issue can be simulated faithfully.
-  let stateObj: RawWorkflowState | null = null;
   if (options.state) {
     const states = await gk.workflowStatesRaw(teamId);
     const target = states.find(s => s.name.toLowerCase() === options.state!.toLowerCase());
     if (!target) throw new Error(`No workflow state named "${options.state}" in this team.`);
     input.stateId = target.id;
-    stateObj = target;
   }
-  let assigneeObj: RawUser | null = null;
   if (options.assignee) {
-    assigneeObj = await gk.resolveMemberRaw(options.assignee);
-    input.assigneeId = assigneeObj.id;
+    input.assigneeId = (await gk.resolveMemberRaw(options.assignee)).id;
   }
-  const labelObjs: RawLabel[] = [];
   if (options.labels && options.labels.length > 0) {
-    // Resolve against real + pending-created labels, like addLabels; provisional `~label:` ids
-    // are resolved to real ids in applyAction.
-    const teamLabels = await gk.labelsForDisplay(teamId);
+    const teamLabels = await gk.labelsRaw(teamId);
     const byName = new Map(teamLabels.map(l => [l.name.toLowerCase(), l]));
-    for (const name of options.labels) {
+    input.labelIds = options.labels.map(name => {
       const found = byName.get(name.toLowerCase());
       if (!found) throw new Error(`No label named "${name}" in the team. Create it with createLabel() first.`);
-      labelObjs.push(found);
-    }
-    input.labelIds = labelObjs.map(l => l.id);
+      return found.id;
+    });
   }
-  let projectObj: RawProject | null = null;
-  if (options.projectId) {
-    projectObj = await gk.getProjectRaw(options.projectId);
-  }
-  let parentObj: RawIssue["parent"] = null;
   if (options.parentId) {
-    const parent = await gk.issueRaw(options.parentId);
-    input.parentId = parent.id;
-    parentObj = { id: parent.id, identifier: parent.identifier, url: parent.url, title: parent.title };
+    input.parentId = (await gk.issueRaw(options.parentId)).id;
   }
 
-  const provisionalId = gk.nextProvisionalIssueId();
-  const now = new Date().toISOString();
-  const synthetic: RawIssue = {
-    id: provisionalId,
-    identifier: provisionalId,
-    url: `https://linear.app/${gk.workspaceKey()}/issue/${provisionalId}`,
-    title: options.title,
-    description: options.descriptionMarkdown ?? "",
-    priority: input.priority ?? 0,
-    createdAt: now,
-    updatedAt: now,
-    dueDate: options.dueDate ?? null,
-    state: stateObj,
-    assignee: assigneeObj,
-    labels: { nodes: labelObjs, pageInfo: { hasNextPage: false, endCursor: null } },
-    team,
-    project: projectObj,
-    parent: parentObj,
-    cycle: null,
-  };
-
-  await gk.enqueue(
-    queue,
-    { kind: "createIssue", input, provisionalId, synthetic, title: `Create issue "${options.title}"` },
+  const created = await gk.performAction(
+    recorder,
     { title: `Create issue "${options.title}"`,
-      body: `Create a new issue titled **${options.title}**${options.assignee ? `, assigned to ${options.assignee}` : ""}.`,
-      implementsRevert: true },
+      description: `Create a new issue titled **${options.title}**${options.assignee ? `, assigned to ${options.assignee}` : ""}.`,
+      actionKind: ISSUE_CREATE },
+    api => api.createIssue(input),
   );
 
-  return new LinearIssueImpl(gk, queue.dup(), provisionalId, teamScope);
+  return new LinearIssueImpl(gk, recorder.dup(), created.id, teamScope);
 }

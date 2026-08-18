@@ -1,11 +1,10 @@
 // The MCP gatekeeper: connects any Model Context Protocol server as a Gadgets capability.
 //
-// Every call is either an observation or an approval-gated action, `readOnlyHint` decides which,
-// writes are queued rather than performed inline, and per-tool TypeScript is generated from the
-// server's schemas so Code Mode works.
+// Every call is either an observation or a recorded action, `readOnlyHint` decides which, and
+// per-tool TypeScript is generated from the server's schemas so Code Mode works.
 //
-// The endpoint is whatever a user typed, so annotations never earn auto-approval here and a Gadget
-// bound to it is owner-only. See `sharing-policy.ts` and the README.
+// The endpoint is whatever a user typed, so a Gadget bound to it is owner-only. See
+// `sharing-policy.ts` and the README.
 import { RpcStub, RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import { validateRpc, skipRpcValidation } from "capnweb-validate";
 import { createLogger } from "@gadgets/backend-utils/logger";
@@ -24,10 +23,7 @@ import {
   type VendorDescription,
 } from "@gadgets/workshop-shared/gatekeeper";
 import type { ToolCatalog } from "@gadgets/mcp-shared/client";
-import {
-  classifyTool,
-  type ServerTrust,
-} from "@gadgets/mcp-shared/tools";
+import { classifyTool } from "@gadgets/mcp-shared/tools";
 import { bindingNameFragment, hostOf } from "@gadgets/mcp-shared/util";
 import type { McpLog, McpLogFields } from "@gadgets/mcp-shared/log";
 import { generateSessionTypes, sessionTypeName } from "@gadgets/mcp-shared/schema-to-ts";
@@ -71,10 +67,6 @@ import MCP_SERVER_CONFIGURATOR_HTML from "./generated/server-configurator-ui.txt
 import type { McpServerConfiguratorRpc } from "./configurator/server-configurator-types";
 
 const VENDOR_ID = "mcp";
-
-// A user-supplied endpoint vouches only for itself, so its annotations never drive auto-approval.
-// The tier says nothing about sharing; a Gadget bound to either tier is owner-only.
-const TRUST: ServerTrust = "byo";
 
 const logger = createLogger<McpLogFields>({ component: "gatekeeper.mcp", vendorId: VENDOR_ID });
 
@@ -176,7 +168,7 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
       tagline: "Connect any Model Context Protocol server",
       description:
         "Connect a Model Context Protocol server and use its tools from a Gadget. Reads happen " +
-        "straight away. Anything that writes waits for your approval.",
+        "straight away. Anything that writes is recorded as an action.",
     };
   }
 
@@ -350,7 +342,7 @@ class McpServerConfiguratorUI extends RpcTarget implements McpServerConfigurator
     return this.#toolsPromise;
   }
 
-  // Every tool the grant may cover, annotated with whether calls need approval.
+  // Every tool the grant may cover, annotated with whether calls only read.
   async listToolOptions(): Promise<ConfiguratorUIOption[]> {
     const { tools, truncated } = await this.#tools();
     requireCompleteCatalogForToolSelection(truncated);
@@ -362,8 +354,8 @@ class McpServerConfiguratorUI extends RpcTarget implements McpServerConfigurator
         value: tool.name,
         title: tool.title ?? tool.name,
         subtitle: tool.description?.split(/\r?\n/)[0],
-        // Surfaced here so the person granting can see, per tool, whether calls will interrupt them.
-        meta: classifyTool(tool, TRUST).mode === "read" ? "read-only" : "needs approval",
+        // Surfaced here so the person granting can see, per tool, whether it only reads.
+        meta: classifyTool(tool).mode === "read" ? "read-only" : "acts",
       }));
   }
 }
@@ -392,15 +384,14 @@ export class McpGatekeeperImpl
   }
 
   /**
-   * Namespaces this binding's action-kind tags, so a pre-approval for one server's `create_issue`
+   * Namespaces this binding's action-kind tags, so a decision about one server's `create_issue`
    * cannot apply to another's.
    *
    * The whole endpoint is the identity, matching `sameEndpoint` and every other place a grant is
    * compared. `serverId` is a display slug and collides across hosts, but the origin is not enough
    * either: one host can front `/mcp` and `/mcp-v2` as unrelated servers, and keying on the origin
-   * let an always-approve decision for a tool on one of them silently auto-apply to the same tool
-   * name on the other. `endpointTag` is that identity, shared with `sameEndpoint` so the two
-   * cannot drift.
+   * let a decision about a tool on one of them silently govern the same tool name on the other.
+   * `endpointTag` is that identity, shared with `sameEndpoint` so the two cannot drift.
    */
   protected get actionScopeTag(): string {
     return `mcp:${endpointTag(this.ctx.props.endpoint)}`;
@@ -409,10 +400,6 @@ export class McpGatekeeperImpl
   protected account(): ConnectionAccount {
     return this.ctx.exports.McpAccount.get(
       this.ctx.exports.McpAccount.idFromString(this.ctx.props.accountObjectId));
-  }
-
-  protected get trust(): ServerTrust {
-    return TRUST;
   }
 
   protected get sessionClass() {
@@ -432,7 +419,7 @@ export class McpGatekeeperImpl
     const reads = tools.filter(entry => entry.mode === "read").length;
     const { scope, serverName } = this.ctx.props;
 
-    const counts = `${reads} read-only, ${tools.length - reads} requiring approval`;
+    const counts = `${reads} read-only, ${tools.length - reads} acting`;
     const plural = tools.length === 1 ? "" : "s";
     const snippet = scope.tools
       ? `${scope.tools.length} named MCP tool${scope.tools.length === 1 ? "" : "s"} on ` +
@@ -455,7 +442,6 @@ export class McpGatekeeperImpl
       serverName: this.ctx.props.serverName,
       endpoint: this.ctx.props.endpoint,
       discriminator: this.resourceUrl,
-      trust: TRUST,
       tools: await this.tools(),
     });
   }

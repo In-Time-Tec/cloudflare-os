@@ -734,10 +734,6 @@ export class ConfluenceApi {
     });
   }
 
-  async deleteComment(commentId: string): Promise<void> {
-    await this.#request("DELETE", `${V2}/footer-comments/${encodeURIComponent(commentId)}`);
-  }
-
   // --- labels ---
 
   async getLabels(id: string, type: ContentType): Promise<string[]> {
@@ -775,10 +771,6 @@ export class ConfluenceApi {
 
   getAttachmentInfo(id: string): Promise<AttachmentResponse> {
     return this.#request<AttachmentResponse>("GET", `${V2}/attachments/${encodeURIComponent(id)}`);
-  }
-
-  async deleteAttachment(id: string): Promise<void> {
-    await this.#request("DELETE", `${V2}/attachments/${encodeURIComponent(id)}`);
   }
 
   /** Attachment upload has no v2 endpoint; use v1 and degrade if it's gone. */

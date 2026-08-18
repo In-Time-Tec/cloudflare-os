@@ -222,8 +222,8 @@ describe("requireCompleteCatalogForToolSelection", () => {
 });
 
 describe("endpointTag", () => {
-  // Action-kind tags namespace persistent approval policy, so they have to draw the line between
-  // servers in exactly the place the rest of the connector does.
+  // Action-kind tags namespace action policy, so they have to draw the line between servers in
+  // exactly the place the rest of the connector does.
   const pairs: [string, string][] = [
     ["https://h.example.com/mcp", "https://h.example.com/mcp-v2"],
     ["https://h.example.com/mcp", "https://other.example.com/mcp"],
@@ -233,8 +233,8 @@ describe("endpointTag", () => {
   ];
 
   it("separates every pair of endpoints that sameEndpoint calls different", () => {
-    // The regression: tags were keyed on the origin, so the first pair collided and an
-    // always-approve decision for a tool on one path auto-applied to the same name on the other.
+    // The regression: tags were keyed on the origin, so the first pair collided and a decision
+    // about a tool on one path governed the same name on the other.
     for (const [a, b] of pairs) {
       expect(sameEndpoint(a, b)).toBe(false);
       expect(endpointTag(a)).not.toBe(endpointTag(b));
@@ -243,7 +243,7 @@ describe("endpointTag", () => {
 
   it("gives one endpoint one tag, however it is spelled", () => {
     // The other direction. Splitting a single endpoint's policy across two spellings would quietly
-    // ask the user to re-approve tools they had already decided on.
+    // ask the user to grant tools they had already granted.
     const spellings = [
       "https://h.example.com/mcp",
       "https://h.example.com/mcp#tool=a&tool=b",
