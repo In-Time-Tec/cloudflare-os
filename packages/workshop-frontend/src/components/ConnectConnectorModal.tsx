@@ -1,4 +1,5 @@
 import { Dialog, Switch } from '@cloudflare/kumo'
+import AccountCapabilities from './AccountCapabilities'
 import { X, ShieldCheck } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -33,6 +34,8 @@ interface ConnectConnectorModalProps {
   onEnsureResources?: (resourceUrlPatterns: string[]) => void
   // Resource `urlPattern`s currently being granted (shows a busy state on the relevant toggle).
   ensuringResourceUrlPatterns?: string[]
+  // Manage mode: the connected account whose per-capability grants to show.
+  accountId?: number
 }
 
 export default function ConnectConnectorModal({
@@ -53,6 +56,7 @@ export default function ConnectConnectorModal({
   grantedResourceUrlPatterns,
   onEnsureResources,
   ensuringResourceUrlPatterns = [],
+  accountId,
 }: ConnectConnectorModalProps) {
   const isManage = mode === 'manage'
 
@@ -326,6 +330,15 @@ export default function ConnectConnectorModal({
                   </span>
                 </div>
               </div>
+            </div>
+          )}
+
+          {isManage && accountId !== undefined && (
+            <div className="mt-5">
+              <AccountCapabilities
+                accountId={accountId}
+                onResourceNeeded={(urlPattern) => onEnsureResources?.([urlPattern])}
+              />
             </div>
           )}
 

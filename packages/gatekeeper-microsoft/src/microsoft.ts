@@ -10,8 +10,8 @@
 //     the refresh token and validated (tenant, oid) identity; capability sessions borrow
 //     short-lived access tokens from it. The refresh token never leaves the DO.
 //
-// Every capability session lives behind the Workshop approval-queue model (see sessions.ts):
-// reads are authorized observations, writes are queued actions applied only after approval.
+// Every capability session lives behind the Workshop action-recording model (see sessions.ts):
+// reads are authorized observations, writes are authorized actions performed inline.
 // Graph requests happen in @gadgets/microsoft-graph; Effect stays inside the Worker.
 
 import { WorkerEntrypoint, DurableObject, RpcStub, RpcTarget } from "cloudflare:workers";
@@ -22,6 +22,7 @@ import {
   GatekeeperUser as GatekeeperUserIface, GatekeeperUserVerifier, VendorDescription,
   GatekeeperConnectCallback, GatekeeperConnectOptions, AccountDescription,
   SupportedResource, ResourceConfiguratorFrame, stripTrailingSlashes,
+  Capability, CapabilityGroup,
 } from "@gadgets/workshop-shared/gatekeeper";
 import {
   getOAuthConfig, buildAuthorizeUrl, generatePkce, exchangeCode, refreshTokens, validateIdToken,
@@ -31,6 +32,7 @@ import {
   MAILBOX_RESOURCE, CALENDAR_RESOURCE, FILES_RESOURCE, TEAMS_RESOURCE, SUPPORTED_RESOURCES,
   scopesForResources, resourceForUrl,
 } from "./resources.js";
+import { CAPABILITIES, CAPABILITY_GROUPS } from "./capabilities.js";
 import { VENDOR_ID } from "./vendor.js";
 import { obsContext } from "./observability.js";
 import TYPES_CODE from "./types.txt";
@@ -287,6 +289,10 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
 
   async getSupportedResources(): Promise<SupportedResource[]> {
     return SUPPORTED_RESOURCES;
+  }
+
+  async getCapabilities(): Promise<{capabilities: Capability[], groups: CapabilityGroup[]}> {
+    return {capabilities: CAPABILITIES, groups: CAPABILITY_GROUPS};
   }
 
   async getTypeScriptTypes(): Promise<string> {
@@ -628,8 +634,8 @@ class MicrosoftConfiguratorUI extends RpcTarget {}
 
 /**
  * The human conversations capability for one connected account: a thin RpcTarget over the
- * account's ChatMirror DO. All operations act as the signed-in user; nothing here touches the
- * agent approval queue.
+ * account's ChatMirror DO. All operations act as the signed-in user; nothing here is recorded
+ * as an agent action.
  */
 class ConversationsApiImpl extends RpcTarget implements ConversationsApi {
   constructor(private mirror: DurableObjectStub<import("./chat-mirror.js").ChatMirror>,

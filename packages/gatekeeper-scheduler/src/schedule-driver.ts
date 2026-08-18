@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { RpcStub, RpcTarget } from "cloudflare:workers";
 import { reportIssue } from "@gadgets/backend-utils/error-reporting";
-import type { ApprovalQueue, HookInitiator } from "@gadgets/workshop-shared/gatekeeper";
+import type { ActionRecorder, HookInitiator } from "@gadgets/workshop-shared/gatekeeper";
 import {
   admitRun,
   beginDueRun,
@@ -51,7 +51,7 @@ type StoredCapabilities = {
 
 type HookResult = {
   callback: RpcStub<ScheduleHookTarget>;
-  approvalQueue: RpcStub<ApprovalQueue>;
+  recorder: RpcStub<ActionRecorder>;
 };
 
 export type ScheduleActivation = ScheduleRegistration & {
@@ -429,7 +429,7 @@ export class ScheduleDriver extends DurableObject {
         timeZone: timeZoneOf(admitted.state),
       };
       try {
-        await hookResult.approvalQueue.authorizeObservation({
+        await hookResult.recorder.authorizeObservation({
           title: `Run scheduled task: ${admitted.title}`,
           description: `Deliver scheduled task ${prepared.scheduleId} for its planned occurrence at ${prepared.scheduledTime}.`,
         });

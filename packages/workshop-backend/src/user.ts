@@ -1,6 +1,6 @@
 import { RpcStub } from "capnweb";
-import { ThreadMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ThreadMetadata, TemplateMetadata, TemplateLibrarySummary, TemplateSource, TemplateUserSummary, TEMPLATE_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, TemplateOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
-import { AuthenticatedIdentity, ConversationsApi, Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
+import { ThreadMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ThreadMetadata, TemplateMetadata, TemplateLibrarySummary, TemplateSource, TemplateUserSummary, TEMPLATE_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, TemplateOutput, OutputSummary, WorkpieceId, ListOutputsResult, AccountCapabilityGroup, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
+import { AuthenticatedIdentity, Capability, ConversationsApi, Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
 import { shouldAutoProvisionAccount, ambientGatekeeperMode } from "./provisioning-policy.js";
 import { CloudflareGatekeeperUser } from "@gadgets/workshop-shared/cloudflare-gatekeeper";
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
@@ -31,6 +31,14 @@ type ConnectedAccountRecord = {
   // (no OAuth flow), rather than the user connecting it. Such accounts are protected from manual
   // disconnect, since deleting one permanently destroys the user's data in that gatekeeper.
   autoProvisioned?: boolean;
+
+  /**
+   * Capability tags the user has granted on this account (see Capability). Absent means no explicit
+   * grants have been made yet, which is treated as "everything the account's resources allow" so a
+   * freshly connected account works without a second visit to settings; once any grant is recorded,
+   * the set is authoritative and anything absent is withheld.
+   */
+  grantedCapabilities?: string[];
 };
 
 /**
@@ -1419,6 +1427,91 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let record = this.storage.connectedAccounts.get(accountId);
     if (!record) throw new Error("No such account.");
     return record.account.ensureResources(resourceUrlPatterns);
+  }
+
+  /**
+   * The capability catalog a connected account offers, joined with the user's grants. Absent grants
+   * mean "everything the account's resources allow": a freshly connected account is usable without
+   * a second trip to settings, and the set becomes authoritative the moment anything is withheld.
+   */
+  async listAccountCapabilities(accountId: number): Promise<AccountCapabilityGroup[]> {
+    let record = this.storage.connectedAccounts.get(accountId);
+    if (!record) throw new Error("No such account.");
+    let vendor = this.vendors.get(record.vendorId);
+    if (!vendor) return [];
+
+    let [{capabilities, groups}, description] = await Promise.all([
+      vendor.getCapabilities(),
+      record.account.describe(),
+    ]);
+    let heldResources = description.grantedResourceUrlPatterns;
+    let holdsResource = (pattern?: string) =>
+        pattern === undefined || heldResources === undefined || heldResources.includes(pattern);
+
+    let granted = record.grantedCapabilities;
+    let isGranted = (tag: string) => granted === undefined || granted.includes(tag);
+
+    let byGroup = new Map<string, Capability[]>();
+    for (let capability of capabilities) {
+      let list = byGroup.get(capability.group);
+      if (list) list.push(capability); else byGroup.set(capability.group, [capability]);
+    }
+
+    return groups
+        .filter(group => byGroup.has(group.id))
+        .map(group => {
+          let resourceGranted = holdsResource(group.resourceUrlPattern);
+          return {
+            id: group.id,
+            label: group.label,
+            summary: group.summary,
+            resourceUrlPattern: group.resourceUrlPattern,
+            resourceGranted,
+            capabilities: byGroup.get(group.id)!.map(capability => ({
+              tag: capability.tag,
+              label: capability.label,
+              summary: capability.summary,
+              mode: capability.mode,
+              group: capability.group,
+              granted: isGranted(capability.tag) && resourceGranted,
+              needsResourceGrant: !resourceGranted,
+            })),
+          };
+        });
+  }
+
+  /**
+   * Grant or withhold capabilities. Tags are checked against the vendor's catalog so a stale UI
+   * cannot grant something the gatekeeper no longer offers. The first withhold materializes the
+   * full set, since an absent list means "everything".
+   */
+  async setAccountCapabilities(accountId: number, tags: string[], granted: boolean): Promise<void> {
+    let record = this.storage.connectedAccounts.get(accountId);
+    if (!record) throw new Error("No such account.");
+    let vendor = this.vendors.get(record.vendorId);
+    if (!vendor) throw new Error("This account's gatekeeper is not available on this deployment.");
+
+    let {capabilities} = await vendor.getCapabilities();
+    let known = new Set(capabilities.map(capability => capability.tag));
+    let unknown = tags.filter(tag => !known.has(tag));
+    if (unknown.length > 0) {
+      throw new Error(`This connection does not offer: ${unknown.join(", ")}.`);
+    }
+
+    let current = new Set(record.grantedCapabilities ?? capabilities.map(c => c.tag));
+    for (let tag of tags) {
+      if (granted) current.add(tag); else current.delete(tag);
+    }
+    record.grantedCapabilities = [...current];
+    this.storage.connectedAccounts.put(record);
+  }
+
+  /**
+   * The capability tags an account currently grants, for the Overseer's enforcement path. Absent
+   * means unrestricted, which the Overseer distinguishes from an empty grant.
+   */
+  async getGrantedCapabilities(accountId: number): Promise<string[] | undefined> {
+    return this.storage.connectedAccounts.get(accountId)?.grantedCapabilities;
   }
 
   async subscribeConnectedAccounts(

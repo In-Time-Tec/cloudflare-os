@@ -14,12 +14,6 @@ function run(content: string, annotations?: Record<string, boolean>) {
   return { type: "text", plain_text: content, text: { content }, annotations: annotations ?? {} };
 }
 
-import { simulatePageContent, simulatedTitle, type StoredActionRecord } from "../src/notion-actions";
-
-function rec(id: number, action: any): StoredActionRecord {
-  return { id, action, state: "pending", submittedAt: id };
-}
-
 describe("parseNotionId", () => {
   // Slug words ending in a hex char (a–f or a digit) must not glue onto the 32-char ID.
   it("parses slug URLs whose last word ends in a hex character", () => {
@@ -120,34 +114,6 @@ describe("blocksToMarkdown columns", () => {
     expect(md).toContain("left");
     expect(md).toContain("right");
     expect(md).not.toContain("unsupported block");
-  });
-});
-
-describe("simulatedTitle", () => {
-  it("derives the title from setTitle, the create title, and title-typed properties", () => {
-    expect(simulatedTitle([rec(1, { type: "setTitle", pageId: "p", title: "Renamed", previousTitle: "" })], "Old"))
-      .toBe("Renamed");
-    // Title set via a title-typed property entry on create (not the `title` shorthand).
-    expect(simulatedTitle([rec(1, {
-      type: "createPage", provisionalId: "~1", parent: { kind: "database", databaseId: "d" },
-      properties: { Name: { type: "title", text: "FromProp" } },
-    })], "")).toBe("FromProp");
-    // setProperties with a title-typed entry updates the title too.
-    expect(simulatedTitle([rec(1, {
-      type: "setProperties", pageId: "p",
-      properties: { Name: { type: "title", text: "Edited" } }, previousProperties: {},
-    })], "Old")).toBe("Edited");
-  });
-});
-
-describe("simulatePageContent", () => {
-  it("reflects the markdown->block conversion (not a raw echo)", () => {
-    const md = simulatePageContent(null, [rec(1, { type: "appendContent", pageId: "p", markdown: "##### deep\n\n* a" })]);
-    // ##### clamps to ### and `*` bullets become `-`, matching what an apply + read-back yields.
-    expect(md).toContain("### deep");
-    expect(md).toContain("- a");
-    expect(md).not.toContain("##### ");
-    expect(md).not.toContain("* a");
   });
 });
 

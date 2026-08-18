@@ -1,9 +1,11 @@
 import { DurableObject, RpcStub, RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
 import {
-  ApprovalQueue,
   stripTrailingSlashes,
   type AccountDescription,
+  type ActionCapability,
+  type ActionKind,
+  type ActionRecorder,
   type Gatekeeper,
   type GatekeeperConnectCallback,
   type GatekeeperConnectOptions,
@@ -54,9 +56,6 @@ import type {
   EnrichEntity,
   EnrichFieldInfo,
   EnrichMatchStatus,
-  EnrichmentKind,
-  EnrichmentOutcome,
-  EnrichmentTicket,
   EnrichResult,
   Insight,
   IntentEnrichCriteria,
@@ -351,6 +350,12 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
     return SUPPORTED_RESOURCES;
   }
 
+  async getCapabilities() {
+    // No separately grantable operations: the resource grant is the whole of this connection's
+    // access.
+    return {capabilities: [], groups: []};
+  }
+
   async getTypeScriptTypes(): Promise<string> {
     return TYPES_CODE;
   }
@@ -637,62 +642,13 @@ export class ZoomInfoGatekeeperImpl extends DurableObject<Env, ZoomInfoGatekeepe
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions() {
-    return [];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return [ENRICH_CAPABILITY];
   }
 
-  #makeApi(account: DurableObjectStub<UserAccount>): ZoomInfoApi {
-    return new ZoomInfoApi(() => account.getAccessToken(), resolveOAuthConfig(this.env).apiBaseUrl);
-  }
-
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<ZoomInfoSession> {
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<ZoomInfoSession> {
     return new ZoomInfoSessionImpl(
-      this.#userAccount(), approvalQueue.dup(), resolveOAuthConfig(this.env).apiBaseUrl, this.ctx.storage.kv);
-  }
-
-  /**
-   * Approved: replay the queued enrichment against ZoomInfo (spending credits) and store the result
-   * for the Gadget to read via getEnrichmentResult(). A ZoomInfo failure is recorded as a "failed"
-   * outcome rather than re-thrown: the action is considered resolved (we don't want the overseer to
-   * retry a paid operation that may have already charged credits), and the Gadget sees the failure.
-   */
-  async applyAction(action: number): Promise<void> {
-    const store = new EnrichmentStore(this.ctx.storage.kv);
-    const pending = store.getPending(action);
-    if (!pending) {
-      throw new Error(`Unknown pending ZoomInfo enrichment: ${action}`);
-    }
-    const account = this.#userAccount();
-    try {
-      const result = await callZoomInfo(account, () => performEnrichment(this.#makeApi(account), pending));
-      store.putResult(action, { status: "ready", result });
-    } catch (error) {
-      store.putResult(action, {
-        status: "failed",
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-    store.removePending(action);
-  }
-
-  /** Rejected: discard the queued enrichment (no credits spent) and record the outcome. */
-  async rejectAction(action: number): Promise<void> {
-    const store = new EnrichmentStore(this.ctx.storage.kv);
-    store.removePending(action);
-    store.putResult(action, { status: "rejected" });
-  }
-
-  /**
-   * Enrichment isn't revertable: spent credits can't be refunded. submitAction sets
-   * implementsRevert: false, so this is not normally reached; we drop the stored result defensively.
-   */
-  async revertAction(action: number): Promise<void | { message?: string; canRetry?: boolean }> {
-    new EnrichmentStore(this.ctx.storage.kv).removeResult(action);
-    return {
-      message:
-          "Enrichment can't be reverted: any ZoomInfo credits spent are not refundable. The " +
-          "retrieved data has been discarded from this Gadget.",
-    };
+      this.#userAccount(), recorder.dup(), resolveOAuthConfig(this.env).apiBaseUrl, this.ctx.storage.kv);
   }
 
   /**
@@ -836,8 +792,7 @@ function mapEnrichResult<T>(resource: JsonApiResource, buildRecord: (r: JsonApiR
 }
 
 // Run a ZoomInfo API call, translating auth failures into a reconnect-prompting error and notifying
-// the account so the user is asked to reconnect. Shared by the session (reads) and applyAction
-// (approved enrichments).
+// the account so the user is asked to reconnect.
 async function callZoomInfo<T>(account: DurableObjectStub<UserAccount>, fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
@@ -853,93 +808,50 @@ async function callZoomInfo<T>(account: DurableObjectStub<UserAccount>, fn: () =
 }
 
 // ---------------------------------------------------------------------------
-// Enrichment action queue.
+// Enrichment.
 //
-// Each enrich* call stores a PendingEnrichment and submits it for approval. When the user approves,
-// ZoomInfoGatekeeperImpl.applyAction() replays it against the API (spending credits) and stores the
-// result; the Gadget reads it back via getEnrichmentResult(). Rejection stores a "rejected" outcome
-// and spends nothing. Everything lives in the GatekeeperImpl DO's KV, shared by the session (which
-// submits/reads) and the apply/reject callbacks.
+// Enrichment is the gatekeeper's one side-effecting operation: it spends non-refundable ZoomInfo
+// credits. Each enrich* call authorizes the action, performs it against the API, and reports the
+// outcome, disclosing the worst-case credit cost up front.
 
-// How many recent enrichment outcomes to retain per connected account. Enough that a Gadget can
-// still read back results from earlier in a session, while capping the DO's KV footprint (each
-// outcome is small and gated behind a human approval, so this window is generous).
-const MAX_RETAINED_ENRICHMENTS = 100;
+// Which enrichment endpoint a request targets; selects the shaping in performEnrichment.
+type EnrichmentKind =
+  | "companies"
+  | "corporateHierarchy"
+  | "hashtags"
+  | "contacts"
+  | "intent"
+  | "scoops"
+  | "news";
+
+// The one kind of action this gatekeeper performs; enrichment spends ZoomInfo credits.
+const ENRICH_ACTION_KIND: ActionKind = {
+  tag: "zoominfo.record.enrich",
+  label: "Enrich ZoomInfo records",
+};
+
+const ENRICH_CAPABILITY: ActionCapability = {
+  kind: ENRICH_ACTION_KIND,
+  summary: "Spend ZoomInfo credits to enrich records into full detail",
+  risk: {
+    // Spent credits are not refundable.
+    reversible: "no",
+    reach: "acts-on-world",
+    audience: "private",
+    freeform: false,
+  },
+};
 
 // A cached value with the time it was fetched, for TTL expiry.
 type CachedValue<T> = { value: T; fetchedAt: number };
 
-// A submitted-but-not-yet-applied enrichment: enough to replay the ZoomInfo call on approval.
-type PendingEnrichment = {
-  kind: EnrichmentKind;
-  summary: string;
-  attributes: Record<string, unknown>;
-  page?: PageRequest;
-};
-
-// The stored outcome once the user has decided (mirrors EnrichmentOutcome minus the "pending" state,
-// which is represented by the absence of a stored outcome while the request is still pending).
-type StoredEnrichmentOutcome =
-  | { status: "ready"; result: unknown }
-  | { status: "rejected" }
-  | { status: "failed"; message: string };
-
-class EnrichmentStore {
-  #kv: DurableObjectStorage["kv"];
-
-  constructor(kv: DurableObjectStorage["kv"]) {
-    this.#kv = kv;
-  }
-
-  #pendingKey(id: number): string {
-    return `enrich:pending:${id}`;
-  }
-
-  #resultKey(id: number): string {
-    return `enrich:result:${id}`;
-  }
-
-  submit(pending: PendingEnrichment): number {
-    const id = this.#kv.get<number>("enrich:nextId") ?? 1;
-    this.#kv.put("enrich:nextId", id + 1);
-    this.#kv.put(this.#pendingKey(id), pending);
-    return id;
-  }
-
-  getPending(id: number): PendingEnrichment | undefined {
-    return this.#kv.get<PendingEnrichment>(this.#pendingKey(id));
-  }
-
-  removePending(id: number): void {
-    this.#kv.delete(this.#pendingKey(id));
-  }
-
-  getResult(id: number): StoredEnrichmentOutcome | undefined {
-    return this.#kv.get<StoredEnrichmentOutcome>(this.#resultKey(id));
-  }
-
-  putResult(id: number, outcome: StoredEnrichmentOutcome): void {
-    this.#kv.put(this.#resultKey(id), outcome);
-    // Bound storage: evict the enrichment that has fallen out of the retention window. IDs are
-    // dense and monotonic (see submit), so this keeps at most MAX_RETAINED_ENRICHMENTS recent
-    // outcomes readable while preventing unbounded growth over the account's lifetime. Dropping the
-    // pending key too sweeps up any never-decided request that aged out.
-    const evictId = id - MAX_RETAINED_ENRICHMENTS;
-    if (evictId >= 1) {
-      this.#kv.delete(this.#resultKey(evictId));
-      this.#kv.delete(this.#pendingKey(evictId));
-    }
-  }
-
-  removeResult(id: number): void {
-    this.#kv.delete(this.#resultKey(id));
-  }
-}
-
-// Replay an approved enrichment against the ZoomInfo API and shape the response into the same
-// payload the (former) synchronous method would have returned. Dispatches on the stored kind.
-async function performEnrichment(api: ZoomInfoApi, pending: PendingEnrichment): Promise<unknown> {
-  const { kind, attributes, page } = pending;
+// Perform one enrichment against the ZoomInfo API and shape the response for its kind.
+async function performEnrichment(
+  api: ZoomInfoApi,
+  kind: EnrichmentKind,
+  attributes: Record<string, unknown>,
+  page?: PageRequest,
+): Promise<unknown> {
   switch (kind) {
     case "companies": {
       const doc = await api.post("/data/v1/companies/enrich", "CompanyEnrich", attributes);
@@ -998,25 +910,25 @@ async function performEnrichment(api: ZoomInfoApi, pending: PendingEnrichment): 
 @validateRpc()
 class ZoomInfoSessionImpl extends RpcTarget implements ZoomInfoSession {
   #account: DurableObjectStub<UserAccount>;
-  #approvalQueue: RpcStub<ApprovalQueue>;
+  #recorder: RpcStub<ActionRecorder>;
   #api: ZoomInfoApi;
   #kv: DurableObjectStorage["kv"];
 
   constructor(
     account: DurableObjectStub<UserAccount>,
-    approvalQueue: RpcStub<ApprovalQueue>,
+    recorder: RpcStub<ActionRecorder>,
     apiBaseUrl: string,
     kv: DurableObjectStorage["kv"],
   ) {
     super();
     this.#account = account;
-    this.#approvalQueue = approvalQueue;
+    this.#recorder = recorder;
     this.#api = new ZoomInfoApi(() => account.getAccessToken(), apiBaseUrl);
     this.#kv = kv;
   }
 
   [Symbol.dispose]() {
-    this.#approvalQueue[Symbol.dispose]();
+    this.#recorder[Symbol.dispose]();
   }
 
   // Run an API call, translating auth failures into a reconnect-prompting error.
@@ -1025,7 +937,7 @@ class ZoomInfoSessionImpl extends RpcTarget implements ZoomInfoSession {
   }
 
   #observe(title: string, description: string): Promise<void> {
-    return this.#approvalQueue.authorizeObservation({ title, description });
+    return this.#recorder.authorizeObservation({ title, description });
   }
 
   // Read a cached value if still fresh, else undefined. Cache lives in the GatekeeperImpl DO's KV,
@@ -1040,37 +952,32 @@ class ZoomInfoSessionImpl extends RpcTarget implements ZoomInfoSession {
     this.#kv.put<CachedValue<T>>(`cache:${key}`, { value, fetchedAt: Date.now() });
   }
 
-  // Submit a paid enrichment for approval, disclosing the worst-case credit cost. Stores the request
-  // so ZoomInfoGatekeeperImpl.applyAction() can replay it once approved, and returns a ticket the
-  // Gadget passes to getEnrichmentResult(). No credits are spent until approval. `awaitDecision`
-  // suspends the agent's turn until the user decides, so no result simulation is needed.
-  async #submitEnrichment(
+  // Authorize a paid enrichment (disclosing the worst-case credit cost), perform it, and report the
+  // outcome. A ZoomInfo error may still have charged credits, so the failure is reported as possibly
+  // having taken effect.
+  async #enrich(
     kind: EnrichmentKind,
     summary: string,
     attributes: Record<string, unknown>,
     worstCaseCredits: number,
     page?: PageRequest,
-  ): Promise<EnrichmentTicket> {
-    const store = new EnrichmentStore(this.#kv);
-    const id = store.submit({ kind, summary, attributes, page });
+  ): Promise<unknown> {
+    const handle = await this.#recorder.authorizeAction({
+      title: `ZoomInfo: ${summary}`,
+      description:
+          `${summary}\n\n**Credit cost:** up to **${worstCaseCredits}** ZoomInfo bulk-data ` +
+          `credit${worstCaseCredits === 1 ? "" : "s"} (fewer if records are already under ` +
+          `management; none for no-match/error results).`,
+      actionKind: ENRICH_ACTION_KIND,
+    });
     try {
-      await this.#approvalQueue.submitAction(id, {
-        title: `ZoomInfo: ${summary}`,
-        description:
-            `${summary}\n\n**Credit cost:** up to **${worstCaseCredits}** ZoomInfo bulk-data ` +
-            `credit${worstCaseCredits === 1 ? "" : "s"} (fewer if records are already under ` +
-            `management; none for no-match/error results). Charged only on approval.`,
-        // Spent credits can't be refunded, so there is no automatic revert.
-        implementsRevert: false,
-        // No simulation: suspend the agent until the user decides rather than letting it read back
-        // un-enriched state.
-        awaitDecision: true,
-      });
+      const result = await this.#call(api => performEnrichment(api, kind, attributes, page));
+      await handle.succeeded();
+      return result;
     } catch (error) {
-      store.removePending(id);
+      await handle.failed(error instanceof Error ? error.message : String(error), true);
       throw error;
     }
-    return { id, kind, summary };
   }
 
   // -------------------------------------------------------------------------
@@ -1145,37 +1052,37 @@ class ZoomInfoSessionImpl extends RpcTarget implements ZoomInfoSession {
   async enrichCompanies(
     inputs: CompanyEnrichInput[],
     outputFields: CompanyOutputField[],
-  ): Promise<EnrichmentTicket> {
+  ): Promise<EnrichResult<CompanyRecord>[]> {
     const matchCompanyInput = inputs.map(input => clean({ ...input, companyId: idValue(input.companyId) }));
-    return this.#submitEnrichment(
+    return this.#enrich(
       "companies",
       `Enrich ${inputs.length} compan${inputs.length === 1 ? "y" : "ies"} with fields: ` +
         `${outputFields.join(", ") || "(none)"}`,
       { matchCompanyInput, outputFields },
       inputs.length,
-    );
+    ) as Promise<EnrichResult<CompanyRecord>[]>;
   }
 
   async enrichCorporateHierarchy(
     inputs: CompanyRefInput[],
     outputFields: CorporateHierarchyOutputField[],
-  ): Promise<EnrichmentTicket> {
+  ): Promise<EnrichResult<CorporateHierarchyRecord>[]> {
     const matchCompanyInput = inputs.map(input => clean({ ...input, companyId: idValue(input.companyId) }));
-    return this.#submitEnrichment(
+    return this.#enrich(
       "corporateHierarchy",
       `Enrich corporate hierarchy for ${inputs.length} compan${inputs.length === 1 ? "y" : "ies"}`,
       { matchCompanyInput, outputFields },
       inputs.length,
-    );
+    ) as Promise<EnrichResult<CorporateHierarchyRecord>[]>;
   }
 
-  async enrichHashtags(companyId: string): Promise<EnrichmentTicket> {
-    return this.#submitEnrichment(
+  async enrichHashtags(companyId: string): Promise<CompanyHashtag[]> {
+    return this.#enrich(
       "hashtags",
       `Fetch hashtags for company \`${companyId}\``,
       clean({ companyId: idValue(companyId) }),
       1,
-    );
+    ) as Promise<CompanyHashtag[]>;
   }
 
   // -------------------------------------------------------------------------
@@ -1199,20 +1106,20 @@ class ZoomInfoSessionImpl extends RpcTarget implements ZoomInfoSession {
     inputs: ContactEnrichInput[],
     outputFields: ContactOutputField[],
     requiredFields?: ContactOutputField[],
-  ): Promise<EnrichmentTicket> {
+  ): Promise<EnrichResult<ContactRecord>[]> {
     const matchPersonInput = inputs.map(input => clean({
       ...input,
       personId: idValue(input.personId),
       companyId: idValue(input.companyId),
     }));
-    return this.#submitEnrichment(
+    return this.#enrich(
       "contacts",
       `Enrich ${inputs.length} contact${inputs.length === 1 ? "" : "s"} with fields: ` +
         `${outputFields.join(", ") || "(none)"}` +
         `${requiredFields?.length ? `; required: ${requiredFields.join(", ")}` : ""}`,
       clean({ matchPersonInput, outputFields, requiredFields }),
       inputs.length,
-    );
+    ) as Promise<EnrichResult<ContactRecord>[]>;
   }
 
   // -------------------------------------------------------------------------
@@ -1237,15 +1144,15 @@ class ZoomInfoSessionImpl extends RpcTarget implements ZoomInfoSession {
   async enrichIntent(
     criteria: IntentEnrichCriteria,
     page?: PageRequest,
-  ): Promise<EnrichmentTicket> {
-    return this.#submitEnrichment(
+  ): Promise<SearchPage<IntentSignal>> {
+    return this.#enrich(
       "intent",
       `Fetch intent signals for company \`${criteria.companyId}\` across topics ` +
         `[${criteria.topics.join(", ")}]`,
       clean({ ...criteria, companyId: idValue(criteria.companyId) }),
       1,
       page,
-    );
+    ) as Promise<SearchPage<IntentSignal>>;
   }
 
   // -------------------------------------------------------------------------
@@ -1269,14 +1176,14 @@ class ZoomInfoSessionImpl extends RpcTarget implements ZoomInfoSession {
   async enrichScoops(
     criteria: ScoopEnrichCriteria,
     page?: PageRequest,
-  ): Promise<EnrichmentTicket> {
-    return this.#submitEnrichment(
+  ): Promise<SearchPage<Scoop>> {
+    return this.#enrich(
       "scoops",
       `Fetch scoops for company \`${criteria.companyId}\``,
       clean({ ...criteria, companyId: idValue(criteria.companyId) }),
       1,
       page,
-    );
+    ) as Promise<SearchPage<Scoop>>;
   }
 
   // -------------------------------------------------------------------------
@@ -1296,40 +1203,14 @@ class ZoomInfoSessionImpl extends RpcTarget implements ZoomInfoSession {
   async enrichNews(
     criteria: NewsEnrichCriteria,
     page?: PageRequest,
-  ): Promise<EnrichmentTicket> {
-    return this.#submitEnrichment(
+  ): Promise<SearchPage<NewsArticle>> {
+    return this.#enrich(
       "news",
       `Fetch news articles for company \`${criteria.companyId}\``,
       clean({ ...criteria, companyId: idValue(criteria.companyId) }),
       1,
       page,
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // Enrichment results
-
-  async getEnrichmentResult(ticket: EnrichmentTicket): Promise<EnrichmentOutcome> {
-    const store = new EnrichmentStore(this.#kv);
-    const stored = store.getResult(ticket.id);
-    let outcome: EnrichmentOutcome;
-    if (stored) {
-      // The stored result payload is untyped (see StoredEnrichmentOutcome); its shape was produced
-      // by performEnrichment for this ticket's kind, so we re-attach the kind discriminant to form a
-      // correctly-shaped EnrichmentReady. This cast is the single trust boundary for that fact.
-      outcome = stored.status === "ready"
-        ? ({ status: "ready", kind: ticket.kind, result: stored.result } as EnrichmentOutcome)
-        : stored;
-    } else if (store.getPending(ticket.id)) {
-      outcome = { status: "pending" };
-    } else {
-      throw new Error(`Unknown ZoomInfo enrichment ticket: ${ticket.id}`);
-    }
-    await this.#observe(
-      `Read ZoomInfo enrichment result #${ticket.id}`,
-      `Enrichment \`${ticket.kind}\` (${ticket.summary}): **${outcome.status}**.`,
-    );
-    return outcome;
+    ) as Promise<SearchPage<NewsArticle>>;
   }
 
   // -------------------------------------------------------------------------

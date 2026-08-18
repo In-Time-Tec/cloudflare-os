@@ -48,32 +48,16 @@
 //    The whole-instance `session.callService(...)` is the bulk/escape-hatch API.
 //
 // =====================================================================================
-// APPROVAL & SIMULATION
+// WRITES
 // =====================================================================================
 //
-// Writes (any method that changes state in Home Assistant) are queued for approval and do not
-// execute against HA until the user approves them. Until then:
+// Writes (any method that changes state in Home Assistant) execute against HA before their
+// `Promise<void>` resolves, so a subsequent read sees the result. A write that policy forbids
+// throws instead of being performed.
 //
-// - The write method's `Promise<void>` resolves as soon as the action is queued — it does NOT
-//   wait for HA to actually carry out the action.
-// - Subsequent reads (e.g. `entity.getState()`, `session.listEntities()`) reflect a SIMULATED
-//   post-action state: as if every pending write had already been applied. This lets you chain
-//   reads and writes naturally without waiting on user approval.
-//
-// Simulation predicts FINAL states only — there's no transition timing or animation. It covers
-// the common service families (turn_on/off/toggle, set_temperature, set_volume, set_cover_position,
-// lock/unlock, set_value, select_option, media_play/pause, vacuum.start/stop, etc.). It cannot
-// predict the effect of:
-//
-// - **Scenes** (`scene.activate` / `scene.turn_on`) — we don't parse scene config to know which
-//   entities a scene affects. Read the affected entities AFTER approval to see new state.
-// - **Scripts** (`script.run` / `script.turn_on`) — we don't execute script bodies locally.
-// - **Custom or vendor-specific services** — only the well-known service families are
-//   simulated; unknown service calls leave state untouched.
-// - **Templates** (`session.renderTemplate(...)`) — templates evaluate against HA's LIVE state,
-//   NOT the simulated state. If you need a post-write value, prefer `entity.getState()`.
-// - **History** (`session.getHistory()` / `entity.getHistory()`) — historical, by definition
-//   pre-action.
+// Home Assistant applies a service call asynchronously: the call returns once HA has accepted it,
+// which for a physical device can precede the device actually reaching the new state. A read
+// immediately after a write may still show the old state for that reason.
 
 import type { RpcTarget } from "cloudflare:workers";
 
@@ -321,8 +305,7 @@ export interface HomeAssistantSession extends RpcTarget {
 
   // ---- Control ------------------------------------------------------------
 
-  /** Call any Home Assistant service. Returns no value. The action is queued for approval and
-   * does not actually execute against HA until the user approves it.
+  /** Call any Home Assistant service. Returns no value.
    *
    * Arguments are **positional**, not an options object:
    *

@@ -28,7 +28,7 @@ every system the organization has connected in one click.
 pinning different tools of one upstream server share both the name and the endpoint, so the scope is
 the only thing that distinguishes them.
 
-The session API — a typed method per tool, plus `callTool`, `getActionResult`, and `listTools` — is
+The session API — a typed method per tool, plus `callTool` and `listTools` — is
 the same as [`gatekeeper-mcp`](../gatekeeper-mcp/README.md#what-it-provides).
 
 Scoping to one server also shrinks what the agent reads: a 57-tool portal generates 57 tool
@@ -39,10 +39,9 @@ signatures unscoped, and 12 when scoped to one server.
 | Variable | Meaning |
 | --- | --- |
 | `MCP_PORTAL_URL` | The portal's MCP endpoint. Unset means the connector hides itself. |
-| `MCP_PORTAL_NAME` | Display name in the connector list and every approval prompt. Defaults to `MCP Server Portal (<host>)`. |
+| `MCP_PORTAL_NAME` | Display name in the connector list and on every recorded call. Defaults to `MCP Server Portal (<host>)`. |
 | `MCP_PORTAL_AUTH` | `oauth` (default), `none`, or `token`. |
 | `MCP_PORTAL_TOKEN` | Secret bearer token, for `MCP_PORTAL_AUTH: "token"`. |
-| `MCP_PORTAL_TRUST_ANNOTATIONS` | `true` to let upstream tool annotations drive auto-approval. Off by default; see below. |
 | `MCP_ALLOW_INSECURE` | `"true"` to disable the endpoint checks entirely: permits `http://` **and** private, loopback, link-local, and cloud-metadata hosts, for the portal and every OAuth URL discovered from it. Local dev only. |
 
 Only `MCP_ALLOW_INSECURE` is set in the repo's `wrangler.jsonc`, pinned to `"false"` so the default
@@ -65,13 +64,8 @@ comes from this Worker's configuration rather than from a form. Nothing held for
 survives the move: tokens, the transport session, and any in-progress authorization are dropped, so
 the user re-authorizes against the new host. The account advances a persisted generation before
 probing; refreshes, expiry notifications, and session writes that started under the old generation
-are ignored when they eventually return. Always-approve action kinds also include the exact endpoint,
-so consent for the old portal does not carry over to the new one.
-
-`MCP_PORTAL_TRUST_ANNOTATIONS` is read at each point of use (`portalTrust(env)`) and never
-persisted on an account or a binding's props, so clearing it de-escalates every existing connection
-on the next call. Setting it does not retroactively auto-apply anything; the user must still enable
-a rule for each action kind.
+are ignored when they eventually return. Action kinds also include the exact endpoint, so consent
+for the old portal does not carry over to the new one.
 
 ## How the connect flow works
 
@@ -82,7 +76,7 @@ against the portal; under `"token"` it presents `MCP_PORTAL_TOKEN` and no user i
 needed; under `"none"` it connects unauthenticated.
 
 The account records `provenance: "deployment"`, which is what keeps an upstream server from renaming
-itself over `MCP_PORTAL_NAME` in every approval prompt.
+itself over `MCP_PORTAL_NAME` on every recorded call.
 
 ## Granting
 
@@ -91,17 +85,17 @@ pinned — which tools:
 
 ```
 Server · Which server behind this portal to grant. Its tools appear next.
-[ 🔍 GitHub ]                                    12 tools · 8 read-only, 4 need approval
+[ 🔍 GitHub ]                                          12 tools · 8 read-only, 4 acting
 
 Tools · Choose how much of this server the Gadget may call.
 (•) All tools      Every tool this server offers (12 today), including ones it adds later.
 ( ) Choose tools   Only the tools you tick. Anything else is refused, including tools added later.
 
-Allowed tools · Read-only tools return data straight away. The rest queue for your approval.
+Allowed tools · Read-only tools are recorded as observations. The rest are recorded as actions.
 [ 🔍 Filter tools... ]
 12 of 12 selected                                                                     Clear
 ☑ List issues                                                                     read-only
-☑ Create issue                                                               needs approval
+☑ Create issue                                                                         acts
 ```
 
 **All tools** is the default. The breadth is asked outright rather than inferred from whether every
@@ -141,7 +135,7 @@ fresh catalog is still used for that operation rather than turning a cache miss 
 
 The server list is advisory: it supplies display names and ordering while tool-name prefixes remain
 the authority on membership, and a failed call degrades to bare ids. The gatekeeper makes that call
-while building a form, so it does not pass through the approval queue. Failing to reach the portal
+while building a form, so it is not recorded. Failing to reach the portal
 at all is different, and blocks the grant rather than falling back to the bare endpoint — the
 configurator reports it and stays unsubmittable.
 
@@ -149,15 +143,11 @@ configurator reports it and stays unsubmittable.
 change which upstream servers the session can reach, so granting one would let a Gadget widen its
 own authority. This is a capability-boundary rule, not a policy preference, and is not configurable.
 
-## Approvals and sharing
+## Recording and sharing
 
-Identical to [`gatekeeper-mcp`](../gatekeeper-mcp/README.md#approvals-and-sharing), except for the
-trust tier. A portal is an aggregator: `destructiveHint` and `idempotentHint` are written by
-whichever upstream server it fronts, servers the administrator who chose the portal never reviewed,
-and any one of them could self-declare both and get writes that skip the approval prompt. So the
-tier is `byo` unless a deployment sets `MCP_PORTAL_TRUST_ANNOTATIONS=true`. That flag is the
-"trusted server" assertion MCP's guidance asks for, and it has to be about the upstreams themselves,
-not just the portal in front of them.
+Identical to [`gatekeeper-mcp`](../gatekeeper-mcp/README.md#recording-and-sharing). Each upstream
+server's tools become their own action kinds, namespaced by the portal endpoint and the granted
+server, so an administrator can disable one upstream's writes without touching another's.
 
 `addObserver` refuses everyone, as it does for user-supplied endpoints. Reaching the portal is not
 the same as being allowed to see a particular tool result, and the Gadget runs on the owner's

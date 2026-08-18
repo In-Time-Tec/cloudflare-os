@@ -18,20 +18,37 @@ declare module "cloudflare:workers" {
 
 // ── Test doubles ────────────────────────────────────────────────────────────
 
-/** Records every authorizeObservation/submitAction; approvals resolve immediately. */
-function fakeApprovalQueue() {
+/**
+ * Records every authorizeObservation/authorizeAction, and the outcome reported on each action's
+ * handle. Every action is authorized; `refuse` makes authorizeAction throw instead, standing in
+ * for a kind an administrator disabled.
+ */
+function fakeRecorder(options?: { refuse?: string }) {
   const observations: { title: string; description: string }[] = [];
-  const actions: { id: number; description: { title: string } }[] = [];
-  const queue = {
+  const actions: {
+    description: { title: string; description: string; actionKind: { tag: string } };
+    outcome?: { state: "succeeded"; detail?: string }
+              | { state: "failed"; error: string; mayHaveTakenEffect: boolean };
+  }[] = [];
+  const recorder = {
     async authorizeObservation(description: { title: string; description: string }) {
       observations.push(description);
     },
-    async submitAction(id: number, description: { title: string }) {
-      actions.push({ id, description });
+    async authorizeAction(
+        description: { title: string; description: string; actionKind: { tag: string } }) {
+      if (options?.refuse) throw new Error(options.refuse);
+      const entry: (typeof actions)[number] = { description };
+      actions.push(entry);
+      return {
+        async succeeded(detail?: string) { entry.outcome = { state: "succeeded", detail }; },
+        async failed(error: string, mayHaveTakenEffect: boolean) {
+          entry.outcome = { state: "failed", error, mayHaveTakenEffect };
+        },
+      };
     },
-    dup() { return queue; },
+    dup() { return recorder; },
   };
-  return { queue: queue as never, observations, actions };
+  return { recorder: recorder as never, observations, actions };
 }
 
 /** Stub the workerd-global fetch with canned Graph responses keyed by pathname. */
@@ -93,10 +110,10 @@ describe("MailboxGatekeeperImpl", () => {
     const accountId = await seedAccount("mail-list");
     const gk = env.TEST_MAILBOX.getByName("mail-list");
     await primeGatekeeper(gk, accountId);
-    const { queue, observations } = fakeApprovalQueue();
+    const { recorder, observations } = fakeRecorder();
 
     const result = await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       const cursor = await session.listInbox();
       const page = await cursor.next();
       return { page, done: await cursor.next() };
@@ -109,49 +126,56 @@ describe("MailboxGatekeeperImpl", () => {
     expect(observations[0].description).toContain("Hello");
   });
 
-  it("stages a draft on submit and creates it only on applyAction", async () => {
+  it("creates a draft inline and returns the real id", async () => {
     const requests = stubGraph({ "me/messages": { id: "draft-9" } });
     const accountId = await seedAccount("mail-draft");
     const gk = env.TEST_MAILBOX.getByName("mail-draft");
     await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
+    const { recorder, actions } = fakeRecorder();
 
-    await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
-      const pending = await session.createDraft(["a@x.example"], "Subj", "Body");
-      expect(pending.id).toMatch(/^pending-draft-/);
+    const draft = await runInDurableObject(gk, async instance => {
+      const session = await instance.startSession(recorder);
+      return session.createDraft(["a@x.example"], "Subj", "Body");
     });
 
-    // Nothing hit Graph at submit time.
-    expect(requests.filter(r => r.method === "POST")).toHaveLength(0);
-    expect(actions).toHaveLength(1);
-    expect(actions[0].description.title).toContain("Subj");
-
-    await runInDurableObject(gk, instance => instance.applyAction(actions[0].id));
+    expect(draft.id).toBe("draft-9");
     const posts = requests.filter(r => r.method === "POST");
     expect(posts).toHaveLength(1);
     expect(posts[0].body).toMatchObject({ subject: "Subj" });
     expect(posts[0].headers.get("Authorization")).toBe("Bearer seeded-token");
-
-    // The action is consumed: applying again fails.
-    await expect(runInDurableObject(gk, instance => instance.applyAction(actions[0].id)))
-        .rejects.toThrow(/Unknown pending/);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].description.title).toContain("Subj");
+    expect(actions[0].description.actionKind.tag).toBe("microsoft.mail.draft.create");
+    expect(actions[0].outcome).toEqual({ state: "succeeded", detail: "Draft id: draft-9" });
   });
 
-  it("rejectAction discards the staged draft without touching Graph", async () => {
-    const requests = stubGraph({});
-    const accountId = await seedAccount("mail-reject");
-    const gk = env.TEST_MAILBOX.getByName("mail-reject");
+  it("performs nothing when authorization refuses the action", async () => {
+    const requests = stubGraph({ "me/messages": { id: "draft-9" } });
+    const accountId = await seedAccount("mail-refused");
+    const gk = env.TEST_MAILBOX.getByName("mail-refused");
     await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
+    const { recorder } = fakeRecorder({ refuse: "Drafting is disabled on this deployment." });
 
-    await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
-      await session.createDraft(["a@x.example"], "S", "B");
-      await instance.rejectAction(actions[0].id);
-      await expect(instance.applyAction(actions[0].id)).rejects.toThrow(/Unknown pending/);
-    });
+    await expect(runInDurableObject(gk, async instance => {
+      const session = await instance.startSession(recorder);
+      return session.createDraft(["a@x.example"], "S", "B");
+    })).rejects.toThrow(/disabled on this deployment/);
     expect(requests).toHaveLength(0);
+  });
+
+  it("records a failed send as possibly having taken effect", async () => {
+    // A 500 from Graph leaves the outcome unknown: the request was already sent.
+    vi.stubGlobal("fetch", async () => new Response("{}", { status: 500 }));
+    const accountId = await seedAccount("mail-failed");
+    const gk = env.TEST_MAILBOX.getByName("mail-failed");
+    await primeGatekeeper(gk, accountId);
+    const { recorder, actions } = fakeRecorder();
+
+    await expect(runInDurableObject(gk, async instance => {
+      const session = await instance.startSession(recorder);
+      return session.sendMail(["a@x.example"], "S", "B");
+    })).rejects.toThrow(/temporarily unavailable/);
+    expect(actions[0].outcome).toMatchObject({ state: "failed", mayHaveTakenEffect: true });
   });
 
   it("surfaces expired credentials as the reconnect message", async () => {
@@ -162,10 +186,10 @@ describe("MailboxGatekeeperImpl", () => {
     await runInDurableObject(stub, async (_i, state) => { accountId = state.id.toString(); });
     const gk = env.TEST_MAILBOX.getByName("mail-expired");
     await primeGatekeeper(gk, accountId);
-    const { queue } = fakeApprovalQueue();
+    const { recorder } = fakeRecorder();
 
     await expect(runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       const cursor = await session.listInbox();
       return cursor.next();
     })).rejects.toThrow(/reconnect the account/);
@@ -192,41 +216,45 @@ describe("CalendarGatekeeperImpl", () => {
     const accountId = await seedAccount("cal-agenda");
     const gk = env.TEST_CALENDAR.getByName("cal-agenda");
     await primeGatekeeper(gk, accountId);
-    const { queue, observations } = fakeApprovalQueue();
+    const { recorder, observations } = fakeRecorder();
 
     const events = await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       return session.agenda(new Date("2026-08-15T00:00:00Z"), new Date("2026-08-16T00:00:00Z"));
     });
     expect(events[0]).toMatchObject({ subject: "Standup" });
     expect(observations[0].title).toContain("1 calendar events");
   });
 
-  it("stages event creation behind approval; invitations only go out on apply", async () => {
+  it("creates an event inline and records the new event id", async () => {
     const requests = stubGraph({ "me/events": { id: "ev-1" } });
     const accountId = await seedAccount("cal-create");
     const gk = env.TEST_CALENDAR.getByName("cal-create");
     await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
+    const { recorder, actions } = fakeRecorder();
 
-    await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
-      await session.createEvent({
+    const event = await runInDurableObject(gk, async instance => {
+      const session = await instance.startSession(recorder);
+      return session.createEvent({
         subject: "Review", start: new Date("2026-08-20T15:00:00Z"),
         end: new Date("2026-08-20T16:00:00Z"), attendees: ["bob@corp.example"],
       });
     });
-    expect(requests.filter(r => r.method === "POST")).toHaveLength(0);
-
-    await runInDurableObject(gk, instance => instance.applyAction(actions[0].id));
+    expect(event.id).toBe("ev-1");
     const posts = requests.filter(r => r.method === "POST");
     expect(posts[0].body).toMatchObject({ subject: "Review" });
+    expect(actions[0].outcome).toEqual({ state: "succeeded", detail: "Event id: ev-1" });
   });
 
-  it("offers calendar action kinds for opt-in auto-approval", async () => {
+  it("declares every calendar kind it can record, with its risk", async () => {
     const gk = env.TEST_CALENDAR.getByName("cal-kinds");
-    const kinds = await runInDurableObject(gk, i => i.getAutoApprovableActions());
-    expect(kinds.map(k => k.tag)).toContain("microsoft.calendar.event.create");
+    const catalog = await runInDurableObject(gk, i => i.getActionCatalog());
+    expect(catalog.map(c => c.kind.tag)).toContain("microsoft.calendar.event.create");
+    expect(catalog.every(c => c.summary.length > 0)).toBe(true);
+    expect(catalog.find(c => c.kind.tag === "microsoft.calendar.event.modify")!.risk)
+        .toEqual({
+          reversible: "no", reach: "modifies-content", audience: "external", freeform: true,
+        });
   });
 });
 
@@ -243,20 +271,22 @@ describe("FilesGatekeeperImpl", () => {
     const accountId = await seedAccount("files-list");
     const gk = env.TEST_FILES.getByName("files-list");
     await primeGatekeeper(gk, accountId);
-    const { queue, observations } = fakeApprovalQueue();
+    const { recorder, observations } = fakeRecorder();
 
     const entries = await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       return session.listOneDrive("root");
     });
     expect(entries[0]).toMatchObject({ name: "notes.md", kind: "file" });
     expect(observations[0].description).toContain("notes.md");
   });
 
-  it("rejects unknown action ids", async () => {
-    const gk = env.TEST_FILES.getByName("files-readonly");
-    await expect(runInDurableObject(gk, i => i.applyAction(999)))
-        .rejects.toThrow(/Unknown pending/);
+  it("separates writing files from deleting them in its catalog", async () => {
+    const gk = env.TEST_FILES.getByName("files-kinds");
+    const catalog = await runInDurableObject(gk, i => i.getActionCatalog());
+    expect(catalog.map(c => c.kind.tag))
+        .toEqual(["microsoft.files.write", "microsoft.files.delete"]);
+    expect(catalog[1].risk.freeform).toBe(false);
   });
 });
 
@@ -274,10 +304,10 @@ describe("TeamsGatekeeperImpl", () => {
     const accountId = await seedAccount("teams-read");
     const gk = env.TEST_TEAMS.getByName("teams-read");
     await primeGatekeeper(gk, accountId);
-    const { queue, observations } = fakeApprovalQueue();
+    const { recorder, observations } = fakeRecorder();
 
     const messages = await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
+      const session = await instance.startSession(recorder);
       const cursor = await session.readChat("c1");
       return cursor.next();
     });
@@ -286,30 +316,31 @@ describe("TeamsGatekeeperImpl", () => {
     expect(observations[0].title).toContain("1 Teams messages");
   });
 
-  it("stages channel posts behind approval and posts only on apply", async () => {
+  it("posts to a channel inline and returns the provider message id", async () => {
     const requests = stubGraph({ "teams/t1/channels/ch1/messages": { id: "sent-1" } });
     const accountId = await seedAccount("teams-post");
     const gk = env.TEST_TEAMS.getByName("teams-post");
     await primeGatekeeper(gk, accountId);
-    const { queue, actions } = fakeApprovalQueue();
+    const { recorder, actions } = fakeRecorder();
 
-    await runInDurableObject(gk, async instance => {
-      const session = await instance.startSession(queue);
-      await session.postToChannel("t1", "ch1", "ship it");
+    const sent = await runInDurableObject(gk, async instance => {
+      const session = await instance.startSession(recorder);
+      return session.postToChannel("t1", "ch1", "ship it");
     });
-    expect(requests.filter(r => r.method === "POST")).toHaveLength(0);
+    expect(sent.id).toBe("sent-1");
     expect(actions[0].description.title).toContain("channel");
-
-    await runInDurableObject(gk, instance => instance.applyAction(actions[0].id));
+    expect(actions[0].outcome).toEqual({ state: "succeeded", detail: "Message id: sent-1" });
     const posts = requests.filter(r => r.method === "POST");
     expect(posts[0].body).toEqual({ body: { contentType: "text", content: "ship it" } });
   });
 
-  it("offers post and chat-create kinds for opt-in auto-approval", async () => {
+  it("declares posting and chat creation with different reach", async () => {
     const gk = env.TEST_TEAMS.getByName("teams-kinds");
-    const kinds = await runInDurableObject(gk, i => i.getAutoApprovableActions());
-    expect(kinds.map(k => k.tag)).toEqual([
+    const catalog = await runInDurableObject(gk, i => i.getActionCatalog());
+    expect(catalog.map(c => c.kind.tag)).toEqual([
       "microsoft.teams.message.post", "microsoft.teams.chat.create",
     ]);
+    expect(catalog[0].risk.reach).toBe("acts-on-world");
+    expect(catalog[1].risk.reach).toBe("creates-content");
   });
 });

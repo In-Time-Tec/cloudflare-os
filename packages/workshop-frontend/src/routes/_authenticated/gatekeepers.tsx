@@ -264,7 +264,7 @@ type ModalTarget =
   | { kind: 'manage'; accountId: number }
   | null
 
-function ConnectorsPage() {
+export function ConnectorsPage({ embedded = false }: { embedded?: boolean } = {}) {
   useDocumentTitle('Gatekeepers')
 
   const { authenticatedApi } = useAuthenticatedApi()
@@ -507,7 +507,8 @@ function ConnectorsPage() {
 
   return (
     <PageChrome
-      title="Gatekeepers"
+      title="Connectors"
+      chromeless={embedded}
       actions={<ViewToggle view={view} onChange={setView} />}
     >
         <div className="mb-6">
@@ -636,6 +637,7 @@ function ConnectorsPage() {
           accountDescription={activeAccount?.accountDescription}
           credentialsValid={activeAccount?.credentialsValid}
           grantedResourceUrlPatterns={activeAccount?.accountDescription.grantedResourceUrlPatterns}
+          accountId={modalTarget?.kind === 'manage' ? modalTarget.accountId : undefined}
           onEnsureResources={handleEnsureResources}
           ensuringResourceUrlPatterns={ensuringResourceUrlPatterns}
           disconnecting={disconnecting}

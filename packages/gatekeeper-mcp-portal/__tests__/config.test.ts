@@ -4,7 +4,6 @@ import {
   portalAuthRequiresReconnect,
   portalServer,
   portalTokenFor,
-  portalTrust,
   readPortalConfig,
   requirePortalServerScope,
 } from "../src/config.js";
@@ -90,43 +89,16 @@ describe("portalResource", () => {
   });
 });
 
-describe("portalTrust", () => {
-  it("does not trust upstream annotations just because an administrator chose the portal", () => {
-    // A portal aggregates servers the administrator did not write. Auto-approval keys off annotations
-    // those upstreams supply, so choosing the portal must not silently vouch for all of them.
-    expect(portalTrust(env({ MCP_PORTAL_URL: "https://gw.example.com/mcp" }))).toBe("byo");
-  });
-
-  it("requires the exact opt-in, so a stray value is not an assertion", () => {
-    expect(portalTrust(env({ MCP_PORTAL_TRUST_ANNOTATIONS: "true" }))).toBe("vetted");
-    expect(portalTrust(env({ MCP_PORTAL_TRUST_ANNOTATIONS: "TRUE" }))).toBe("vetted");
-    for (const value of ["1", "yes", "on", "vetted", ""]) {
-      expect(portalTrust(env({ MCP_PORTAL_TRUST_ANNOTATIONS: value }))).toBe("byo");
-    }
-  });
-
-  it("takes effect immediately when withdrawn", () => {
-    // The tier is read at each point of use rather than stored on the account or a binding's props.
-    // It used to be frozen at connect time, so turning the assertion off left every existing account
-    // vetted until it happened to reconnect -- the wrong direction for a security setting to stick.
-    const vetted = env({ MCP_PORTAL_TRUST_ANNOTATIONS: "true" });
-    expect(portalTrust(vetted)).toBe("vetted");
-    expect(portalTrust(env())).toBe("byo");
-  });
-});
-
 describe("portalServer", () => {
-  it("records provenance, which is permanent, and not the trust tier, which is not", () => {
-    // Provenance answers "who chose this endpoint" and is settled forever once the account connects.
-    // The trust tier answers "what may its annotations do today" and is configuration. The bug this
-    // pins: with `trust` doing double duty, a portal left at the default `byo` counted as
-    // user-supplied, so the upstream could rename itself over MCP_PORTAL_NAME in every prompt.
+  it("records provenance, so an upstream cannot rename itself over the configured name", () => {
+    // Provenance answers "who chose this endpoint" and is settled forever once the account
+    // connects. A portal is always the deployment's own choice, which is what keeps the far side
+    // from renaming itself over MCP_PORTAL_NAME in every recorded call.
     const config = readPortalConfig(env({
       MCP_PORTAL_URL: "https://gw.example.com/mcp",
       MCP_PORTAL_NAME: "Acme Portal",
     }))!;
     expect(portalServer(config).provenance).toBe("deployment");
-    expect(portalServer(config)).not.toHaveProperty("trust");
     expect(portalServer(config).serverName).toBe("Acme Portal");
   });
 });

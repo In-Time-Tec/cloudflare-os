@@ -58,7 +58,7 @@ export interface McpServerConfiguratorRpc {
   listServerOptions(): Promise<ConfiguratorUIOption[]>;
 
   /**
-   * Tools the grant may cover, annotated with whether calls need approval. Narrowed to one
+   * Tools the grant may cover, annotated with whether calls only read. Narrowed to one
    * upstream server when `serverId` is given.
    */
   listToolOptions(serverId?: string): Promise<ConfiguratorUIOption[]>;

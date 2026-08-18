@@ -13,46 +13,26 @@ export type McpContent =
   | { type: "resource"; resource: { uri: string; mimeType?: string; text?: string; blob?: string } };
 
 /**
- * Outcome of `callTool` or `getActionResult`.
- *
- * Read-only tools resolve to `"ok"` straight away. Everything else is an action: it is queued for
- * approval and resolves to `"pending"`, then to `"ok"`, `"rejected"`, or `"failed"`.
+ * Outcome of `callTool`. Every call runs immediately, so the result is the server's own; a call
+ * the deployment refuses, or one that fails, throws instead.
  */
-export type McpCallResult =
-  | {
-      status: "ok";
-      /** Content blocks as returned by the server. */
-      content: McpContent[];
-      /** All text blocks concatenated, for the common case where that is all you need. */
-      text: string;
-      /** Present when the tool declares an output schema and returned structured data. */
-      structuredContent?: unknown;
-      /** True when the tool itself reported failure (the call succeeded; the tool did not). */
-      isError?: boolean;
-    }
-  | {
-      status: "pending";
-      /** Pass to `getActionResult` to collect the outcome once it has been decided. */
-      actionId: number;
-      /** Human-readable explanation to relay to the user. */
-      message: string;
-    }
-  | {
-      status: "rejected";
-      /** Why the action was not performed. */
-      message: string;
-    }
-  | {
-      status: "failed";
-      /** The approved call failed. Its message says whether it may have taken effect. */
-      message: string;
-    };
+export type McpCallResult = {
+  status: "ok";
+  /** Content blocks as returned by the server. */
+  content: McpContent[];
+  /** All text blocks concatenated, for the common case where that is all you need. */
+  text: string;
+  /** Present when the tool declares an output schema and returned structured data. */
+  structuredContent?: unknown;
+  /** True when the tool itself reported failure (the call succeeded; the tool did not). */
+  isError?: boolean;
+};
 
 /** How this deployment classified one tool. */
 export type McpToolMode =
   // Returns data immediately; every call is recorded as an observation.
   | "read"
-  // Queued for approval before it runs.
+  // Changes something; every call is recorded as an action, with its outcome.
   | "action";
 
 /** Description of one tool exposed by the session. */
@@ -63,7 +43,7 @@ export type McpToolInfo = {
   title?: string;
   /** The server's own description of the tool. */
   description?: string;
-  /** Whether calls are observations or approval-gated actions. */
+  /** Whether calls are recorded as observations or as actions. */
   mode: McpToolMode;
   /**
    * Why the tool was classified this way: `"server-annotation"` when the server's own

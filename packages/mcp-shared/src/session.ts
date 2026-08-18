@@ -5,43 +5,13 @@
 // supplies. The base never touches the Durable Object, the account, or the endpoint's credentials.
 
 import { RpcTarget, type RpcStub } from "cloudflare:workers";
-import type { ActionDescription, ActionKind, ApprovalQueue }
-  from "@gadgets/workshop-shared/gatekeeper";
+import type { ActionKind, ActionRecorder } from "@gadgets/workshop-shared/gatekeeper";
 
-import type { McpClient } from "./client.js";
+import { callMayHaveTakenEffect, type McpClient } from "./client.js";
 import type { WithClientOptions } from "./connection.js";
 import { isWholeEndpoint, type ToolScope } from "./scope.js";
 import { describeCall, toCallResult, toolInfo, type ClassifiedTool } from "./tools.js";
 import type { McpCallResult, McpToolInfo } from "./types";
-
-/**
- * A queued tool call, awaiting a decision. Persisted by the host in its own storage; the session
- * only ever reads one back by id.
- */
-export type StoredAction = {
-  id: number;
-  toolName: string;
-  args: Record<string, unknown>;
-  /**
-   * `applying` is the window between an approval arriving and the call returning. It exists so a
-   * second `applyAction` for the same id cannot find the record still `pending` and call the tool a
-   * second time; see `ActionStore.apply`.
-   */
-  state: "pending" | "applying" | "applied" | "rejected" | "failed";
-  submittedAt: number;
-  /** When the in-flight apply was claimed, for recovering a claim whose Durable Object died mid-call. */
-  claimedAt?: number;
-  /**
-   * Whether a `failed` record may be sent again. Absent means yes, which is the reading for records
-   * written before this field existed. False marks a failure that left the outcome unknown: the
-   * request may already have been carried out, so another attempt could duplicate a write that MCP
-   * gives no way to undo. See `ActionStore.apply`.
-   */
-  retryable?: boolean;
-  /** Populated once applied; delivered to the Gadget as an observation. */
-  result?: Extract<McpCallResult, { status: "ok" }>;
-  error?: string;
-};
 
 /**
  * What a session needs from the gatekeeper facet that owns it. Narrow: the session is handed to a
@@ -58,12 +28,8 @@ export interface McpSessionHost {
   /** Runs `fn` against an initialized client for this binding's endpoint. */
   call<T>(fn: (client: McpClient) => Promise<T>, options?: WithClientOptions): Promise<T>;
 
-  /** The approval-kind tag for one tool, namespaced so pre-approvals cannot cross servers. */
+  /** The action kind for one tool, namespaced so policy cannot cross servers. */
   actionKindFor(toolName: string): ActionKind;
-
-  stageAction(toolName: string, args: Record<string, unknown>): StoredAction;
-  discardStagedAction(id: number): void;
-  lookupAction(id: number): StoredAction | undefined;
 }
 
 /**
@@ -73,21 +39,21 @@ export interface McpSessionHost {
  */
 export class McpSessionBase extends RpcTarget {
   #host: McpSessionHost;
-  #queue: RpcStub<ApprovalQueue>;
+  #recorder: RpcStub<ActionRecorder>;
 
-  constructor(host: McpSessionHost, queue: RpcStub<ApprovalQueue>) {
+  constructor(host: McpSessionHost, recorder: RpcStub<ActionRecorder>) {
     super();
     this.#host = host;
-    this.#queue = queue;
+    this.#recorder = recorder;
   }
 
   [Symbol.dispose](): void {
-    (this.#queue as RpcStub<ApprovalQueue> & { [Symbol.dispose](): void })[Symbol.dispose]();
+    (this.#recorder as RpcStub<ActionRecorder> & { [Symbol.dispose](): void })[Symbol.dispose]();
   }
 
   async listTools(): Promise<McpToolInfo[]> {
     const tools = await this.#host.tools();
-    await this.#queue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: `${this.#host.serverName}: list tools`,
       description:
         `Read the tool catalog of the MCP server **${this.#host.serverName}** ` +
@@ -129,79 +95,29 @@ export class McpSessionBase extends RpcTarget {
     if (entry.mode === "read") {
       const result = await host.call(client => client.callTool(name, toolArgs));
       // Authorize before the data is handed back, per the gatekeeper contract.
-      await this.#queue.authorizeObservation(described);
+      await this.#recorder.authorizeObservation(described);
       return toCallResult(result);
     }
 
-    const staged = host.stageAction(name, toolArgs);
-    const description: ActionDescription = {
+    const handle = await this.#recorder.authorizeAction({
       ...described,
-      // MCP describes no inverse operation for a tool call.
-      implementsRevert: false,
-      // Nothing about a queued call is simulated, so later reads would show a world in which it
-      // never happened. Wait for the decision instead.
-      awaitDecision: true,
-      autoApprovable: entry.autoApprovable,
       actionKind: host.actionKindFor(name),
-    };
+    });
 
+    let result;
     try {
-      await this.#queue.submitAction(staged.id, description);
+      // A write is never retried on session expiry: a fronting proxy can report one after the
+      // upstream already accepted the call.
+      result = await host.call(
+        client => client.callTool(name, toolArgs), { retryOnExpiry: false });
     } catch (err) {
-      host.discardStagedAction(staged.id);
+      // `callMayHaveTakenEffect` fails safe: anything it cannot positively identify as declined is
+      // reported as possibly performed, since MCP offers no way to check or undo one.
+      await handle.failed(
+        err instanceof Error ? err.message : String(err), callMayHaveTakenEffect(err));
       throw err;
     }
-
-    return {
-      status: "pending",
-      actionId: staged.id,
-      message:
-        `Calling "${name}" on ${host.serverName} needs approval. If this is running in an ` +
-        `agent's executeCode call, return from this executeCode call now so the approval can ` +
-        `appear in chat. After approval, call getActionResult(${staged.id}) for the outcome.`,
-    };
-  }
-
-  async getActionResult(actionId: number): Promise<McpCallResult> {
-    if (!Number.isInteger(actionId)) throw new Error("getActionResult() requires an action id.");
-    const host = this.#host;
-    const stored = host.lookupAction(actionId);
-    if (!stored) throw new Error(`No MCP action with id ${actionId}.`);
-
-    switch (stored.state) {
-      case "pending":
-      case "applying":
-        return {
-          status: "pending",
-          actionId,
-          message: stored.state === "applying"
-            ? `Calling "${stored.toolName}" on ${host.serverName} was approved and is running.`
-            : `Calling "${stored.toolName}" on ${host.serverName} is awaiting approval.`,
-        };
-      case "rejected":
-        return {
-          status: "rejected",
-          message: `Calling "${stored.toolName}" on ${host.serverName} was not approved.`,
-        };
-      case "failed":
-        return {
-          status: "failed",
-          message: stored.error
-            ?? `Calling "${stored.toolName}" on ${host.serverName} failed.`,
-        };
-      case "applied": {
-        const result = stored.result
-          ?? { status: "ok" as const, content: [], text: "", isError: false };
-        // The result was produced while the Gadget was not looking, so it becomes an observation at
-        // the moment it is handed over rather than when the call was applied.
-        await this.#queue.authorizeObservation({
-          title: `${host.serverName}: result of ${stored.toolName}`,
-          description:
-            `Read the response from the approved call to \`${stored.toolName}\` on ` +
-            `**${host.serverName}**.`,
-        });
-        return result;
-      }
-    }
+    await handle.succeeded();
+    return toCallResult(result);
   }
 }

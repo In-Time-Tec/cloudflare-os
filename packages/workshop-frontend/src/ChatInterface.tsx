@@ -8,9 +8,7 @@ import {
   useRef,
   useMemo,
   useCallback,
-  type Dispatch,
   type ReactNode,
-  type SetStateAction,
   type DragEvent as ReactDragEvent,
 } from "react";
 import { reportIssue } from './errorReporting'
@@ -41,7 +39,6 @@ import {
   File as FileIcon,
   PencilSimple,
   Brain,
-  ShieldCheck,
   Terminal,
   Globe,
   MagnifyingGlass,
@@ -81,7 +78,7 @@ import {
   OutputIcon,
   OutputFormatOffer,
 } from "@gadgets/workshop-shared/api";
-import { ActionKind, ResourceDescription } from "@gadgets/workshop-shared/gatekeeper";
+import {  ResourceDescription } from "@gadgets/workshop-shared/gatekeeper";
 import {
   parseSlashCommandInput, slashCommandTokenKey, stripSlashCommandToken,
 } from "./components/chat/slash-command-input";
@@ -94,9 +91,6 @@ import {
 import {
   removeComposerToken, snapCaretOutOfRanges, spliceComposerToken, type ComposerRange,
 } from "./components/chat/composer-tokens";
-import CapsuleOverlay, { CAPSULE_OVERLAY_GAP } from "./CapsuleOverlay";
-import type { SelectableItem } from "./ResourcePicker";
-import GatekeeperModal from "./GatekeeperModal";
 import { GatekeeperIcon } from "./components/GatekeeperIcon";
 import { formatOf, FORMAT_ICONS } from "./components/format/formats";
 import { FormatMiniature } from "./components/format/FormatVisuals";
@@ -104,14 +98,8 @@ import { formatIconDataUrl } from "./components/format/formatIconImage";
 import { locateMessageFormatRefs } from "./components/format/messageFormatRefs";
 import ComposerFormatMenuItems from "./components/format/ComposerFormatMenuItems";
 import { HookToggle } from "./components/HookToggle";
-import { handlePickerKeyDown } from "./pickerNavigation";
-import { normalizeResourceUrl } from "./resourceMatching";
-import AutoApproveConfirmDialog from "./components/AutoApproveConfirmDialog";
-import { AlwaysApproveButton, ResolveButton } from "./components/ResolveButton";
 import { WorkshopButton, WorkshopIconButton } from "./components/WorkshopControls";
 import { useActionEntries } from "./useActions";
-import { useAlwaysApproveTag } from "./useAlwaysApproveTag";
-import { useResolveAction } from "./useResolveAction";
 import { safeExternalUrl } from "./utils/safeExternalUrl";
 import { useAuthenticatedApi } from "./AuthContext";
 import { useVendorBranding } from "./useVendorBranding";
@@ -354,11 +342,6 @@ function cssLogoUrl(url: string | undefined): string | undefined {
   return cached || undefined;
 }
 
-function firstAccountIndex(items: readonly SelectableItem[]): number {
-  const index = items.findIndex((item) => item.type === "account");
-  return index > 0 ? index : 0;
-}
-
 // A slash command the user picked, tracked as the range of composer text that names it.
 type SelectedSlashCommand = ComposerRange & {
   choice: SlashCommandChoice;
@@ -431,7 +414,6 @@ async function prepareChatAttachment(file: File): Promise<{blob: Blob, mimeType:
 }
 
 // Matches http:// and https:// URLs in text, stopping at whitespace and common delimiters.
-const URL_REGEX = /https?:\/\/[^\s)>\]]*/g;
 const CAPSULE_LINK_PREFIX = "/__gadgets_capsule__/";
 const CAPSULE_TOKEN_PREFIX = "GADGETS_CAPSULE_";
 const CAPSULE_TOKEN_SUFFIX = "_TOKEN";
@@ -704,10 +686,6 @@ function getToolCallSummary(
       return { verb: "Observed user changes" };
     case "listTemplates":
       return { verb: "Listed templates" };
-    case "listConnectableResources":
-      return { verb: "Listed connectable resources", target: tc.input.vendorId };
-    case "requestConnection":
-      return { verb: "Requested connection", target: tc.input.vendorId };
   }
   // Compile-time exhaustiveness check.
   const _exhaustive: never = tc;
@@ -783,10 +761,6 @@ function describeToolCallCount(toolName: AiToolCall["toolName"], count: number):
       return count === 1 ? "Stopped" : `Stopped ${count} times`;
     case "listTemplates":
       return `Listed templates`;
-    case "listConnectableResources":
-      return `Listed connectable resources`;
-    case "requestConnection":
-      return count === 1 ? "Requested a connection" : `Requested ${count} connections`;
   }
   const _exhaustive: never = toolName;
   return _exhaustive;
@@ -878,8 +852,6 @@ function getProvisionalToolVerb(toolName: AiToolCall["toolName"]): string {
     case "observeUserChanges": return "Observing user changes";
     case "giveUp": return "Stopping";
     case "listTemplates": return "Listing templates";
-    case "listConnectableResources": return "Listing connectable resources";
-    case "requestConnection": return "Requesting a connection";
   }
   const _exhaustive: never = toolName;
   return _exhaustive;
@@ -902,8 +874,6 @@ function describeProvisionalToolCount(toolName: AiToolCall["toolName"], count: n
     case "observeUserChanges": return `Observing ${pluralize(count, "change set")}`;
     case "giveUp": return "Stopping";
     case "listTemplates": return "Listing templates";
-    case "listConnectableResources": return "Listing connectable resources";
-    case "requestConnection": return `Requesting ${pluralize(count, "connection")}`;
   }
   const _exhaustive: never = toolName;
   return _exhaustive;
@@ -1778,7 +1748,6 @@ const ToolGroupRow = memo(function ToolGroupRow({
 });
 
 export const ChatInput = ({
-  createCapsuleGatekeeper,
   getOverseer,
   onSend,
   isAgentActive,
@@ -1797,7 +1766,6 @@ export const ChatInput = ({
   seedText,
   seedNonce,
   draftStorageKey,
-  attachLabel,
   draftUpdateBanner,
   blockedReason,
   chatKey,
@@ -1849,7 +1817,6 @@ export const ChatInput = ({
   /** Session-storage key used to recover this composer's draft prompt after a page refresh. */
   draftStorageKey?: string;
   /** Optional label for the attach menu item. */
-  attachLabel?: string;
   draftUpdateBanner?: ReactNode;
   /** When set, the composer is disabled and shows this message — the user must resolve something
    * (e.g. accept/deny a pending connection request) before they can type or send. */
@@ -1888,7 +1855,6 @@ export const ChatInput = ({
   const [cursorPosition, setCursorPosition] = useState(0);
   const pickerCaretRef = useRef<{key: string | null; text: string}>({key: null, text: ""});
   // Caret position and text the URL overlay was last resolved for, to skip repeated scans.
-  const lastUrlScanRef = useRef({position: -1, text: ""});
   const { authenticatedApi } = useAuthenticatedApi();
   const vendorBranding = useVendorBranding(authenticatedApi);
   const selectedSlashCommandRef = useRef(selectedSlashCommand);
@@ -1899,32 +1865,6 @@ export const ChatInput = ({
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const attachmentDragDepthRef = useRef(0);
   const mountedRef = useRef(true);
-  const [activeUrl, setActiveUrl] = useState<{
-    text: string;
-    start: number;
-    end: number;
-  } | null>(null);
-  const [overlayIndex, setOverlayIndex] = useState(0);
-  const overlayItemsRef = useRef<SelectableItem[]>([]);
-  const overlayActivateRef = useRef<((index: number) => void) | null>(null);
-  // Once the user moves the overlay's selection, the default stops applying.
-  const overlayNavigatedRef = useRef(false);
-  const [urlLineOffset, setUrlLineOffset] = useState<number | undefined>(undefined);
-  const navigateOverlay: Dispatch<SetStateAction<number>> = (index) => {
-    overlayNavigatedRef.current = true;
-    setOverlayIndex(index);
-  };
-  // Accounts arrive from a subscription, so they can land after the panel first renders.
-  const handleOverlayItems = useCallback((items: SelectableItem[]) => {
-    overlayItemsRef.current = items;
-    if (!overlayNavigatedRef.current) setOverlayIndex(firstAccountIndex(items));
-  }, []);
-
-  // Attach modal state
-  const [attachModalOpen, setAttachModalOpen] = useState(false);
-  // Save the cursor position when the attach modal opens, so we can insert the capsule there.
-  const attachCursorPosRef = useRef(0);
-
   // Refs for the mirror div and the textarea wrapper.
   const wrapperRef = useRef<HTMLDivElement>(null);
   const promptCardRef = useRef<HTMLDivElement>(null);
@@ -2130,42 +2070,6 @@ export const ChatInput = ({
 
   // Reset overlay selection when the overlay appears or changes URL, preferring a connected account
   // so Tab never reaches for "Connect new account" first.
-  useEffect(() => {
-    setOverlayIndex(firstAccountIndex(overlayItemsRef.current));
-    overlayNavigatedRef.current = false;
-  }, [activeUrl]);
-
-  // Measure the line the URL starts on, so the panel sits with that line rather than above a
-  // composer the URL may have wrapped over several lines. The mirror's geometry is the textarea's.
-  useLayoutEffect(() => {
-    const mirror = mirrorRef.current?.node;
-    const wrapper = wrapperRef.current;
-    if (!activeUrl || !mirror || !wrapper) {
-      setUrlLineOffset(undefined);
-      return;
-    }
-    const walker = document.createTreeWalker(mirror, NodeFilter.SHOW_TEXT);
-    let consumed = 0;
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const length = node.textContent?.length ?? 0;
-      if (consumed + length <= activeUrl.start) {
-        consumed += length;
-        continue;
-      }
-      const offset = activeUrl.start - consumed;
-      const range = document.createRange();
-      range.setStart(node, offset);
-      range.setEnd(node, Math.min(offset + 1, length));
-      const line = range.getBoundingClientRect();
-      const box = wrapper.getBoundingClientRect();
-      // Never below the composer's own bottom edge, in case the line is scrolled out of view.
-      setUrlLineOffset(Math.max(
-          CAPSULE_OVERLAY_GAP, box.bottom - line.top + CAPSULE_OVERLAY_GAP));
-      return;
-    }
-    setUrlLineOffset(undefined);
-  }, [activeUrl, inputValue]);
-
   const isBlocked = !!blockedReason;
 
   // A disabled textarea stops firing mouse events, so drop the hover state the token hit-testing
@@ -2339,20 +2243,6 @@ export const ChatInput = ({
     ];
   };
 
-  const capsuleTokenText = (description: ResourceDescription, vendorId?: string) =>
-    (vendorId && vendorBranding.get(vendorId)?.logoUrl ? CAPSULE_LOGO_SLOT : "") + description.title;
-
-  // The picker parses at the caret, but only its token matters, so refresh its copy of the caret
-  // when that changes rather than on every movement. Plain caret movement then re-renders nothing.
-  const syncPickerCaret = (position: number) => {
-    const text = inputValueRef.current;
-    const key = slashCommandTokenKey(text, position);
-    if (key !== pickerCaretRef.current.key || text !== pickerCaretRef.current.text) {
-      pickerCaretRef.current = {key, text};
-      setCursorPosition(position);
-    }
-  };
-
   const moveCaret = (position: number) => {
     const textarea = composerTextareaRef.current;
     if (!textarea) return;
@@ -2433,18 +2323,20 @@ export const ChatInput = ({
   }, []);
 
   // Keeps the resolved command anchored to its text when text is inserted or removed before it.
+  const syncPickerCaret = (position: number) => {
+    const text = inputValueRef.current;
+    const key = slashCommandTokenKey(text, position);
+    if (key !== pickerCaretRef.current.key || text !== pickerCaretRef.current.text) {
+      pickerCaretRef.current = {key, text};
+      setCursorPosition(position);
+    }
+  };
+
   const shiftSelectedSlashCommand = (position: number, delta: number) => {
     if (delta === 0) return;
     setSelectedSlashCommand(previous => previous && previous.start >= position
       ? {...previous, start: previous.start + delta}
       : previous);
-  };
-
-  const shiftFormatTokens = (position: number, delta: number) => {
-    if (delta === 0) return;
-    setFormatTokens(previous => previous.map(token => token.start >= position
-      ? {...token, start: token.start + delta}
-      : token));
   };
 
   const slashCommandPicker = useSlashCommandPicker({
@@ -2660,179 +2552,6 @@ export const ChatInput = ({
     setInputValue((prev) => prev + "\n\n" + formatted);
   };
 
-  // Called when the user selects an account in the CapsuleOverlay.
-  // Creates a capsule gatekeeper, fetches its description, and replaces the URL
-  // in the input text with the resource title highlighted as a capsule.
-  const handleCapsuleCreate = async (accountId: number, vendorId: string) => {
-    if (!activeUrl) return;
-
-    try {
-      // Create the capsule gatekeeper.
-      const gk = await createCapsuleGatekeeper(accountId, normalizeResourceUrl(activeUrl.text));
-      if (!gk) {
-        console.error("Failed to create capsule gatekeeper");
-        return;
-      }
-
-      try {
-        // Fetch ID and description in parallel (promise pipelining).
-        const [id, description] = await Promise.all([
-          gk.getId(),
-          gk.describe(),
-        ]);
-
-        // Snapshot the activeUrl position before any state updates.
-        const urlStart = activeUrl.start;
-        const urlEnd = activeUrl.end;
-        const splice = spliceComposerToken(
-            inputValueRef.current, urlStart, urlEnd, capsuleTokenText(description, vendorId));
-
-        setInputValue(splice.value);
-
-        // Adjust positions of existing capsules and add the new one.
-        shiftSelectedSlashCommand(urlEnd, splice.delta);
-        shiftFormatTokens(urlEnd, splice.delta);
-        setCapsules((prev) => [
-          ...prev.map((c) => c.start >= urlEnd ? { ...c, start: c.start + splice.delta } : c),
-          {
-            start: splice.start,
-            length: splice.length,
-            gatekeeperId: id,
-            description,
-            vendorId,
-          },
-        ]);
-
-        // Clear activeUrl so the overlay dismisses.
-        setActiveUrl(null);
-
-        requestAnimationFrame(() => {
-          composerTextareaRef.current?.focus();
-          moveCaret(splice.caret);
-        });
-      } finally {
-        gk[Symbol.dispose]();
-      }
-    } catch (err) {
-      console.error("Failed to create capsule:", err);
-    }
-  };
-
-  // Called when the user selects a prefix-match "refine" row in the CapsuleOverlay.
-  // Replaces the URL in the input with the new (extended) URL and selects the first placeholder.
-  const handleRefine = (
-    newUrl: string,
-    placeholderStart: number,
-    placeholderEnd: number,
-  ) => {
-    if (!activeUrl) return;
-
-    const urlStart = activeUrl.start;
-    const urlEnd = activeUrl.end;
-    const lengthDiff = newUrl.length - (urlEnd - urlStart);
-
-    // Replace the old URL text with the new URL (which includes the suffix + placeholders).
-    setInputValue(
-      (prev) => prev.slice(0, urlStart) + newUrl + prev.slice(urlEnd),
-    );
-
-    // Adjust positions of any capsules that come after the URL.
-    shiftSelectedSlashCommand(urlEnd, lengthDiff);
-    shiftFormatTokens(urlEnd, lengthDiff);
-    if (lengthDiff !== 0) {
-      setCapsules((prev) => {
-        const adjusted = prev.map((c) =>
-          c.start >= urlEnd ? { ...c, start: c.start + lengthDiff } : c,
-        );
-        return adjusted;
-      });
-    }
-
-    // Update activeUrl to reflect the new URL bounds.
-    setActiveUrl({
-      text: newUrl,
-      start: urlStart,
-      end: urlStart + newUrl.length,
-    });
-
-    // Reset overlay index so the first item is selected after the picker re-evaluates.
-    setOverlayIndex(0);
-
-    // Select the first placeholder in the textarea on the next frame.
-    requestAnimationFrame(() => {
-      const wrapper = wrapperRef.current;
-      if (!wrapper) return;
-      const textarea = wrapper.querySelector("textarea");
-      if (textarea) {
-        textarea.setSelectionRange(
-          urlStart + placeholderStart,
-          urlStart + placeholderEnd,
-        );
-        textarea.focus();
-      }
-    });
-  };
-
-  // Opens the attach modal, saving the current cursor position so we can insert there later.
-  const handleAttachOpen = () => {
-    const wrapper = wrapperRef.current;
-    if (wrapper) {
-      const textarea = wrapper.querySelector("textarea");
-      if (textarea) {
-        attachCursorPosRef.current =
-          textarea.selectionStart ?? inputValueRef.current.length;
-      } else {
-        attachCursorPosRef.current = inputValueRef.current.length;
-      }
-    } else {
-      attachCursorPosRef.current = inputValueRef.current.length;
-    }
-    setAttachModalOpen(true);
-  };
-
-  // Insert a capsule chip at the given position and move the caret past it.
-  const insertCapsuleAt = (
-    insertPos: number,
-    id: number,
-    description: ResourceDescription,
-    vendorId?: string,
-  ) => {
-    const splice = spliceComposerToken(
-        inputValueRef.current, insertPos, insertPos, capsuleTokenText(description, vendorId));
-
-    setInputValue(splice.value);
-
-    // Shift any existing capsules after the insertion point.
-    shiftSelectedSlashCommand(insertPos, splice.delta);
-    shiftFormatTokens(insertPos, splice.delta);
-    setCapsules((prev) => [
-      ...prev.map((c) =>
-        c.start >= insertPos ? { ...c, start: c.start + splice.delta } : c),
-      { start: splice.start, length: splice.length, gatekeeperId: id, description, vendorId },
-    ]);
-
-    requestAnimationFrame(() => {
-      composerTextareaRef.current?.focus();
-      moveCaret(splice.caret);
-    });
-  };
-
-  // Called by the GatekeeperModal when a gatekeeper is created via the attach flow.
-  // Inserts a capsule at the previously-saved cursor position.
-  const handleAttachCreated = async (gk: RpcStub<GatekeeperClient<any>>) => {
-    try {
-      // Fetch everything in parallel (promise pipelining).
-      const [id, description, creationSpec] = await Promise.all([
-        gk.getId(), gk.describe(), gk.getCreationSpec(),
-      ]);
-      insertCapsuleAt(attachCursorPosRef.current, id, description,
-          creationSpec.type === "gatekeeper" ? creationSpec.vendorId : undefined);
-      setAttachModalOpen(false);
-    } finally {
-      gk[Symbol.dispose]();
-    }
-  };
-
   // Handle text changes: capsules are atomic, so an edit overlapping one removes it, while an
   // edit overlapping the resolved command only detaches the resolution. Both shift when text is
   // inserted or removed before them.
@@ -3039,42 +2758,6 @@ export const ChatInput = ({
     }
     syncPickerCaret(cursorPos);
 
-    // One keystroke reaches this through `select`, `keyup`, and the frame after the edit. The scan
-    // below only depends on the caret and the text, so do it once per distinct position.
-    const text = inputValueRef.current;
-    const scanned = lastUrlScanRef.current;
-    if (scanned.position === cursorPos && scanned.text === text) return;
-    lastUrlScanRef.current = {position: cursorPos, text};
-
-    // Find all URL matches in the current text.
-    URL_REGEX.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = URL_REGEX.exec(text)) !== null) {
-      const start = match.index;
-      const end = start + match[0].length;
-
-      // Cursor is within this URL (inclusive of both endpoints).
-      if (cursorPos >= start && cursorPos <= end) {
-        // Skip if this region is already a capsule.
-        const isInsideCapsule = capsulesRef.current.some(
-          (c) => start >= c.start && end <= c.start + c.length,
-        );
-        if (isInsideCapsule) break;
-
-        setActiveUrl((prev) =>
-          prev &&
-          prev.text === match![0] &&
-          prev.start === start &&
-          prev.end === end
-            ? prev
-            : { text: match![0], start, end },
-        );
-        return;
-      }
-    }
-
-    // Cursor is not inside any URL.
-    setActiveUrl(null);
   };
 
   // Formats named in the message are inline tokens like capsules, addressed by the caret as one
@@ -3299,20 +2982,6 @@ export const ChatInput = ({
                 : "")}
           </div>
           <div ref={wrapperRef} className={styles.capsuleInputWrapper}>
-            {activeUrl && (
-              <CapsuleOverlay
-                url={activeUrl.text}
-                onSelectAccount={(accountId, vendorId) => {
-                  handleCapsuleCreate(accountId, vendorId);
-                }}
-                onRefine={handleRefine}
-                onDismiss={() => setActiveUrl(null)}
-                lineOffset={urlLineOffset}
-                activeIndex={overlayIndex}
-                onItems={handleOverlayItems}
-                activateRef={overlayActivateRef}
-              />
-            )}
             <ComposerMirror
               ref={mirrorRef}
               value={inputValue}
@@ -3445,17 +3114,6 @@ export const ChatInput = ({
                   if (!isAgentActive && !isBlocked) submitMessage();
                   return;
                 }
-                if (activeUrl) {
-                  handlePickerKeyDown(
-                    e,
-                    activeUrl.text,
-                    activeUrl.start,
-                    overlayIndex,
-                    navigateOverlay,
-                    overlayItemsRef,
-                    overlayActivateRef,
-                  );
-                }
               }}
               ref={(el) => {
                 composerTextareaRef.current = el;
@@ -3543,14 +3201,6 @@ export const ChatInput = ({
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu>
-            <button
-              type="button"
-              onClick={handleAttachOpen}
-              className="inline-flex h-8 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-[13px] leading-none tracking-[-0.25px] text-kumo-inactive transition-[background-color,color,transform] duration-150 ease-out hover:bg-kumo-tint hover:text-kumo-subtle focus-visible:bg-kumo-tint focus-visible:text-kumo-subtle focus-visible:outline-none active:scale-[0.97]"
-            >
-              <Plug size={15} className="flex-shrink-0" />
-              <span className={`leading-none ${styles.attachLabelText}`}>{attachLabel ?? "Add resource"}</span>
-            </button>
           </div>
 
           {/* Right actions */}
@@ -3646,13 +3296,6 @@ export const ChatInput = ({
         </div>
       </div>
       </div>
-
-      <GatekeeperModal
-        open={attachModalOpen}
-        onClose={() => setAttachModalOpen(false)}
-        getOverseer={getOverseer}
-        onCreated={handleAttachCreated}
-      />
     </div>
   );
 };
@@ -4314,7 +3957,7 @@ interface ChatInterfaceProps {
   onAgentActiveChange?: (chatId: number, isActive: boolean) => void;
   // Called after an auto-approval rule is enabled from the chat thread, so the Activity pane's
   // Auto-approval list reflects it without a reload.
-  onAutoApproveChange?: () => void;
+
   onHasAnyCodeChange?: (hasAnyCode: boolean) => void;
   onSelectedChatHasProposedChangesChange?: (hasProposedChanges: boolean) => void;
   constrainChatWidth?: boolean;
@@ -4445,7 +4088,7 @@ function ChatInterface({
   onDiscardConsoleLogs,
   onChatCountChange,
   onAgentActiveChange,
-  onAutoApproveChange,
+
   onHasAnyCodeChange,
   onSelectedChatHasProposedChangesChange,
   constrainChatWidth,
@@ -4500,22 +4143,6 @@ function ChatInterface({
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
   const [expandedCompactions, setExpandedCompactions] = useState<Set<number>>(new Set());
   const [processingActions, setProcessingActions] = useState<Set<number>>(
-    new Set(),
-  );
-  // Connection-request (agent requestConnection) accept flow. When set, the GatekeeperModal opens
-  // pre-seeded with the agent's vendor/resource; on creation we finalize acceptConnectionRequest.
-  const [connectionAccept, setConnectionAccept] = useState<{
-    requestId: string;
-    vendorId: string;
-    resourceUrl?: string;
-    resourceUrlPattern?: string;
-  } | null>(null);
-  // Read via this ref inside handleConnectionCreated to avoid a stale closure: that callback is
-  // passed as the `onCreated` prop to GatekeeperModal, so it would otherwise capture an outdated
-  // `connectionAccept`.
-  const connectionAcceptRef = useRef<typeof connectionAccept>(null);
-  connectionAcceptRef.current = connectionAccept;
-  const [processingConnections, setProcessingConnections] = useState<Set<string>>(
     new Set(),
   );
   const [availableModels, setAvailableModels] = useState<AiChatAuthorInfo[]>(
@@ -4670,26 +4297,7 @@ function ChatInterface({
     () => computeMessageStates(currentMessages, currentCompactions[0]),
     [currentMessages, currentCompactions],
   );
-  // A pending agent connection request blocks the composer: the user must accept ("Set up") or deny
-  // it before continuing the conversation.
-  const hasPendingConnectionRequest = useMemo(
-    () => currentMessages.some(
-      (msg) => msg.type === "connectionRequest" && msg.state === "pending",
-    ),
-    [currentMessages],
-  );
-  // A pending awaitDecision action also blocks the composer: the agent turn is suspended until the
-  // user approves or rejects it, so (like a connection request) further input must wait.
-  const hasPendingAwaitedAction = useMemo(
-    () => currentMessages.some(
-      (msg) => msg.type === "action" &&
-        msg.actionLog?.type === "action" &&
-        msg.actionLog.state === "pending" &&
-        msg.actionLog.description.awaitDecision === true,
-    ),
-    [currentMessages],
-  );
-  // A gadget's stamped format, looked up by the id a finished createArtifact call reports, so the
+  // An artifact's stamped format, looked up by the id a finished createArtifact call reports, so the
   // transcript can say "Created Doc" with the Doc icon.
   const resolveToolOutput = useCallback(
     (tc: AiToolCall) => resolveToolCallOutput(tc, outputOfWorkpiece),
@@ -5577,32 +5185,6 @@ function ChatInterface({
     return changed;
   };
 
-  const applyOptimisticActionState = (actionId: number, state: "approved" | "rejected"): boolean => {
-    let changed = false;
-    const locations = cacheRef.current.actionMessages.get(actionId);
-    if (!locations) return false;
-
-    for (const [key, location] of locations) {
-      const messages = cacheRef.current.messages.get(location.chatId);
-      const msg = messages?.[location.sequence];
-      if (msg?.type !== "action" || msg.actionId !== actionId || !msg.actionLog) {
-        locations.delete(key);
-        continue;
-      }
-
-      const nextMessages = [...messages!];
-      nextMessages[location.sequence] = {
-        ...msg,
-        actionLog: { ...msg.actionLog, state, appliedAt: new Date() },
-      };
-      cacheRef.current.messages.set(location.chatId, nextMessages);
-      changed = true;
-    }
-
-    if (locations.size === 0) cacheRef.current.actionMessages.delete(actionId);
-    return changed;
-  };
-
   const applyOptimisticHookEnabled = (actionId: number, enabled: boolean): boolean => {
     let changed = false;
     const locations = cacheRef.current.actionMessages.get(actionId);
@@ -5642,22 +5224,6 @@ function ChatInterface({
     }
   }, [overseer, selectedChatId, toasts]);
 
-  // Pending "always approve this type" confirmation, opened from a pending action card.
-  const [autoApproveConfirm, setAutoApproveConfirm] = useState<
-    { actionId: number; gatekeeperId: number; resourceTitle: string;
-      actionKind: ActionKind; actionLabel: string } | null
-  >(null);
-
-  // Enable auto-approval of an action tag on its connection (gated by the confirm dialog). The
-  // server applies the now-eligible pending action(s) via its drain, and the action state flips to
-  // "approved" through the actions subscription -- so we don't optimistically mutate it here.
-  const { alwaysApproveTag, isTagAutoApproved } =
-    useAlwaysApproveTag(overseer, setProcessingActions, onAutoApproveChange);
-
-  const resolveAction = useResolveAction(overseer, setProcessingActions, (actionId, state) => {
-    if (applyOptimisticActionState(actionId, state)) forceUpdate();
-  });
-
   // Handle enabling/disabling a bound hook from the chat thread.
   const handleToggleHook = async (actionId: number, hookId: number, enabled: boolean) => {
     setProcessingActions((prev) => new Set(prev).add(actionId));
@@ -5677,66 +5243,6 @@ function ChatInterface({
       setProcessingActions((prev) => {
         const next = new Set(prev);
         next.delete(actionId);
-        return next;
-      });
-    }
-  };
-
-  // Open the gatekeeper modal pre-seeded with the agent's requested vendor/resource.
-  const handleAcceptConnection = (msg: AiChatMessage & { type: "connectionRequest" }) => {
-    setConnectionAccept({
-      requestId: msg.requestId,
-      vendorId: msg.vendorId,
-      resourceUrl: msg.resourceUrl,
-      resourceUrlPattern: msg.resourceUrlPattern,
-    });
-  };
-
-  // Invoked by the accept-flow GatekeeperModal once the user has connected + configured a resource.
-  // The gatekeeper is bound into no gadget; finalizing the request surfaces it to the agent as a
-  // binding in the chat's env, under the name the agent chose when it made the request (the agent
-  // wires it into a gadget itself if that gadget's code needs it).
-  const handleConnectionCreated = async (gk: RpcStub<GatekeeperClient<any>>) => {
-    const accept = connectionAcceptRef.current;
-    if (!accept) {
-      gk[Symbol.dispose]();
-      return;
-    }
-    setProcessingConnections((prev) => new Set(prev).add(accept.requestId));
-    try {
-      const id = await gk.getId();
-      await overseer.acceptConnectionRequest(accept.requestId, {
-        gatekeeperId: id,
-      });
-      setConnectionAccept(null);
-    } catch (err) {
-      console.error("Failed to finalize connection:", err);
-      toasts.add({ title: "Failed to add connection", variant: "error" });
-    } finally {
-      gk[Symbol.dispose]();
-      setProcessingConnections((prev) => {
-        const next = new Set(prev);
-        next.delete(accept.requestId);
-        return next;
-      });
-    }
-  };
-
-  const handleDenyConnection = async (requestId: string) => {
-    setProcessingConnections((prev) => new Set(prev).add(requestId));
-    try {
-      await overseer.denyConnectionRequest(requestId);
-      // If the accept modal happens to be open for this same request, close it.
-      if (connectionAcceptRef.current?.requestId === requestId) {
-        setConnectionAccept(null);
-      }
-    } catch (err) {
-      console.error("Failed to deny connection:", err);
-      toasts.add({ title: "Failed to deny connection", variant: "error" });
-    } finally {
-      setProcessingConnections((prev) => {
-        const next = new Set(prev);
-        next.delete(requestId);
         return next;
       });
     }
@@ -6019,75 +5525,6 @@ function ChatInterface({
     return out;
   }, [currentMessages, messageStates, outputOfWorkpiece]);
 
-  const renderConnectionRequestCard = (
-    msg: AiChatMessage & { type: "connectionRequest" },
-  ) => {
-    const isPending = msg.state === "pending";
-    const isAccepted = msg.state === "accepted";
-    const isDenied = msg.state === "denied";
-    const isProc = processingConnections.has(msg.requestId);
-
-    const stateLabel = isAccepted ? "Connected" : isDenied ? "Denied" : null;
-    const stateLabelCls = isDenied ? "text-kumo-danger" : "text-kumo-success";
-    const scope = msg.resourceTitle ?? msg.resourceUrl;
-
-    return (
-      <div className="group/work max-w-[860px] text-[14px] leading-5 tracking-[-0.25px] text-kumo-subtle">
-        <div className="rounded-2xl border border-kumo-line bg-kumo-base px-4 py-3">
-          <div className="flex items-start gap-3">
-            <GatekeeperIcon
-              vendorId={msg.vendorId}
-              logoUrl={msg.vendorLogoUrl}
-              className="h-9 w-9 flex-shrink-0 rounded-lg"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <span className="font-medium text-kumo-default">
-                  Connect {msg.vendorName}
-                </span>
-                {scope && (
-                  <span className="rounded-full bg-kumo-tint px-2 py-0.5 text-[11px] leading-4 text-kumo-subtle">
-                    {scope}
-                  </span>
-                )}
-                {stateLabel && (
-                  <span className={`text-[12px] font-medium ${stateLabelCls}`}>
-                    {stateLabel}
-                  </span>
-                )}
-              </div>
-              {msg.reason && (
-                <p className="mt-1 text-[13px] leading-[18px] text-kumo-subtle">
-                  {msg.reason}
-                </p>
-              )}
-            </div>
-            {isPending && (
-              <div className="ml-3 flex flex-shrink-0 items-center gap-2 self-center text-[13px] leading-4">
-                <button
-                  type="button"
-                  onClick={() => handleDenyConnection(msg.requestId)}
-                  disabled={isProc}
-                  className="cursor-pointer rounded-md px-2 py-1 font-medium text-kumo-inactive transition-colors duration-150 ease-out hover:text-kumo-danger focus-visible:text-kumo-danger focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Deny
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleAcceptConnection(msg)}
-                  disabled={isProc}
-                  className="cursor-pointer rounded-md bg-kumo-brand px-3 py-1 font-medium text-white transition-[opacity,transform] duration-150 ease-out hover:opacity-90 focus-visible:outline-none active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Set up
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const renderActionCard = (msg: ActionChatMessage) => {
     const log = msg.actionLog;
     if (!log) return null;
@@ -6207,67 +5644,11 @@ function ChatInterface({
       );
     }
 
-    const isPending = state === "pending";
-    const isApproved = state === "approved";
-    const isRejected = state === "rejected";
-    // A blocking (awaitDecision) pending action suspends the agent turn and blocks the composer, so
-    // present it as a prominent callout with its details expanded by default.
-    const isBlocking = isPending && log.description.awaitDecision === true;
-    // A pending request is never collapsed: its description is the thing the user has to read in
-    // order to answer it, so hiding it behind a disclosure would just add a step before every
-    // decision. Resolved actions are history, and collapse so a long thread stays scannable.
-    const showDescription = isPending || open;
+    const failed = state === "failed" || state === "blocked";
+    const showDescription = open;
     const metadata = log.resourceTitle;
-    const stateLabel = isApproved
-      ? "Approved"
-      : isRejected
-        ? "Denied"
-        : null;
-    const stateLabelCls = isRejected
-      ? "text-kumo-danger"
-      : "text-kumo-inactive";
-    // Auto-approval target: offer "Always approve this type" only when enabling a rule would
-    // actually apply this action -- a tagged action on a connection that the gatekeeper marked
-    // auto-approvable. (A non-auto-approvable action stays a manual gate even with a rule; an
-    // auto-approvable action with an existing rule wouldn't still be pending.)
-    const autoApproveTarget =
-      log.gatekeeperId !== undefined && log.description.actionKind !== undefined &&
-      log.description.autoApprovable === true
-        ? {
-            actionId: msg.actionId,
-            gatekeeperId: log.gatekeeperId,
-            resourceTitle: log.resourceTitle,
-            actionKind: log.description.actionKind,
-            actionLabel: log.description.title,
-          }
-        : undefined;
-
-    const actionControls = isPending ? (
-      <>
-        {autoApproveTarget &&
-          !isTagAutoApproved(autoApproveTarget.gatekeeperId, autoApproveTarget.actionKind.tag) && (
-          <Tooltip content="Always approve this type of action on this connection, without future prompts." asChild>
-            <span className="flex">
-              <AlwaysApproveButton
-                onClick={() => setAutoApproveConfirm(autoApproveTarget)}
-                disabled={isProc}
-              />
-            </span>
-          </Tooltip>
-        )}
-        <ResolveButton
-          tone="deny"
-          onClick={() => void resolveAction(msg.actionId, "deny")}
-          disabled={isProc}
-        />
-        <ResolveButton
-          tone="approve"
-          variant={isBlocking ? "filled" : "quiet"}
-          onClick={() => void resolveAction(msg.actionId, "approve")}
-          disabled={isProc}
-        />
-      </>
-    ) : null;
+    const stateLabel = state === "failed" ? "Failed" : state === "blocked" ? "Blocked" : null;
+    const stateLabelCls = failed ? "text-kumo-danger" : "text-kumo-inactive";
 
     // Resource label, shown at the top of the blocking callout and at the bottom of the subtle
     // inline row.
@@ -6293,60 +5674,15 @@ function ChatInterface({
       </div>
     ) : null;
 
-    // A blocking (awaitDecision) action suspends the agent turn, so present it as a prominent
-    // callout laid out like the connection-request card: a permissions icon, title + resource +
-    // details, and the approve/deny actions.
-    if (isBlocking) {
-      return (
-        <div className="group/work max-w-[860px] text-[14px] leading-5 tracking-[-0.25px] text-kumo-subtle">
-          <div className="rounded-2xl border border-kumo-brand/40 bg-kumo-brand/10 px-4 py-3">
-            <div className="flex items-start gap-3">
-              <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-kumo-tint text-kumo-brand" aria-hidden="true">
-                <ShieldCheck size={20} weight="fill" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                  <span className="min-w-0 truncate font-medium text-kumo-default">
-                    {log.description.title}
-                  </span>
-                  {resourceMeta}
-                </div>
-                <div className={`chat-panel mt-1 max-h-[200px] overflow-y-auto pr-1 text-[13px] leading-[18px] text-kumo-subtle ${styles.markdownContent}`}>
-                  <MarkdownMessage message={log.description.description} />
-                </div>
-              </div>
-              <div className="ml-3 flex flex-shrink-0 items-center gap-1 self-center">
-                {actionControls}
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
     const titleIcon = (
       <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center" aria-hidden="true">
-        {isPending ? (
-          <span className="h-1.5 w-1.5 rounded-full bg-kumo-brand" />
-        ) : (
-          <WorkIcon Icon={LinkSimple} />
-        )}
+        <WorkIcon Icon={LinkSimple} />
       </span>
     );
 
     return (
       <div className="group/work max-w-[860px] text-[14px] leading-5 tracking-[-0.25px] text-kumo-subtle">
-        {isPending ? (
-          <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-1.5 py-1">
-            <div className="flex min-w-[8rem] flex-1 items-center gap-3">
-              {titleIcon}
-              <span className="min-w-0 flex-1 truncate text-kumo-default">
-                {log.description.title}
-              </span>
-            </div>
-            <div className="ml-auto flex flex-shrink-0 items-center gap-0.5">{actionControls}</div>
-          </div>
-        ) : (
+        {(
           <button
             type="button"
             onClick={() => toggleActionExpansion(msg.actionId)}
@@ -6873,8 +6209,6 @@ function ChatInterface({
 
                         {msg.type === "action" && renderActionCard(msg)}
 
-                        {msg.type === "connectionRequest" && renderConnectionRequestCard(msg)}
-
                         {msg.type === "useArtifact" && (
                           <div className="max-w-[860px] text-[14px] leading-5 tracking-[-0.25px] text-kumo-subtle">
                             <Tooltip content={`Used the gadget at ${formatFullTimestamp(msg.timestamp)}`} asChild>
@@ -7214,13 +6548,6 @@ function ChatInterface({
                           `thread:${threadId}:chat:${selectedChatId}`,
                         )
                       : undefined}
-                    blockedReason={
-                      hasPendingConnectionRequest
-                        ? "Set up or deny the connection request above to continue."
-                        : hasPendingAwaitedAction
-                          ? "Approve or reject the pending action above to continue."
-                          : undefined
-                    }
                     draftUpdateBanner={(() => {
                       if (!currentChatMetadata?.hasProposedChanges) return null;
 
@@ -7290,35 +6617,6 @@ function ChatInterface({
         </div>
       ) : null}
 
-      {autoApproveConfirm && (
-        <AutoApproveConfirmDialog
-          open
-          actionLabel={autoApproveConfirm.actionLabel}
-          resourceTitle={autoApproveConfirm.resourceTitle}
-          isProcessing={processingActions.has(autoApproveConfirm.actionId)}
-          onOpenChange={(open) => {
-            if (!open) setAutoApproveConfirm(null);
-          }}
-          onConfirm={async () => {
-            const { actionId, gatekeeperId, actionKind } = autoApproveConfirm;
-            if (await alwaysApproveTag(actionId, gatekeeperId, actionKind)) {
-              setAutoApproveConfirm(null);
-            }
-          }}
-        />
-      )}
-
-      {/* Accept flow for an agent connection request: pre-seeds the gatekeeper modal and, on
-          creation, finalizes the request so the agent resumes. */}
-      <GatekeeperModal
-        open={connectionAccept !== null}
-        onClose={() => setConnectionAccept(null)}
-        getOverseer={getOverseer}
-        onCreated={handleConnectionCreated}
-        initialVendorId={connectionAccept?.vendorId}
-        initialResourceUrl={connectionAccept?.resourceUrl}
-        initialResourceUrlPattern={connectionAccept?.resourceUrlPattern}
-      />
       <OutOfCreditsModal
         open={usageModalOpen}
         onClose={() => setUsageModalOpen(false)}

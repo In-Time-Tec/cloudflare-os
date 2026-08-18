@@ -24,7 +24,7 @@
 // Artifact a stub pointing to the Artifact's server-side Durable Object interface.
 
 import { RpcCompatible, RpcStub, RpcTarget } from "capnweb";
-import { AccountDescription, ActionKind, ActionDescription, AvatarImage, GatekeeperUiFrame, ObservationDescription, ResourceDescription, ResourceConfiguratorFrame, SupportedResource, VendorDescription, HookDescription } from "./gatekeeper.js";
+import { AccountDescription, ActionDescription, AvatarImage, GatekeeperUiFrame, ObservationDescription, ResourceDescription, ResourceConfiguratorFrame, SupportedResource, VendorDescription, HookDescription } from "./gatekeeper.js";
 import type { UiFeatureFlags } from "./feature-flags.js";
 
 export const SERVICE_SALT = new Uint8Array([
@@ -563,6 +563,23 @@ export interface AuthenticatedApi extends RpcTarget {
   ensureAccountResources(accountId: number, resourceUrlPatterns: string[]): Promise<{url?: string}>;
 
   /**
+   * The capabilities a connected account offers, grouped, with the user's current grants folded in.
+   * This is the settings UI's whole model: what the account could do, and what it may do.
+   */
+  listAccountCapabilities(accountId: number): Promise<AccountCapabilityGroup[]>;
+
+  /**
+   * Grant or withhold capabilities on a connected account. Pass every tag being changed; tags are
+   * matched against the account's catalog and unknown ones are rejected, so a stale UI cannot grant
+   * a capability the gatekeeper no longer offers.
+   *
+   * Granting takes effect in every chat, including ones already open. Withholding takes effect on
+   * the next operation: a write is refused before it happens, while a read is refused after the
+   * gatekeeper fetched it, so the data stops at the Workshop rather than never being read.
+   */
+  setAccountCapabilities(accountId: number, tags: string[], granted: boolean): Promise<void>;
+
+  /**
    * List the auto-provisioning ("ambient") gatekeepers the user can opt into right now: those set to
    * 'optional' by the admin that the user hasn't added yet. Rendered as an "Available" section on the
    * Connectors page. ('enabled' ones are already provisioned; 'disabled' ones aren't offered.) Returns
@@ -785,6 +802,41 @@ export type BannerConfig = {
 export function isHexColor(value: unknown): value is string {
   return typeof value === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
 }
+
+/**
+ * One capability offered by a connected account, joined with whether the user has granted it. This
+ * is what the settings UI renders: the vocabulary comes from the gatekeeper, the `granted` flag
+ * from the user's own grants.
+ */
+export type AccountCapability = {
+  tag: string;
+  label: string;
+  summary: string;
+  mode: 'read' | 'write';
+  group: string;
+  granted: boolean;
+
+  /**
+   * True when the capability's group needs a resource grant the account does not hold yet, so the
+   * UI can ask for the OAuth scopes before offering the switch.
+   */
+  needsResourceGrant: boolean;
+};
+
+/** A group of capabilities on a connected account, with the user's grants folded in. */
+export type AccountCapabilityGroup = {
+  id: string;
+  label: string;
+  summary: string;
+
+  /** The resource whose OAuth scopes this group needs, when the vendor declares grantable ones. */
+  resourceUrlPattern?: string;
+
+  /** Whether the account currently holds that resource grant. */
+  resourceGranted: boolean;
+
+  capabilities: AccountCapability[];
+};
 
 /** A single gatekeeper resource type in the admin resource-config UI. */
 export type AdminResource = {
@@ -1539,12 +1591,16 @@ export interface CodeSubscriber {
 }
 
 /**
- * Specifies the state of an action in the action log:
- * * pending: Action has not been applied yet. It is waiting for approval.
- * * approved: Action was approved and applied.
- * * rejected: Action was rejected by the user.
+ * The outcome of an entry in the activity log:
+ * * succeeded: The action was performed.
+ * * failed: The action was attempted and did not complete. See `failure` for what is known.
+ * * blocked: The action was refused before it was attempted, by deployment policy or the thread
+ *   sharing lockdown. Nothing was performed.
+ *
+ * Observations are always "succeeded"; the state is not meaningful for hooks, which are
+ * enabled/disabled instead.
  */
-export type ActionState = "pending" | "approved" | "rejected";
+export type ActionState = "succeeded" | "failed" | "blocked";
 
 export type ActionLogEntry = {
   /** Sequential ID number for the action. Counts up from when the thread was created. */
@@ -1560,25 +1616,24 @@ export type ActionLogEntry = {
   resourceUrl?: string;
 
   createdAt: Date;
-  appliedAt?: Date;
+
+  /** When the action's outcome was recorded. Absent while it is still in flight. */
+  completedAt?: Date;
 
   state: ActionState;
 } & ({
   type: "action";
   description: ActionDescription;
-  /**
-   * Who resolved the action (approved or rejected it). Set when the action leaves "pending"; absent
-   * while still pending (or for legacy actions resolved before this was tracked). For an
-   * auto-approved action this is the user who enabled the rule -- auto-approvals run under their
-   * authority (see `autoApproved`).
-   */
-  resolvedBy?: AiChatAuthorInfo;
 
   /**
-   * True when the action was applied automatically by an auto-approval rule rather than by a human
-   * clicking Approve. Only ever set alongside state "approved" (there is no automatic rejection).
+   * Under whose grant this action ran: the thread member whose connected account authorized the
+   * gatekeeper. This is the accountability record -- nobody approves an individual action, so this
+   * names the person whose consent made it possible.
    */
-  autoApproved?: boolean;
+  authorizedBy?: AiChatAuthorInfo;
+
+  /** Why the action failed or was blocked. Absent when it succeeded. */
+  failure?: ActionFailure;
 } | {
   type: "observation";
   description: ObservationDescription;
@@ -1596,6 +1651,19 @@ export type ActionLogEntry = {
   // Note that `state` is not meaningful for hooks. Instead of being "approved" or "rejected", they
   // are enabled/disabled, which the user can freely toggle as often as they want.
 });
+
+/** Why an action did not succeed, recorded on its activity-log entry. */
+export type ActionFailure = {
+  /** Human-readable explanation, shown in the activity log. */
+  message: string;
+
+  /**
+   * True when the outcome is genuinely unknown -- e.g. a network error after the request was
+   * already sent -- so the log says so rather than implying nothing happened. Never set for
+   * "blocked" entries, which are refused before anything is attempted.
+   */
+  mayHaveTakenEffect?: boolean;
+};
 
 export type BoundHookInfo = {
   id: number;
@@ -1779,25 +1847,13 @@ export interface Overseer extends RpcTarget {
   newAgentSpawnerGatekeeper(config: AgentSpawnerConfig): Promise<GatekeeperClient<any>>;
 
   /**
-   * List history of actions.
+   * List the thread's activity log: every action, observation, and hook binding, oldest first.
    * TODO: This should be paginated.
    */
   listActions(): Promise<ActionLogEntry[]>;
 
   /**
-   * Approve an action that is currently in the "pending" state. The action will be performed on
-   * approval.
-   */
-  approveAction(id: number): Promise<void>;
-
-  /**
-   * Reject an action that is in the "pending" state. This notifies the gatekeeper that it will not
-   * be approved in the future.
-   */
-  rejectAction(id: number): Promise<void>;
-
-  /**
-   * List information about bound hooks (which could wake up a artifact asynchronously).
+   * List information about bound hooks (which could wake up an artifact asynchronously).
    *
    * The list spans the whole thread; each entry names the artifact it wakes (see
    * BoundHookInfo.templateId), so a per-artifact view must filter on that.
@@ -1814,50 +1870,8 @@ export interface Overseer extends RpcTarget {
   deleteHook(id: number): Promise<void>;
 
   /**
-   * Enable auto-approval of actions carrying the given `actionKind` (the
-   * ActionDescription.actionKind) on the gatekeeper identified by `gatekeeperId`. Future actions
-   * with that kind's tag whose author marked them `autoApprovable` are then applied automatically
-   * without manual approval, and any matching action(s) already pending are applied immediately.
-   *
-   * Auto-approval rules are thread-wide per gatekeeper: approving an action kind approves it
-   * no matter which artifact invokes it.
-   */
-  setAutoApprovedActionKind(gatekeeperId: WorkpieceId, actionKind: ActionKind): Promise<void>;
-
-  /**
-   * Remove the auto-approval rule for `tag` on the given gatekeeper; matching actions then
-   * require manual approval again.
-   */
-  removeAutoApprovedActionKind(gatekeeperId: WorkpieceId, tag: string): Promise<void>;
-
-  /** List the currently-enabled auto-approval rules. */
-  listAutoApprovedActionKinds(): Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind }>>;
-
-  /**
-   * List the auto-approvable action kinds offered by gatekeepers bound in this thread. Each
-   * entry identifies its connection and reports whether a matching auto-approval rule is enabled.
-   */
-  listPreApprovableActions(): Promise<PreApprovableAction[]>;
-
-  /**
-   * Accept an agent's pending connection request (a "connectionRequest" chat message). The caller
-   * is responsible for having actually created the gatekeeper (via newGatekeeper()) and passes the
-   * resulting gatekeeper id. The gatekeeper is surfaced to the agent as a named binding in the
-   * chat's env, under the name the agent chose when it made the request (see
-   * `connectionRequest.bindingName`). This marks the request accepted, updates the inline card,
-   * and resumes the agent so it can use the resource.
-   */
-  acceptConnectionRequest(requestId: string, result: {gatekeeperId: WorkpieceId}): Promise<void>;
-
-  /**
-   * Deny an agent's pending connection request. Updates the inline card. Does NOT resume the agent:
-   * the turn stays ended so the user can decide what to tell the agent to do instead.
-   */
-  denyConnectionRequest(requestId: string): Promise<void>;
-
-  /**
-   * Subscribe to action adds/updates. Dispose the returned stub to unsubscribe.
-   * If `startAfter` is set, replay actions changed after that timestamp.
+   * Subscribe to activity-log adds/updates. Dispose the returned stub to unsubscribe.
+   * If `startAfter` is set, replay entries changed after that timestamp.
    */
   subscribeToActions(subscriber: RpcStub<ActionsSubscriber>, startAfter?: Date): Promise<RpcStub<{}>>;
 
@@ -2419,70 +2433,6 @@ export type AiChatMessageBody = {
    */
   type: "agentNudge";
   text: string;
-} | {
-  /**
-   * The agent requested that the user connect a gatekeeper (e.g. "I need ClickHouse cluster X").
-   * Rendered inline in the chat as an accept/deny card. State is mutated in-place when the user
-   * accepts or denies; the message is re-delivered to subscribers so the card updates. On accept the
-   * agent is resumed with the outcome (see the history builder in agent.ts); on deny the agent is
-   * not resumed (the user drives what happens next).
-   */
-  type: "connectionRequest";
-
-  /** Unique id used by acceptConnectionRequest()/denyConnectionRequest(). */
-  requestId: string;
-
-  /** The gatekeeper vendor the agent is requesting (id + denormalized display name). */
-  vendorId: string;
-  vendorName: string;
-
-  /** Denormalized vendor logo URL, for the connection card icon. */
-  vendorLogoUrl?: string;
-
-  /**
-   * Denormalized human-readable resource type/scope being requested (e.g. "Home Assistant
-   * Instance", "Gmail Mailbox"), resolved from the vendor's supported resources at request time.
-   */
-  resourceTitle?: string;
-
-  /**
-   * A fully- or partially-specified resource URL, if the agent could infer one. When absent (or
-   * incomplete) the accept flow opens the vendor's resource configurator to fill in the gaps.
-   */
-  resourceUrl?: string;
-
-  /**
-   * The urlPattern of the supported resource this request resolved to at request time (one of the
-   * vendor's SupportedResource.urlPattern values, e.g. "https://github.com/:owner/:repo" or the
-   * whole-instance "https://*"). The backend guarantees every connection request resolves to a
-   * concrete resource (see resolveRequestedResource), and the accept modal pre-selects exactly this
-   * resource — so accepting never opens a blank "create new connection" picker.
-   */
-  resourceUrlPattern?: string;
-
-  /** Why the agent wants this connection. Shown to the user to inform their decision. */
-  reason: string;
-
-  /** Lifecycle state. Starts "pending"; set by the user's accept/deny. */
-  state: "pending" | "accepted" | "denied";
-
-  /**
-   * Once accepted, the id of the created gatekeeper. The resource is surfaced to the agent as a
-   * named binding in the chat's env; the agent can additionally bind it into a artifact via
-   * setArtifactBinding if its artifact code needs it.
-   */
-  gatekeeperId?: WorkpieceId;
-
-  /**
-   * The name under which the resource will appear in the chat's env (`env.NAME` in executeCode)
-   * once the request is accepted. Supplied by the agent as a required parameter of the
-   * requestConnection tool -- the agent knows why it is requesting the resource, so it picks the
-   * name itself -- and recorded here at request time. The name is claimed in the chat's scope
-   * from that moment until the request is denied. Optional only because messages persisted
-   * before named chat bindings existed lack it; those are named and stamped lazily at the
-   * turn-start naming chokepoint.
-   */
-  bindingName?: string;
 };
 
 /**
@@ -2696,36 +2646,6 @@ export type AiToolCall = {
    */
   toolName: "listTemplates";
   input: {};
-  output?: string;
-} | {
-  /**
-   * List the resource types a gatekeeper vendor offers, so the agent can construct a resourceUrl
-   * for requestConnection. Resource patterns are only surfaced on demand (not in the system prompt).
-   */
-  toolName: "listConnectableResources";
-  input: {
-    vendorId: string;
-  };
-  output?: string;
-} | {
-  /**
-   * Ask the user to connect a gatekeeper, pre-configured as much as the agent can manage. Renders
-   * an accept/deny card in the chat; non-blocking (the turn ends, and the agent is resumed if the
-   * user accepts; on deny the agent is not resumed).
-   */
-  toolName: "requestConnection";
-  input: {
-    vendorId: string;
-    resourceUrl?: string;
-    reason: string;
-
-    /**
-     * Name under which the resource will appear in the chat's env once accepted (see
-     * `connectionRequest.bindingName`). Optional only because logs persisted before named chat
-     * bindings lack it.
-     */
-    bindingName?: string;
-  };
   output?: string;
 });
 
@@ -3086,20 +3006,6 @@ export type ArtifactBindingInfo = {
   chatId?: number;
 };
 
-/**
- * An auto-approvable action kind offered by a specific connection. Aggregated from each bound
- * gatekeeper's getAutoApprovableActions(); `alreadyEnabled` reports whether a matching rule exists.
- */
-export type PreApprovableAction = {
-  gatekeeperId: WorkpieceId;
-  resourceTitle: string;
-  actionKind: ActionKind;
-  alreadyEnabled: boolean;
-
-  /** Vendor of the gatekeeper holding this connection. Absent for vendorless gatekeepers. */
-  vendorId?: string;
-};
-
 // =======================================================================================
 // Template types
 // =======================================================================================
@@ -3113,6 +3019,13 @@ export type GatekeeperCreationSpec = {
   vendorId: string;        // identifies the gatekeeper adapter (e.g. "google")
   resourceUrl: string;
   typeUrlPattern: string;  // URL pattern from the vendor's SupportedResource (not the specific URL)
+
+  /**
+   * The connected account this capability was minted from. The Workshop reads that account's
+   * capability grants to decide whether an operation may proceed, so a record without it predates
+   * per-capability grants and is treated as unrestricted.
+   */
+  accountId?: number;
 } | {
   type: "aiModel";
   modelId: string;         // the user's configured model ID

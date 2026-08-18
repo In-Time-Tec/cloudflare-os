@@ -2,8 +2,8 @@ import { WorkerEntrypoint, DurableObject, RpcTarget, RpcStub } from "cloudflare:
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
 import {
   GatekeeperUser, GatekeeperVendor as GatekeeperVendorIface, Gatekeeper, ResourceDescription,
-  ApprovalQueue, VendorDescription, GatekeeperConnectCallback, GatekeeperConnectOptions,
-  AccountDescription, SupportedResource, ResourceConfiguratorFrame, ActionKind, Cursor,
+  ActionRecorder, VendorDescription, GatekeeperConnectCallback, GatekeeperConnectOptions,
+  AccountDescription, SupportedResource, ResourceConfiguratorFrame, ActionCapability, Cursor,
   GatekeeperUserVerifier, ObservationDescription,
   stripTrailingSlashes, AuthenticatedIdentity,
 } from "@gadgets/workshop-shared/gatekeeper";
@@ -305,6 +305,12 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
 
   async getSupportedResources(): Promise<SupportedResource[]> {
     return SUPPORTED_RESOURCES;
+  }
+
+  async getCapabilities() {
+    // No separately grantable operations: the resource grant is the whole of this connection's
+    // access.
+    return {capabilities: [], groups: []};
   }
 
   async getTypeScriptTypes(): Promise<string> {
@@ -737,7 +743,7 @@ function messageIdToTs(messageId: string): string {
 
 type SlackSessionContext = {
   api: SlackApi;
-  approvalQueue: RpcStub<ApprovalQueue>;
+  recorder: RpcStub<ActionRecorder>;
   // Set for workspace bindings only: routes conversation-scoped observations through the gatekeeper
   // so it can record which conversations were revealed and exclude observers who cannot access them.
   // Undefined for single-unit conversation/thread bindings, whose whole resource is verified up
@@ -747,7 +753,7 @@ type SlackSessionContext = {
 };
 
 function dupSessionContext(ctx: SlackSessionContext): SlackSessionContext {
-  return { api: ctx.api, approvalQueue: ctx.approvalQueue.dup(), tracker: ctx.tracker };
+  return { api: ctx.api, recorder: ctx.recorder.dup(), tracker: ctx.tracker };
 }
 
 // Authorize a conversation-scoped observation. For workspace bindings this records the revealed
@@ -755,15 +761,15 @@ function dupSessionContext(ctx: SlackSessionContext): SlackSessionContext {
 // single-unit bindings it is a plain authorizeObservation. `conversationIds` may be empty for
 // workspace-level reads (workspace metadata, member directory) any member may see. Every read that
 // reveals conversation identity or content should go through this rather than calling
-// approvalQueue.authorizeObservation directly.
+// recorder.authorizeObservation directly.
 async function authorizeConversationObservation(
     ctx: SlackSessionContext, conversationIds: string[],
     description: ObservationDescription): Promise<void> {
   if (ctx.tracker) {
     await ctx.tracker.authorizeConversationObservation(
-        ctx.approvalQueue, conversationIds, description);
+        ctx.recorder, conversationIds, description);
   } else {
-    await ctx.approvalQueue.authorizeObservation(description);
+    await ctx.recorder.authorizeObservation(description);
   }
 }
 
@@ -826,7 +832,7 @@ class SlackCursor<T> extends RpcTarget implements Cursor<T> {
   }
 
   [Symbol.dispose]() {
-    this.#ctx.approvalQueue[Symbol.dispose]();
+    this.#ctx.recorder[Symbol.dispose]();
   }
 
   next(): Promise<T[] | null> {
@@ -848,11 +854,7 @@ class SlackCursor<T> extends RpcTarget implements Cursor<T> {
 
 // ── Gatekeeper impls ────────────────────────────────────────────────
 
-const NO_ACTIONS: ActionKind[] = [];
-
-function unreachableAction(): never {
-  throw new Error("Slack gatekeeper is read-only and submits no actions.");
-}
+const NO_ACTIONS: ActionCapability[] = [];
 
 type SlackWorkspaceGatekeeperImplProps = {
   userObjectId: string;
@@ -891,13 +893,13 @@ export class SlackWorkspaceGatekeeperImpl extends DurableObject<Env, SlackWorksp
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
+  async getActionCatalog(): Promise<ActionCapability[]> {
     return NO_ACTIONS;
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<SlackWorkspaceSession> {
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<SlackWorkspaceSession> {
     return new SlackWorkspaceSessionImpl(
-        { api: this.#api(), approvalQueue: approvalQueue.dup(), tracker: this });
+        { api: this.#api(), recorder: recorder.dup(), tracker: this });
   }
 
   // ── Observer tracking (data-set tracking by conversation) ─────────
@@ -967,7 +969,7 @@ export class SlackWorkspaceGatekeeperImpl extends DurableObject<Env, SlackWorksp
    * authorizeConversationObservation.
    */
   async authorizeConversationObservation(
-      queue: RpcStub<ApprovalQueue>, conversationIds: string[],
+      queue: RpcStub<ActionRecorder>, conversationIds: string[],
       description: ObservationDescription): Promise<void> {
     let check = conversationIds.length > 0
         ? await this.#prepareConversationObservation(conversationIds)
@@ -1008,9 +1010,6 @@ export class SlackWorkspaceGatekeeperImpl extends DurableObject<Env, SlackWorksp
     this.ctx.storage.kv.delete(this.#observerKey(id));
   }
 
-  applyAction(): Promise<void> { return unreachableAction(); }
-  rejectAction(): Promise<void> { return unreachableAction(); }
-  revertAction(): Promise<void> { return unreachableAction(); }
 }
 
 type SlackConversationGatekeeperImplProps = {
@@ -1051,13 +1050,13 @@ export class SlackConversationGatekeeperImpl
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
+  async getActionCatalog(): Promise<ActionCapability[]> {
     return NO_ACTIONS;
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<SlackConversation> {
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<SlackConversation> {
     return new SlackConversationImpl(
-        { api: this.#api(), approvalQueue: approvalQueue.dup() },
+        { api: this.#api(), recorder: recorder.dup() },
         this.ctx.props.conversationId);
   }
 
@@ -1079,9 +1078,6 @@ export class SlackConversationGatekeeperImpl
 
   async removeObserver(_id: string): Promise<void> {}
 
-  applyAction(): Promise<void> { return unreachableAction(); }
-  rejectAction(): Promise<void> { return unreachableAction(); }
-  revertAction(): Promise<void> { return unreachableAction(); }
 }
 
 type SlackThreadGatekeeperImplProps = {
@@ -1127,13 +1123,13 @@ export class SlackThreadGatekeeperImpl extends DurableObject<Env, SlackThreadGat
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
+  async getActionCatalog(): Promise<ActionCapability[]> {
     return NO_ACTIONS;
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<SlackThread> {
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<SlackThread> {
     return new SlackThreadImpl(
-        { api: this.#api(), approvalQueue: approvalQueue.dup() },
+        { api: this.#api(), recorder: recorder.dup() },
         this.ctx.props.conversationId, this.ctx.props.threadTs);
   }
 
@@ -1154,9 +1150,6 @@ export class SlackThreadGatekeeperImpl extends DurableObject<Env, SlackThreadGat
 
   async removeObserver(_id: string): Promise<void> {}
 
-  applyAction(): Promise<void> { return unreachableAction(); }
-  rejectAction(): Promise<void> { return unreachableAction(); }
-  revertAction(): Promise<void> { return unreachableAction(); }
 }
 
 // ── Session stubs ───────────────────────────────────────────────────
@@ -1171,7 +1164,7 @@ class SlackWorkspaceSessionImpl extends RpcTarget implements SlackWorkspaceSessi
   }
 
   [Symbol.dispose]() {
-    this.#ctx.approvalQueue[Symbol.dispose]();
+    this.#ctx.recorder[Symbol.dispose]();
   }
 
   async getInfo(): Promise<SlackWorkspaceInfo> {
@@ -1265,7 +1258,7 @@ class SlackConversationImpl extends RpcTarget implements SlackConversation {
   }
 
   [Symbol.dispose]() {
-    this.#ctx.approvalQueue[Symbol.dispose]();
+    this.#ctx.recorder[Symbol.dispose]();
   }
 
   async getInfo(): Promise<SlackConversationInfo> {
@@ -1346,7 +1339,7 @@ class SlackThreadImpl extends RpcTarget implements SlackThread {
   }
 
   [Symbol.dispose]() {
-    this.#ctx.approvalQueue[Symbol.dispose]();
+    this.#ctx.recorder[Symbol.dispose]();
   }
 
   // Resolve reply timestamps to the thread root once per session.

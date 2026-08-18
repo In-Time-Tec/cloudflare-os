@@ -20,7 +20,6 @@ import {
   ArtifactClient,
   ConsoleLogSubscriber,
   ConsoleLogEvent,
-  ActionLogEntry,
   WorkpieceId,
   WorkpieceSummary,
   TemplateOutput,
@@ -31,9 +30,8 @@ import ArtifactCodeInterface from './ArtifactCodeInterface'
 import ArtifactUI from './ArtifactUI'
 import ArtifactUseView from './ArtifactUseView'
 import Connections from './Connections'
-import Activity, { type ActivityView } from './Activity'
+import Activity from './Activity'
 import { CountBadge } from './components/CountBadge'
-import ActivityNotifications from './ActivityNotifications'
 import WorkpiecePicker, {
   WORKPIECE_RAIL_COLLAPSED_WIDTH,
   WORKPIECE_RAIL_EXPANDED_WIDTH,
@@ -165,12 +163,6 @@ function rightTabs(output?: TemplateOutput): { value: RightTab; label: string }[
     { value: 'connections', label: 'Connections' },
   ]
 }
-
-const ACTIVITY_TABS: { value: ActivityView; label: string }[] = [
-  { value: 'review', label: 'Needs review' },
-  { value: 'auto', label: 'Auto-approval' },
-  { value: 'history', label: 'History' },
-]
 
 // Names what the pane is showing. `icon` is for the thread-level views (Activity); a workpiece
 // passes its `output` instead, so a Doc gets a document glyph rather than the gadget hexagon.
@@ -501,7 +493,6 @@ export default function ThreadEditor() {
   )
   const [threadTransitionEnabled, setThreadTransitionEnabled] = useState(false)
   const activityReturnViewRef = useRef<ThreadView | null>(null)
-  const [activityView, setActivityView] = useState<ActivityView>('history')
   const [activityClosing, setActivityClosing] = useState(false)
   const [shareModalOpen, setShareModalOpen] = useState(false)
   const [templateModalOpen, setTemplateModalOpen] = useState(false)
@@ -598,7 +589,6 @@ export default function ThreadEditor() {
 
   // ── code / chat state ────────────────────────────────────────────────────────
   const [uiReloadTrigger, setUiReloadTrigger] = useState(0)
-  const [autoApproveReloadTrigger, setAutoApproveReloadTrigger] = useState(0)
   const [proposedChanges, setProposedChanges] = useState<Uint8Array | undefined>(undefined)
   const [draftProposedChanges, setDraftProposedChanges] = useState<StreamingProposedChanges | undefined>(undefined)
   const [streamingProposedChanges, setStreamingProposedChanges] = useState<StreamingProposedChanges | undefined>(undefined)
@@ -738,15 +728,6 @@ export default function ThreadEditor() {
     // Clear on teardown so a thread switch never shows the previous thread's indicators.
     return () => { cancelled = true; setHookedGadgetIds(NO_GADGETS) }
   }, [overseer, hookSignature, metadata !== null, isUseOnly])
-  const pendingActions = useMemo(() => {
-    const pending: ActionLogEntry[] = []
-    for (const record of actionsById.values()) {
-      if (record.state === 'pending') pending.push(record)
-    }
-    return pending
-  }, [actionsById])
-  const pendingActionsCount = pendingActions.length
-
   // Whether the *selected* gadget has code. When no gadget is selected, the code interface is
   // unmounted and raw `hasCode` can't update, but a gadget-less thread has no code to show.
   const effectiveHasCode = selectedFilesRoot !== undefined
@@ -860,11 +841,10 @@ export default function ThreadEditor() {
     setThreadVisibility('open', urlWorkpieceId)
   }, [workpiecesReady, urlWorkpieceId, visibleGadgets, setThreadVisibility])
 
-  const openActivity = useCallback((initialView: ActivityView) => {
+  const openActivity = useCallback(() => {
     setThreadTransitionEnabled(true)
     setActivityClosing(false)
     if (threadView?.mode !== 'activity') activityReturnViewRef.current = threadView
-    setActivityView(initialView)
     setThreadView({ mode: 'activity' })
   }, [threadView])
 
@@ -1399,12 +1379,6 @@ export default function ThreadEditor() {
             </span>
           )}
 
-          <ActivityNotifications
-            overseer={overseer.stub}
-            pendingActions={pendingActions}
-            onViewActivity={openActivity}
-          />
-
           <WorkshopIconButton
             onClick={() => setShareModalOpen(true)}
             title="Share thread"
@@ -1490,7 +1464,6 @@ export default function ThreadEditor() {
                   constrainChatWidth
                   onChatCountChange={handleChatCountChange}
                   onAgentActiveChange={handleAgentActiveChange}
-                  onAutoApproveChange={() => setAutoApproveReloadTrigger(t => t + 1)}
                   onHasAnyCodeChange={setHasAnyProposedChanges}
                   onSelectedChatHasProposedChangesChange={setSelectedChatHasProposedChanges}
                   onOpenGadget={handleSelectWorkpiece}
@@ -1553,15 +1526,7 @@ export default function ThreadEditor() {
             <div className="flex flex-shrink-0 items-center gap-1.5">
               <div className="flex items-center rounded-lg border border-kumo-line p-0.5">
                 {paneShowsActivity
-                  ? ACTIVITY_TABS.map(tab => (
-                    <PaneTab
-                      key={tab.value}
-                      active={activityView === tab.value}
-                      label={tab.label}
-                      count={tab.value === 'review' ? pendingActionsCount : undefined}
-                      onClick={() => setActivityView(tab.value)}
-                    />
-                  ))
+                  ? <PaneTab active label="Activity" onClick={() => {}} />
                   : rightTabs(selectedGadgetSummary?.output).map(tab => (
                     <PaneTab
                       key={tab.value}
@@ -1608,10 +1573,6 @@ export default function ThreadEditor() {
             {paneShowsActivity && (
               <Activity
                 overseer={overseer.stub}
-                view={activityView}
-                onViewChange={setActivityView}
-                onAutoApproveChange={() => setAutoApproveReloadTrigger(t => t + 1)}
-                autoApproveReloadTrigger={autoApproveReloadTrigger}
               />
             )}
             <div className={paneShowsActivity ? 'hidden' : 'contents'}>
@@ -1709,8 +1670,7 @@ export default function ThreadEditor() {
             onExpandedChange={handleWorkpieceRailExpandedChange}
             onSelect={handleSelectWorkpiece}
             onRename={handleRenameWorkpiece}
-            pendingActivityCount={pendingActionsCount}
-            onOpenActivity={() => openActivity(pendingActionsCount > 0 ? 'review' : 'history')}
+            onOpenActivity={openActivity}
           />
         )}
       </div>

@@ -39,6 +39,12 @@ export type AdminConfig = {
   /** Fully-disabled gatekeeper vendor ids. */
   disabledGatekeepers: string[];
   /**
+   * Action kinds an administrator has disabled deployment-wide: vendorId -> actionKind tags. An
+   * action whose kind is listed is refused at `authorizeAction()` and recorded as blocked, so the
+   * deployment can retract one capability without revoking the whole connection.
+   */
+  disabledActionKinds: Record<string, string[]>;
+  /**
    * Per-vendor provisioning mode for auto-provisioning ("ambient") gatekeepers (e.g. the Context
    * Library). Absent ⇒ the default ("optional", see provisioning-policy.ts). Only meaningful for
    * vendors that declare autoProvisionsAccount.
@@ -89,6 +95,7 @@ export const DEFAULT_ADMIN_CONFIG: AdminConfig = {
   accentColor: "",
   disabledResources: {},
   disabledGatekeepers: [],
+  disabledActionKinds: {},
   ambientGatekeeperModes: {},
   formats: [],
 };
@@ -292,6 +299,13 @@ export function parseAdminConfig(raw: string | null): AdminConfig {
         if (list.length > 0) disabledResources[vendorId] = list;
       }
     }
+    let disabledActionKinds: Record<string, string[]> = {};
+    if (p.disabledActionKinds && typeof p.disabledActionKinds === "object") {
+      for (let [vendorId, tags] of Object.entries(p.disabledActionKinds)) {
+        let list = strings(tags);
+        if (list.length > 0) disabledActionKinds[vendorId.toLowerCase()] = list;
+      }
+    }
     let ambientGatekeeperModes: Record<string, AmbientGatekeeperMode> = {};
     if (p.ambientGatekeeperModes && typeof p.ambientGatekeeperModes === "object") {
       for (let [vendorId, mode] of Object.entries(p.ambientGatekeeperModes)) {
@@ -311,6 +325,7 @@ export function parseAdminConfig(raw: string | null): AdminConfig {
       accentColor: typeof p.accentColor === "string" ? p.accentColor : "",
       disabledResources,
       disabledGatekeepers: strings(p.disabledGatekeepers).map(v => v.toLowerCase()),
+      disabledActionKinds,
       ambientGatekeeperModes,
       formats: parseFormats(p.formats),
     };
@@ -333,6 +348,12 @@ export async function readAdminConfig(env: Cloudflare.Env): Promise<AdminConfig>
 export function isResourceDisabled(
     config: AdminConfig, vendorId: string, urlPattern: string): boolean {
   return config.disabledResources[vendorId]?.includes(urlPattern) ?? false;
+}
+
+/** Whether an administrator has disabled this action kind deployment-wide. */
+export function isActionKindDisabled(
+    config: AdminConfig, vendorId: string, tag: string): boolean {
+  return config.disabledActionKinds?.[vendorId]?.includes(tag) ?? false;
 }
 
 export function filterEnabledResources(

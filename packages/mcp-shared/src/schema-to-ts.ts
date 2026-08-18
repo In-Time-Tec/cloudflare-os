@@ -13,7 +13,7 @@
 
 import type { JsonSchema } from "./client.js";
 import { toMethodName, toolMethodNames } from "./session-methods.js";
-import type { ClassifiedTool, ServerTrust } from "./tools.js";
+import type { ClassifiedTool } from "./tools.js";
 
 // Depth limit for recursive/self-referential schemas; deeper nodes degrade to `unknown`.
 const MAX_DEPTH = 8;
@@ -212,12 +212,10 @@ function renderObject(
 
 // The JSDoc for one tool: the server's own description, plus what calling it will actually do.
 function toolDoc(entry: ClassifiedTool, all: ClassifiedTool[]): string {
-  const { tool, mode, autoApprovable } = entry;
+  const { tool, mode } = entry;
   const detail = mode === "read"
-    ? "Read-only: returns `{ status: \"ok\" }` and is recorded as an observation."
-    : autoApprovable
-      ? "Action: queued for approval, and may be auto-applied if you have opted in to its kind."
-      : "Action: queued for approval; the result arrives via `getActionResult`.";
+    ? "Read-only: recorded as an observation."
+    : "Action: runs immediately, and is recorded as an action with its outcome.";
   const method = toMethodName(tool.name);
   // Say the wire name whenever it is not obvious from the method name, so an agent reading only this
   // comment can still reach the tool through `callTool`.
@@ -300,7 +298,6 @@ export function generateSessionTypes(args: {
    * generated file does not declare.
    */
   discriminator: string;
-  trust: ServerTrust;
   tools: ClassifiedTool[];
 }): string {
   const typeName = sessionTypeName(args.serverId, args.discriminator);
@@ -339,17 +336,10 @@ export function generateSessionTypes(args: {
   lines.push("/**");
   lines.push(` * Session for the "${serverName}" MCP server.`);
   lines.push(" *");
-  lines.push(` * ${readTools.length} tool(s) are read-only and return results immediately, recorded`);
-  lines.push(" * as observations. The remaining " + actionTools.length + " tool(s) are treated as actions:");
-  lines.push(" * `callTool` queues them for approval and returns `{ status: \"pending\" }`; the result");
-  lines.push(" * becomes available through `getActionResult` once a human approves.");
-  lines.push(" * When using this session from `executeCode`, return from that executeCode call as soon as");
-  lines.push(" * an action is pending so its approval can appear in chat. Approval resumes the agent;");
-  lines.push(" * denial ends the turn. Call `getActionResult` after approval.");
-  if (args.trust === "byo") {
-    lines.push(" *");
-    lines.push(" * This server was supplied by the user, so no action is ever applied automatically.");
-  }
+  lines.push(` * ${readTools.length} tool(s) are read-only, recorded as observations. The ` +
+    `remaining ${actionTools.length} tool(s) are`);
+  lines.push(" * treated as actions: each runs immediately and is recorded with its outcome. A");
+  lines.push(" * call the deployment does not permit throws, as does one the server rejects.");
   lines.push(" *");
   // Kept in the agent's view because the agent can otherwise build a share flow that cannot work.
   lines.push(" * Only the owner can open a workspace using this binding. To give it to someone else,");
@@ -399,16 +389,7 @@ export function generateSessionTypes(args: {
       }
     }
   }
-  lines.push("");
 
-  lines.push("  /**");
-  lines.push("   * Fetches the result of a queued action.");
-  lines.push("   *");
-  lines.push("   * Returns `{ status: \"pending\" }` while the action is awaiting review, the completed");
-  lines.push("   * result once applied, `{ status: \"rejected\" }` if denied, or `{ status: \"failed\" }`");
-  lines.push("   * if the approved call failed.");
-  lines.push("   */");
-  lines.push("  getActionResult(actionId: number): Promise<McpCallResult>;");
   lines.push("}");
   lines.push("");
 

@@ -2,11 +2,10 @@
 // their agent-facing sessions.
 //
 // Security model (uniform across all four):
-//   - every read fetches from Graph, then calls approvalQueue.authorizeObservation() BEFORE any
+//   - every read fetches from Graph, then calls recorder.authorizeObservation() BEFORE any
 //     data is returned to the caller;
-//   - every write is staged in DO storage and submitted with approvalQueue.submitAction(); the
-//     Graph call happens only in applyAction() after approval. Writes are not simulated, so every
-//     ActionDescription sets awaitDecision — the agent pauses until the user decides;
+//   - every write is authorized with recorder.authorizeAction(), performed against Graph inline,
+//     and its outcome reported on the returned handle, so sessions return real provider ids;
 //   - all four capabilities expose broad personal data, so observers are never allowed
 //     (addObserver throws): a gadget bound to one of these cannot be shared.
 //
@@ -17,8 +16,8 @@ import { DurableObject, RpcTarget, RpcStub } from "cloudflare:workers";
 import { validateRpc } from "capnweb-validate";
 import { Effect, Result } from "effect";
 import {
-  ActionDescription, ActionKind, ApprovalQueue, Cursor, Gatekeeper, GatekeeperUserVerifier,
-  ResourceDescription,
+  ActionCapability, ActionDescription, ActionKind, ActionRecorder, Cursor, Gatekeeper,
+  GatekeeperUserVerifier, ResourceDescription,
 } from "@gadgets/workshop-shared/gatekeeper";
 import {
   GraphError, GraphTransport, makeTransport, PageCursor,
@@ -37,6 +36,38 @@ type SessionProps = { userObjectId: string };
 
 // ── Shared plumbing ─────────────────────────────────────────────────────────
 
+/** The message a tagged Graph failure becomes at the RPC boundary: what to do about it. */
+function graphMessage(failure: GraphError): string {
+  switch (failure._tag) {
+    case "GraphAuthError":
+      return "Microsoft credentials have expired or been revoked. Please reconnect the account.";
+    case "GraphConsentError":
+      return "The connected Microsoft account has not granted this capability. Expand the " +
+          "account's access from the Connectors page.";
+    case "GraphThrottledError":
+      return `Microsoft is throttling requests; try again in ` +
+          `${Math.ceil(failure.retryAfterMs / 1000)}s.`;
+    case "GraphNotFoundError":
+      return `Not found: ${failure.resource}.`;
+    case "GraphConflictError":
+      return "The item changed remotely; re-read it and try again.";
+    case "GraphUnavailableError":
+      return "Microsoft Graph is temporarily unavailable. Try again shortly.";
+    case "GraphDecodeError":
+      return "Microsoft returned an unexpected response. Try again shortly.";
+  }
+}
+
+/**
+ * Whether a failed write may still have landed. Graph refused the call outright for every tag but
+ * two: a transport-level failure never produced an answer, and a decode failure is either a
+ * rejected request or a response we could not read — both leave the outcome genuinely unknown.
+ * Mutations are never auto-retried, so nothing else can have reached Microsoft twice.
+ */
+function mayHaveTakenEffect(failure: GraphError): boolean {
+  return failure._tag === "GraphUnavailableError" || failure._tag === "GraphDecodeError";
+}
+
 /**
  * Run one SDK operation at the RPC boundary: Effect in, plain value out. Tagged failures become
  * Errors whose messages name the caller's next valid action; the tags never cross the boundary.
@@ -44,89 +75,39 @@ type SessionProps = { userObjectId: string };
 async function runGraph<A>(operation: Effect.Effect<A, GraphError>): Promise<A> {
   const result = await Effect.runPromise(Effect.result(operation));
   if (Result.isSuccess(result)) return result.success;
-  const failure = result.failure;
-  switch (failure._tag) {
-    case "GraphAuthError":
-      throw new Error(
-          "Microsoft credentials have expired or been revoked. Please reconnect the account.");
-    case "GraphConsentError":
-      throw new Error(
-          "The connected Microsoft account has not granted this capability. Expand the " +
-          "account's access from the Connectors page.");
-    case "GraphThrottledError":
-      throw new Error(
-          `Microsoft is throttling requests; try again in ${Math.ceil(failure.retryAfterMs / 1000)}s.`);
-    case "GraphNotFoundError":
-      throw new Error(`Not found: ${failure.resource}.`);
-    case "GraphConflictError":
-      throw new Error("The item changed remotely; re-read it and try again.");
-    case "GraphUnavailableError":
-      throw new Error("Microsoft Graph is temporarily unavailable. Try again shortly.");
-    case "GraphDecodeError":
-      throw new Error("Microsoft returned an unexpected response. Try again shortly.");
-  }
-}
-
-/** Sequential action ids + staged payloads, keyed in DO storage. */
-class PendingActionStore<Action> {
-  #kv: DurableObjectStorage["kv"];
-
-  constructor(kv: DurableObjectStorage["kv"]) {
-    this.#kv = kv;
-  }
-
-  submit(action: Action): number {
-    const id = this.#kv.get<number>("pending:nextActionId") ?? 1;
-    this.#kv.put("pending:nextActionId", id + 1);
-    this.#kv.put(`pending:action:${id}`, action);
-    return id;
-  }
-
-  get(id: number): Action | undefined {
-    return this.#kv.get<Action>(`pending:action:${id}`);
-  }
-
-  remove(id: number): void {
-    this.#kv.delete(`pending:action:${id}`);
-  }
+  throw new Error(graphMessage(result.failure));
 }
 
 /**
- * Base class for the four capability gatekeepers: transport wiring, the private-only observer
- * policy, and the staged-action skeleton. Subclasses own their session, action set, and applys.
+ * Run one side-effecting Graph operation as a recorded action: authorize it, perform it, then
+ * report its outcome on the handle exactly once. An authorization refusal propagates before
+ * anything reaches Microsoft; a Graph failure is recorded and then rethrown for the caller.
+ * `detail` names what the call produced (e.g. the new item's id) for the activity log.
  */
-abstract class MicrosoftGatekeeperBase<Action>
-    extends DurableObject<Env, SessionProps> {
+async function performAction<A>(recorder: RpcStub<ActionRecorder>,
+                                description: ActionDescription,
+                                operation: Effect.Effect<A, GraphError>,
+                                detail?: (value: A) => string): Promise<A> {
+  const handle = await recorder.authorizeAction(description);
+  const result = await Effect.runPromise(Effect.result(operation));
+  if (Result.isSuccess(result)) {
+    await handle.succeeded(detail?.(result.success));
+    return result.success;
+  }
+  const message = graphMessage(result.failure);
+  await handle.failed(message, mayHaveTakenEffect(result.failure));
+  throw new Error(message);
+}
+
+/**
+ * Base class for the four capability gatekeepers: transport wiring and the private-only observer
+ * policy. Subclasses own their session, action catalog, and writes.
+ */
+abstract class MicrosoftGatekeeperBase extends DurableObject<Env, SessionProps> {
   protected transport(): GraphTransport {
     const account = this.ctx.exports.UserAccount.get(
         this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId));
     return makeTransport(() => account.getAccessToken());
-  }
-
-  protected actions(): PendingActionStore<Action> {
-    return new PendingActionStore<Action>(this.ctx.storage.kv);
-  }
-
-  /**
-   * Resolve an id that may be a placeholder from an earlier staged action ("pending-draft-3",
-   * "pending-event-1", ...) to the real provider id recorded when that action was applied.
-   * Sessions hand agents placeholder ids at submit time (writes are not simulated); an agent that
-   * chains a follow-up action on one still works because the follow-up is itself staged, and by
-   * the time it is applied the referenced action has been applied and its real id recorded.
-   * Throws if the referenced action was denied or not yet applied.
-   */
-  protected resolveId(idOrPlaceholder: string, resultKey: string): string {
-    const match = /^pending-[a-z]+-(\d+)$/.exec(idOrPlaceholder);
-    if (!match) return idOrPlaceholder;
-    const applied = this.ctx.storage.kv.get<Record<string, string>>(
-        `applied:action:${match[1]}`);
-    const real = applied?.[resultKey];
-    if (!real) {
-      throw new Error(
-          `The referenced item (${idOrPlaceholder}) has not been created yet - its approval is ` +
-          `still pending or was denied. Approve it first, then retry.`);
-    }
-    return real;
   }
 
   async getTypeScriptTypes(): Promise<string> {
@@ -145,37 +126,15 @@ abstract class MicrosoftGatekeeperBase<Action>
   }
 
   async removeObserver(_id: string): Promise<void> {}
-
-  async rejectAction(actionId: number): Promise<void> {
-    this.actions().remove(actionId);
-  }
-
-  async revertAction(_actionId: number): Promise<{ message: string; canRetry: boolean }> {
-    return {
-      message: "This Microsoft action cannot be reverted automatically; undo it in the " +
-          "Microsoft app if needed.",
-      canRetry: false,
-    };
-  }
 }
 
-/** Format a bounded, human-readable field block for approval descriptions. */
-function approvalField(label: string, value: string): string {
+/** Format a bounded, human-readable field block for activity-log descriptions. */
+function detailField(label: string, value: string): string {
   const bounded = value.length > 2000 ? value.slice(0, 2000) + "…" : value;
   return `**${label}:**\n\n${bounded}\n`;
 }
 
 // ── Outlook Mail ────────────────────────────────────────────────────────────
-
-type MailAction =
-  | { type: "createDraft"; to: string[]; cc?: string[]; subject: string; body: string }
-  | { type: "createReplyDraft"; messageId: string; comment: string }
-  | { type: "sendMail"; to: string[]; cc?: string[]; bcc?: string[];
-      subject: string; body: string }
-  | { type: "sendDraft"; draftId: string }
-  | { type: "reply"; messageId: string; body: string }
-  | { type: "replyAll"; messageId: string; body: string }
-  | { type: "forward"; messageId: string; to: string[]; comment?: string };
 
 const CREATE_DRAFT_KIND: ActionKind = {
   tag: "microsoft.mail.draft.create", label: "Create Outlook drafts",
@@ -185,7 +144,7 @@ const SEND_MAIL_KIND: ActionKind = {
   tag: "microsoft.mail.send", label: "Send email",
 };
 
-export class MailboxGatekeeperImpl extends MicrosoftGatekeeperBase<MailAction>
+export class MailboxGatekeeperImpl extends MicrosoftGatekeeperBase
     implements Gatekeeper<OutlookMailSession> {
   async describe(): Promise<ResourceDescription> {
     return {
@@ -197,59 +156,37 @@ export class MailboxGatekeeperImpl extends MicrosoftGatekeeperBase<MailAction>
     };
   }
 
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
-    // Drafts are additive and invisible to recipients. Sending is visible to recipients but
-    // offered for opt-in auto-approval per this deployment's policy; it defaults to manual review.
-    return [CREATE_DRAFT_KIND, SEND_MAIL_KIND];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return [
+      {
+        kind: CREATE_DRAFT_KIND,
+        summary: "Save drafts in your Drafts folder",
+        risk: {
+          // A draft sits in the owner's own mailbox until they send it, and deleting it undoes
+          // the action entirely.
+          reversible: "automatic",
+          reach: "creates-content",
+          audience: "private",
+          freeform: true,
+        },
+      },
+      {
+        kind: SEND_MAIL_KIND,
+        summary: "Send mail as you, to anyone",
+        risk: {
+          // Delivered mail cannot be recalled outside the tenant, and the recipients are
+          // whoever the agent addressed.
+          reversible: "no",
+          reach: "acts-on-world",
+          audience: "external",
+          freeform: true,
+        },
+      },
+    ];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<OutlookMailSession> {
-    return new MailSessionImpl(this.transport(), approvalQueue.dup(), this.actions());
-  }
-
-  async applyAction(actionId: number): Promise<void> {
-    const action = this.actions().get(actionId);
-    if (!action) throw new Error(`Unknown pending Microsoft mail action: ${actionId}`);
-    const transport = this.transport();
-    let result: Record<string, string> = {};
-    switch (action.type) {
-      case "createDraft": {
-        const created = await runGraph(mail.createDraft(transport, {
-          to: action.to, cc: action.cc, subject: action.subject, body: action.body,
-        }));
-        result = { draftId: created.id };
-        break;
-      }
-      case "createReplyDraft": {
-        const created = await runGraph(
-            mail.createReplyDraft(transport, action.messageId, action.comment));
-        result = { draftId: created.id };
-        break;
-      }
-      case "sendMail":
-        await runGraph(mail.sendMail(transport, {
-          to: action.to, cc: action.cc, bcc: action.bcc,
-          subject: action.subject, body: action.body,
-        }));
-        break;
-      case "sendDraft":
-        await runGraph(mail.sendDraft(transport,
-            this.resolveId(action.draftId, "draftId")));
-        break;
-      case "reply":
-        await runGraph(mail.replyToMessage(transport, action.messageId, action.body));
-        break;
-      case "replyAll":
-        await runGraph(mail.replyAllToMessage(transport, action.messageId, action.body));
-        break;
-      case "forward":
-        await runGraph(mail.forwardMessage(transport, action.messageId, action.to,
-            action.comment));
-        break;
-    }
-    // Record the terminal provider result alongside the consumed action.
-    this.ctx.storage.kv.put(`applied:action:${actionId}`, { type: action.type, ...result });
-    this.actions().remove(actionId);
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<OutlookMailSession> {
+    return new MailSessionImpl(this.transport(), recorder.dup());
   }
 }
 
@@ -264,17 +201,17 @@ class GraphCursorImpl<T> extends RpcTarget implements Cursor<T> {
   #fetchFirst: () => Effect.Effect<Paged<T>, GraphError>;
   #fetchNext: (cursor: PageCursor) => Effect.Effect<Paged<T>, GraphError>;
   #describe: (items: T[]) => { title: string; description: string };
-  #approvalQueue: RpcStub<ApprovalQueue>;
+  #recorder: RpcStub<ActionRecorder>;
   #next: PageCursor | undefined;
   #started = false;
   #tail: Promise<unknown> = Promise.resolve();
 
-  constructor(approvalQueue: RpcStub<ApprovalQueue>,
+  constructor(recorder: RpcStub<ActionRecorder>,
               fetchFirst: () => Effect.Effect<Paged<T>, GraphError>,
               fetchNext: (cursor: PageCursor) => Effect.Effect<Paged<T>, GraphError>,
               describe: (items: T[]) => { title: string; description: string }) {
     super();
-    this.#approvalQueue = approvalQueue;
+    this.#recorder = recorder;
     this.#fetchFirst = fetchFirst;
     this.#fetchNext = fetchNext;
     this.#describe = describe;
@@ -294,24 +231,25 @@ class GraphCursorImpl<T> extends RpcTarget implements Cursor<T> {
     this.#started = true;
     this.#next = page.next;
     if (page.items.length === 0) return null;
-    await this.#approvalQueue.authorizeObservation(this.#describe(page.items));
+    await this.#recorder.authorizeObservation(this.#describe(page.items));
     return page.items;
   }
 }
 
-function messageCursor(transport: GraphTransport, approvalQueue: RpcStub<ApprovalQueue>,
+function messageCursor(transport: GraphTransport, recorder: RpcStub<ActionRecorder>,
                        what: string,
                        fetchFirst: () => Effect.Effect<mail.MessagePage, GraphError>)
     : Cursor<OutlookMessageInfo> {
   const asPage = (page: mail.MessagePage): Paged<OutlookMessageInfo> =>
       ({ items: page.messages.map(toMessageInfo), next: page.next });
-  return new GraphCursorImpl(approvalQueue,
+  return new GraphCursorImpl(recorder,
       () => Effect.map(fetchFirst(), asPage),
       cursor => Effect.map(mail.nextMessagePage(transport, cursor), asPage),
       items => ({
+        observationKind: {tag: "microsoft.mail.read", label: "Read mail"},
         title: `Read ${items.length} Outlook messages (${what})`,
         description: `Fetch a page of Outlook message summaries.\n\n` +
-            approvalField("Subjects", items.map(m => m.subject).join("\n")),
+            detailField("Subjects", items.map(m => m.subject).join("\n")),
       }));
 }
 
@@ -326,72 +264,76 @@ function toMessageInfo(summary: mail.MessageSummary): OutlookMessageInfo {
 @validateRpc()
 class MailSessionImpl extends RpcTarget implements OutlookMailSession {
   constructor(private transport: GraphTransport,
-              private approvalQueue: RpcStub<ApprovalQueue>,
-              private actions: PendingActionStore<MailAction>) {
+              private recorder: RpcStub<ActionRecorder>) {
     super();
   }
 
   async listInbox(): Promise<Cursor<OutlookMessageInfo>> {
-    return messageCursor(this.transport, this.approvalQueue.dup(), "inbox",
+    return messageCursor(this.transport, this.recorder.dup(), "inbox",
         () => mail.listInbox(this.transport));
   }
 
   async search(query: string): Promise<Cursor<OutlookMessageInfo>> {
-    return messageCursor(this.transport, this.approvalQueue.dup(), `search: ${query}`,
+    return messageCursor(this.transport, this.recorder.dup(), `search: ${query}`,
         () => mail.searchMessages(this.transport, query));
   }
 
   async listFolders(): Promise<MailFolderInfo[]> {
     const folders = await runGraph(mail.listFolders(this.transport));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.mail.read", label: "Read mail"},
       title: `List ${folders.length} mail folders`,
-      description: approvalField("Folders", folders.map(f => f.name).join("\n")),
+      description: detailField("Folders", folders.map(f => f.name).join("\n")),
     });
     return folders;
   }
 
   async listFolder(folderId: string): Promise<Cursor<OutlookMessageInfo>> {
-    return messageCursor(this.transport, this.approvalQueue.dup(), `folder: ${folderId}`,
+    return messageCursor(this.transport, this.recorder.dup(), `folder: ${folderId}`,
         () => mail.listFolder(this.transport, folderId));
   }
 
   async getMessage(id: string): Promise<OutlookMessageDetail> {
     const detail = await runGraph(mail.getMessage(this.transport, id));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.mail.read", label: "Read mail"},
       title: `Read Outlook message: ${detail.subject || "(no subject)"}`,
       description: `Read the full content of one Outlook message.\n\n` +
-          approvalField("From", detail.from?.address ?? "unknown") +
-          approvalField("Subject", detail.subject || "(no subject)"),
+          detailField("From", detail.from?.address ?? "unknown") +
+          detailField("Subject", detail.subject || "(no subject)"),
     });
     return detail;
   }
 
   async createDraft(to: string[], subject: string, body: string, cc?: string[])
       : Promise<{ id: string }> {
-    const actionId = this.actions.submit({ type: "createDraft", to, cc, subject, body });
-    await this.approvalQueue.submitAction(actionId, draftDescription(
+    const created = await performAction(this.recorder, draftDescription(
         `Create Outlook draft: ${subject || "(no subject)"}`,
-        approvalField("To", to.join(", ")) +
-        (cc?.length ? approvalField("Cc", cc.join(", ")) : "") +
-        approvalField("Subject", subject) +
-        approvalField("Body", body)));
-    return { id: `pending-draft-${actionId}` };
+        detailField("To", to.join(", ")) +
+        (cc?.length ? detailField("Cc", cc.join(", ")) : "") +
+        detailField("Subject", subject) +
+        detailField("Body", body)),
+        mail.createDraft(this.transport, { to, cc, subject, body }),
+        draft => `Draft id: ${draft.id}`);
+    return { id: created.id };
   }
 
   async createReplyDraft(messageId: string, comment: string): Promise<{ id: string }> {
-    const actionId = this.actions.submit({ type: "createReplyDraft", messageId, comment });
-    await this.approvalQueue.submitAction(actionId, draftDescription(
+    const created = await performAction(this.recorder, draftDescription(
         "Create Outlook reply draft",
-        approvalField("In reply to message", messageId) +
-        approvalField("Reply body", comment)));
-    return { id: `pending-draft-${actionId}` };
+        detailField("In reply to message", messageId) +
+        detailField("Reply body", comment)),
+        mail.createReplyDraft(this.transport, messageId, comment),
+        draft => `Draft id: ${draft.id}`);
+    return { id: created.id };
   }
 
   async listAttachments(messageId: string): Promise<AttachmentInfo[]> {
     const attachments = await runGraph(mail.listAttachments(this.transport, messageId));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.mail.read", label: "Read mail"},
       title: `List ${attachments.length} attachments`,
-      description: approvalField("Attachments",
+      description: detailField("Attachments",
           attachments.map(a => `${a.name} (${a.size ?? "?"} bytes)`).join("\n")),
     });
     return attachments;
@@ -401,58 +343,59 @@ class MailSessionImpl extends RpcTarget implements OutlookMailSession {
       : Promise<{ name: string; contentType?: string; base64: string }> {
     const content = await runGraph(
         mail.getAttachmentContent(this.transport, messageId, attachmentId));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.mail.read", label: "Read mail"},
       title: `Download attachment: ${content.name}`,
       description: `Download one email attachment's full content.\n\n` +
-          approvalField("Attachment", content.name),
+          detailField("Attachment", content.name),
     });
     return content;
   }
 
   async sendMail(to: string[], subject: string, body: string,
                  options?: { cc?: string[]; bcc?: string[] }): Promise<void> {
-    const actionId = this.actions.submit({
-      type: "sendMail", to, cc: options?.cc, bcc: options?.bcc, subject, body,
-    });
-    await this.approvalQueue.submitAction(actionId, sendDescription(
+    await performAction(this.recorder, sendDescription(
         `Send email: ${subject || "(no subject)"}`,
-        approvalField("To", to.join(", ")) +
-        (options?.cc?.length ? approvalField("Cc", options.cc.join(", ")) : "") +
-        (options?.bcc?.length ? approvalField("Bcc", options.bcc.join(", ")) : "") +
-        approvalField("Subject", subject) +
-        approvalField("Body", body)));
+        detailField("To", to.join(", ")) +
+        (options?.cc?.length ? detailField("Cc", options.cc.join(", ")) : "") +
+        (options?.bcc?.length ? detailField("Bcc", options.bcc.join(", ")) : "") +
+        detailField("Subject", subject) +
+        detailField("Body", body)),
+        mail.sendMail(this.transport, {
+          to, cc: options?.cc, bcc: options?.bcc, subject, body,
+        }));
   }
 
   async sendDraft(draftId: string): Promise<void> {
-    const actionId = this.actions.submit({ type: "sendDraft", draftId });
-    await this.approvalQueue.submitAction(actionId, sendDescription(
+    await performAction(this.recorder, sendDescription(
         "Send Outlook draft",
-        approvalField("Draft", draftId)));
+        detailField("Draft", draftId)),
+        mail.sendDraft(this.transport, draftId));
   }
 
   async reply(messageId: string, body: string): Promise<void> {
-    const actionId = this.actions.submit({ type: "reply", messageId, body });
-    await this.approvalQueue.submitAction(actionId, sendDescription(
+    await performAction(this.recorder, sendDescription(
         "Send reply",
-        approvalField("In reply to message", messageId) +
-        approvalField("Body", body)));
+        detailField("In reply to message", messageId) +
+        detailField("Body", body)),
+        mail.replyToMessage(this.transport, messageId, body));
   }
 
   async replyAll(messageId: string, body: string): Promise<void> {
-    const actionId = this.actions.submit({ type: "replyAll", messageId, body });
-    await this.approvalQueue.submitAction(actionId, sendDescription(
+    await performAction(this.recorder, sendDescription(
         "Send reply-all",
-        approvalField("In reply to message", messageId) +
-        approvalField("Body", body)));
+        detailField("In reply to message", messageId) +
+        detailField("Body", body)),
+        mail.replyAllToMessage(this.transport, messageId, body));
   }
 
   async forward(messageId: string, to: string[], comment?: string): Promise<void> {
-    const actionId = this.actions.submit({ type: "forward", messageId, to, comment });
-    await this.approvalQueue.submitAction(actionId, sendDescription(
+    await performAction(this.recorder, sendDescription(
         "Forward message",
-        approvalField("Message", messageId) +
-        approvalField("To", to.join(", ")) +
-        (comment ? approvalField("Comment", comment) : "")));
+        detailField("Message", messageId) +
+        detailField("To", to.join(", ")) +
+        (comment ? detailField("Comment", comment) : "")),
+        mail.forwardMessage(this.transport, messageId, to, comment));
   }
 }
 
@@ -460,9 +403,6 @@ function sendDescription(title: string, fields: string): ActionDescription {
   return {
     title,
     description: `Send email from the user's address. Recipients see it immediately.\n\n` + fields,
-    implementsRevert: false,
-    awaitDecision: true,
-    autoApprovable: true,
     actionKind: SEND_MAIL_KIND,
   };
 }
@@ -471,25 +411,11 @@ function draftDescription(title: string, fields: string): ActionDescription {
   return {
     title,
     description: `Create a draft in the user's Outlook Drafts folder. Nothing is sent.\n\n` + fields,
-    implementsRevert: false,
-    awaitDecision: true,
-    autoApprovable: true,
     actionKind: CREATE_DRAFT_KIND,
   };
 }
 
 // ── Outlook Calendar ────────────────────────────────────────────────────────
-
-type CalendarAction =
-  | { type: "createEvent";
-      subject: string; startIso: string; endIso: string;
-      body?: string; location?: string; attendees?: string[]; onlineMeeting?: boolean }
-  | { type: "updateEvent"; eventId: string;
-      subject?: string; startIso?: string; endIso?: string;
-      body?: string; location?: string; attendees?: string[] }
-  | { type: "cancelEvent"; eventId: string }
-  | { type: "respondToEvent"; eventId: string;
-      response: "accept" | "decline" | "tentativelyAccept"; comment?: string };
 
 const CREATE_EVENT_KIND: ActionKind = {
   tag: "microsoft.calendar.event.create", label: "Create calendar events",
@@ -501,8 +427,7 @@ const RESPOND_EVENT_KIND: ActionKind = {
   tag: "microsoft.calendar.event.respond", label: "Respond to meeting invitations",
 };
 
-export class CalendarGatekeeperImpl
-    extends MicrosoftGatekeeperBase<CalendarAction>
+export class CalendarGatekeeperImpl extends MicrosoftGatekeeperBase
     implements Gatekeeper<OutlookCalendarSession> {
   async describe(): Promise<ResourceDescription> {
     return {
@@ -514,66 +439,55 @@ export class CalendarGatekeeperImpl
     };
   }
 
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
-    // All offered for opt-in auto-approval per deployment policy; every kind defaults to
-    // manual review until the user enables it in the approvals UI.
-    return [CREATE_EVENT_KIND, MODIFY_EVENT_KIND, RESPOND_EVENT_KIND];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return [
+      {
+        kind: CREATE_EVENT_KIND,
+        summary: "Put events on your calendar and invite people",
+        risk: {
+          // Deleting the event undoes it, but attendees keep the invitation mail they were
+          // already sent, so undoing needs a human.
+          reversible: "manual",
+          reach: "creates-content",
+          audience: "external",
+          freeform: true,
+        },
+      },
+      {
+        kind: MODIFY_EVENT_KIND,
+        summary: "Change or cancel events already on your calendar",
+        risk: {
+          // The previous version of the event is not retained anywhere, and attendees are
+          // notified of the change or cancellation.
+          reversible: "no",
+          reach: "modifies-content",
+          audience: "external",
+          freeform: true,
+        },
+      },
+      {
+        kind: RESPOND_EVENT_KIND,
+        summary: "Accept, decline, or tentatively accept invitations for you",
+        risk: {
+          // A response can be changed by responding again, but the organizer was already told.
+          reversible: "manual",
+          reach: "acts-on-world",
+          audience: "external",
+          freeform: true,
+        },
+      },
+    ];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<OutlookCalendarSession> {
-    return new CalendarSessionImpl(this.transport(), approvalQueue.dup(), this.actions());
-  }
-
-  async applyAction(actionId: number): Promise<void> {
-    const action = this.actions().get(actionId);
-    if (!action) throw new Error(`Unknown pending Microsoft calendar action: ${actionId}`);
-    const transport = this.transport();
-    let result: Record<string, string> = {};
-    switch (action.type) {
-      case "createEvent": {
-        const created = await runGraph(calendar.createEvent(transport, {
-          subject: action.subject,
-          start: new Date(action.startIso),
-          end: new Date(action.endIso),
-          body: action.body,
-          location: action.location,
-          attendees: action.attendees,
-          onlineMeeting: action.onlineMeeting,
-        }));
-        result = { eventId: created.id };
-        break;
-      }
-      case "updateEvent":
-        await runGraph(calendar.updateEvent(transport,
-            this.resolveId(action.eventId, "eventId"), {
-          subject: action.subject,
-          start: action.startIso ? new Date(action.startIso) : undefined,
-          end: action.endIso ? new Date(action.endIso) : undefined,
-          body: action.body,
-          location: action.location,
-          attendees: action.attendees,
-        }));
-        result = { eventId: this.resolveId(action.eventId, "eventId") };
-        break;
-      case "cancelEvent":
-        await runGraph(calendar.deleteEvent(transport,
-            this.resolveId(action.eventId, "eventId")));
-        break;
-      case "respondToEvent":
-        await runGraph(calendar.respondToEvent(transport,
-            this.resolveId(action.eventId, "eventId"), action.response, action.comment));
-        break;
-    }
-    this.ctx.storage.kv.put(`applied:action:${actionId}`, { type: action.type, ...result });
-    this.actions().remove(actionId);
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<OutlookCalendarSession> {
+    return new CalendarSessionImpl(this.transport(), recorder.dup());
   }
 }
 
 @validateRpc()
 class CalendarSessionImpl extends RpcTarget implements OutlookCalendarSession {
   constructor(private transport: GraphTransport,
-              private approvalQueue: RpcStub<ApprovalQueue>,
-              private actions: PendingActionStore<CalendarAction>) {
+              private recorder: RpcStub<ActionRecorder>) {
     super();
   }
 
@@ -587,10 +501,11 @@ class CalendarSessionImpl extends RpcTarget implements OutlookCalendarSession {
       page = await runGraph(calendar.nextEventPage(this.transport, page.next));
       events.push(...page.events);
     }
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.calendar.read", label: "Read calendar"},
       title: `Read ${events.length} calendar events`,
       description: `Read the agenda from ${from.toISOString()} to ${to.toISOString()}.\n\n` +
-          approvalField("Events", events.map(e => e.subject).join("\n")),
+          detailField("Events", events.map(e => e.subject).join("\n")),
     });
     return events;
   }
@@ -599,10 +514,11 @@ class CalendarSessionImpl extends RpcTarget implements OutlookCalendarSession {
       : Promise<Record<string, BusySpan[]>> {
     const map = await runGraph(
         calendar.getAvailability(this.transport, addresses, from, to));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.calendar.read", label: "Read calendar"},
       title: `Check availability for ${addresses.length} people`,
       description: `Read free/busy information.\n\n` +
-          approvalField("People", addresses.join(", ")),
+          detailField("People", addresses.join(", ")),
     });
     return Object.fromEntries(map);
   }
@@ -611,96 +527,62 @@ class CalendarSessionImpl extends RpcTarget implements OutlookCalendarSession {
     subject: string; start: Date; end: Date; body?: string; location?: string;
     attendees?: string[]; onlineMeeting?: boolean;
   }): Promise<{ id: string }> {
-    const actionId = this.actions.submit({
-      type: "createEvent", subject: event.subject,
-      startIso: event.start.toISOString(), endIso: event.end.toISOString(),
-      body: event.body, location: event.location, attendees: event.attendees,
-      onlineMeeting: event.onlineMeeting,
-    });
-    await this.approvalQueue.submitAction(actionId, {
+    const created = await performAction(this.recorder, {
       title: `Create calendar event: ${event.subject}`,
       description: "Create an event on the user's calendar. Outlook sends invitations to " +
           "attendees when the event is created.\n\n" +
-          approvalField("When", `${event.start.toISOString()} – ${event.end.toISOString()}`) +
-          (event.attendees?.length ? approvalField("Attendees", event.attendees.join(", ")) : "") +
-          (event.location ? approvalField("Location", event.location) : "") +
-          (event.body ? approvalField("Description", event.body) : ""),
-      implementsRevert: false,
-      awaitDecision: true,
-      autoApprovable: true,
+          detailField("When", `${event.start.toISOString()} – ${event.end.toISOString()}`) +
+          (event.attendees?.length ? detailField("Attendees", event.attendees.join(", ")) : "") +
+          (event.location ? detailField("Location", event.location) : "") +
+          (event.body ? detailField("Description", event.body) : ""),
       actionKind: CREATE_EVENT_KIND,
-    });
-    return { id: `pending-event-${actionId}` };
+    }, calendar.createEvent(this.transport, event), created => `Event id: ${created.id}`);
+    return { id: created.id };
   }
 
   async updateEvent(eventId: string, update: {
     subject?: string; start?: Date; end?: Date; body?: string; location?: string;
     attendees?: string[];
   }): Promise<void> {
-    const actionId = this.actions.submit({
-      type: "updateEvent", eventId,
-      subject: update.subject,
-      startIso: update.start?.toISOString(), endIso: update.end?.toISOString(),
-      body: update.body, location: update.location, attendees: update.attendees,
-    });
     const changes = [
-      update.subject !== undefined ? approvalField("New subject", update.subject) : "",
-      update.start ? approvalField("New start", update.start.toISOString()) : "",
-      update.end ? approvalField("New end", update.end.toISOString()) : "",
-      update.location !== undefined ? approvalField("New location", update.location) : "",
-      update.attendees ? approvalField("New attendees", update.attendees.join(", ")) : "",
-      update.body !== undefined ? approvalField("New description", update.body) : "",
+      update.subject !== undefined ? detailField("New subject", update.subject) : "",
+      update.start ? detailField("New start", update.start.toISOString()) : "",
+      update.end ? detailField("New end", update.end.toISOString()) : "",
+      update.location !== undefined ? detailField("New location", update.location) : "",
+      update.attendees ? detailField("New attendees", update.attendees.join(", ")) : "",
+      update.body !== undefined ? detailField("New description", update.body) : "",
     ].join("");
-    await this.approvalQueue.submitAction(actionId, {
+    await performAction(this.recorder, {
       title: "Update calendar event",
       description: "Update an event on the user's calendar. Outlook sends updated invitations " +
-          "to attendees.\n\n" + approvalField("Event", eventId) + changes,
-      implementsRevert: false,
-      awaitDecision: true,
-      autoApprovable: true,
+          "to attendees.\n\n" + detailField("Event", eventId) + changes,
       actionKind: MODIFY_EVENT_KIND,
-    });
+    }, calendar.updateEvent(this.transport, eventId, update));
   }
 
   async cancelEvent(eventId: string): Promise<void> {
-    const actionId = this.actions.submit({ type: "cancelEvent", eventId });
-    await this.approvalQueue.submitAction(actionId, {
+    await performAction(this.recorder, {
       title: "Cancel calendar event",
       description: "Delete an event from the user's calendar. For events the user organizes, " +
-          "Outlook sends cancellations to attendees.\n\n" + approvalField("Event", eventId),
-      implementsRevert: false,
-      awaitDecision: true,
-      autoApprovable: true,
+          "Outlook sends cancellations to attendees.\n\n" + detailField("Event", eventId),
       actionKind: MODIFY_EVENT_KIND,
-    });
+    }, calendar.deleteEvent(this.transport, eventId));
   }
 
   async respondToEvent(eventId: string, response: "accept" | "decline" | "tentativelyAccept",
                        comment?: string): Promise<void> {
-    const actionId = this.actions.submit({ type: "respondToEvent", eventId, response, comment });
-    await this.approvalQueue.submitAction(actionId, {
+    await performAction(this.recorder, {
       title: `${response === "tentativelyAccept" ? "Tentatively accept" :
               response === "accept" ? "Accept" : "Decline"} meeting invitation`,
       description: "Respond to a meeting invitation. The organizer is notified.\n\n" +
-          approvalField("Event", eventId) +
-          (comment ? approvalField("Comment", comment) : ""),
-      implementsRevert: false,
-      awaitDecision: true,
-      autoApprovable: true,
+          detailField("Event", eventId) +
+          (comment ? detailField("Comment", comment) : ""),
       actionKind: RESPOND_EVENT_KIND,
-    });
+    }, calendar.respondToEvent(this.transport, eventId, response, comment));
   }
 }
 
 // ── OneDrive / SharePoint files ─────────────────────────────────────────────
-
-type FilesAction =
-  | { type: "createFolder"; driveId: string | null; parentFolderId: string; name: string }
-  | { type: "uploadFile"; driveId: string | null; parentFolderId: string; name: string;
-      content: string; contentType: string }
-  | { type: "replaceFileContent"; driveId: string | null; itemId: string;
-      content: string; contentType: string }
-  | { type: "deleteFile"; driveId: string | null; itemId: string };
 
 const WRITE_FILES_KIND: ActionKind = {
   tag: "microsoft.files.write", label: "Create and edit files",
@@ -713,7 +595,7 @@ function fileRef(driveId: string | null): files.DriveRef {
   return driveId ? { kind: "drive", driveId } : { kind: "me" };
 }
 
-export class FilesGatekeeperImpl extends MicrosoftGatekeeperBase<FilesAction>
+export class FilesGatekeeperImpl extends MicrosoftGatekeeperBase
     implements Gatekeeper<MicrosoftFilesSession> {
   async describe(): Promise<ResourceDescription> {
     return {
@@ -725,64 +607,52 @@ export class FilesGatekeeperImpl extends MicrosoftGatekeeperBase<FilesAction>
     };
   }
 
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
-    // Offered for opt-in auto-approval; deletes are grouped separately so a user can allow
-    // file creation/edits without allowing deletion.
-    return [WRITE_FILES_KIND, DELETE_FILES_KIND];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return [
+      {
+        kind: WRITE_FILES_KIND,
+        summary: "Create files and folders, and overwrite existing files",
+        risk: {
+          // Overwriting a file replaces its content in place; OneDrive keeps version history,
+          // but restoring a previous version is a human's job.
+          reversible: "manual",
+          reach: "modifies-content",
+          audience: "shared",
+          freeform: true,
+        },
+      },
+      {
+        kind: DELETE_FILES_KIND,
+        summary: "Delete files and folders, including ones shared with colleagues",
+        risk: {
+          // A delete moves the item to the drive's recycle bin, from which only a human can
+          // restore it. The name of the item is all the agent supplies.
+          reversible: "manual",
+          reach: "modifies-content",
+          audience: "shared",
+          freeform: false,
+        },
+      },
+    ];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<MicrosoftFilesSession> {
-    return new FilesSessionImpl(this.transport(), approvalQueue.dup(), this.actions());
-  }
-
-  async applyAction(actionId: number): Promise<void> {
-    const action = this.actions().get(actionId);
-    if (!action) throw new Error(`Unknown pending Microsoft files action: ${actionId}`);
-    const transport = this.transport();
-    let result: Record<string, string> = {};
-    switch (action.type) {
-      case "createFolder": {
-        const created = await runGraph(files.createFolder(transport,
-            fileRef(action.driveId), action.parentFolderId, action.name));
-        result = { itemId: created.id };
-        break;
-      }
-      case "uploadFile": {
-        const created = await runGraph(files.uploadFile(transport,
-            fileRef(action.driveId), this.resolveId(action.parentFolderId, "itemId"),
-            action.name, action.content, action.contentType));
-        result = { itemId: created.id };
-        break;
-      }
-      case "replaceFileContent": {
-        const updated = await runGraph(files.replaceFileContent(transport,
-            fileRef(action.driveId), this.resolveId(action.itemId, "itemId"),
-            action.content, action.contentType));
-        result = { itemId: updated.id };
-        break;
-      }
-      case "deleteFile":
-        await runGraph(files.deleteItem(transport, fileRef(action.driveId),
-            this.resolveId(action.itemId, "itemId")));
-        break;
-    }
-    this.ctx.storage.kv.put(`applied:action:${actionId}`, { type: action.type, ...result });
-    this.actions().remove(actionId);
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<MicrosoftFilesSession> {
+    return new FilesSessionImpl(this.transport(), recorder.dup());
   }
 }
 
 @validateRpc()
 class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
   constructor(private transport: GraphTransport,
-              private approvalQueue: RpcStub<ApprovalQueue>,
-              private actions: PendingActionStore<FilesAction>) {
+              private recorder: RpcStub<ActionRecorder>) {
     super();
   }
 
   async #authorizeListing(title: string, entries: FileEntry[]): Promise<void> {
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title,
-      description: approvalField("Entries", entries.map(e => e.name).join("\n")),
+      description: detailField("Entries", entries.map(e => e.name).join("\n")),
     });
   }
 
@@ -803,18 +673,20 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
 
   async searchSites(query: string): Promise<SiteInfo[]> {
     const sites = await runGraph(files.searchSites(this.transport, query));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title: `Search SharePoint sites: ${query || "(all)"}`,
-      description: approvalField("Sites", sites.map(s => s.name).join("\n")),
+      description: detailField("Sites", sites.map(s => s.name).join("\n")),
     });
     return sites;
   }
 
   async listSiteDrives(siteId: string): Promise<{ id: string; name: string }[]> {
     const drives = await runGraph(files.listSiteDrives(this.transport, siteId));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title: "List SharePoint document libraries",
-      description: approvalField("Libraries", drives.map(d => d.name).join("\n")),
+      description: detailField("Libraries", drives.map(d => d.name).join("\n")),
     });
     return drives;
   }
@@ -837,9 +709,10 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
   async getFile(driveId: string | null, itemId: string): Promise<FileEntry> {
     const ref = fileRef(driveId);
     const entry = await runGraph(files.getItem(this.transport, ref, itemId));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title: `Read file metadata: ${entry.name}`,
-      description: approvalField("File", entry.name),
+      description: detailField("File", entry.name),
     });
     return entry;
   }
@@ -848,10 +721,11 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
     const ref = fileRef(driveId);
     const entry = await runGraph(files.getItem(this.transport, ref, itemId));
     const content = await runGraph(files.downloadTextContent(this.transport, ref, itemId));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title: `Read file content: ${entry.name}`,
       description: `Read a file's full text content (${content.length} characters).\n\n` +
-          approvalField("File", entry.name),
+          detailField("File", entry.name),
     });
     return content;
   }
@@ -861,10 +735,11 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
     const ref = fileRef(driveId);
     const entry = await runGraph(files.getItem(this.transport, ref, itemId));
     const bytes = await runGraph(files.downloadContent(this.transport, ref, itemId));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title: `Download file: ${entry.name}`,
       description: `Download a file's full content (${bytes.byteLength} bytes).\n\n` +
-          approvalField("File", entry.name),
+          detailField("File", entry.name),
     });
     return { name: entry.name, base64: bytes.toBase64() };
   }
@@ -877,93 +752,56 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
 
   async createFolder(driveId: string | null, parentFolderId: string, name: string)
       : Promise<FileEntry> {
-    const actionId = this.actions.submit({ type: "createFolder", driveId, parentFolderId, name });
-    await this.approvalQueue.submitAction(actionId, {
+    return performAction(this.recorder, {
       title: `Create folder: ${name}`,
       description: "Create a folder in the user's drive.\n\n" +
-          approvalField("Folder name", name) +
-          approvalField("Inside", parentFolderId),
-      implementsRevert: false,
-      awaitDecision: true,
-      autoApprovable: true,
+          detailField("Folder name", name) +
+          detailField("Inside", parentFolderId),
       actionKind: WRITE_FILES_KIND,
-    });
-    return {
-      id: `pending-folder-${actionId}`, name, kind: "folder",
-      driveId: driveId ?? undefined,
-    };
+    }, files.createFolder(this.transport, fileRef(driveId), parentFolderId, name),
+        created => `Folder id: ${created.id}`);
   }
 
   async uploadFile(driveId: string | null, parentFolderId: string, name: string,
                    content: string, contentType?: string): Promise<FileEntry> {
-    const actionId = this.actions.submit({
-      type: "uploadFile", driveId, parentFolderId, name, content,
-      contentType: contentType ?? "text/plain",
-    });
-    await this.approvalQueue.submitAction(actionId, {
+    return performAction(this.recorder, {
       title: `Create file: ${name}`,
       description: "Create a new file in the user's drive.\n\n" +
-          approvalField("File name", name) +
-          approvalField("Inside", parentFolderId) +
-          approvalField("Content", content),
-      implementsRevert: false,
-      awaitDecision: true,
-      autoApprovable: true,
+          detailField("File name", name) +
+          detailField("Inside", parentFolderId) +
+          detailField("Content", content),
       actionKind: WRITE_FILES_KIND,
-    });
-    return {
-      id: `pending-file-${actionId}`, name, kind: "file", size: content.length,
-      driveId: driveId ?? undefined,
-    };
+    }, files.uploadFile(this.transport, fileRef(driveId), parentFolderId, name, content,
+        contentType ?? "text/plain"),
+        created => `File id: ${created.id}`);
   }
 
   async replaceFileContent(driveId: string | null, itemId: string, content: string,
                            contentType?: string): Promise<FileEntry> {
-    // Name the file in the approval so the user reviews "replace notes.md", not an opaque id.
-    // A placeholder id (pending upload) can't be looked up yet; fall back to the id itself.
-    const entry = itemId.startsWith("pending-")
-        ? { id: itemId, name: itemId, kind: "file" as const, driveId: driveId ?? undefined }
-        : await runGraph(files.getItem(this.transport, fileRef(driveId), itemId));
-    const actionId = this.actions.submit({
-      type: "replaceFileContent", driveId, itemId, content,
-      contentType: contentType ?? "text/plain",
-    });
-    await this.approvalQueue.submitAction(actionId, {
+    // Name the file in the log entry so it reads "replace notes.md", not an opaque id.
+    const entry = await runGraph(files.getItem(this.transport, fileRef(driveId), itemId));
+    return performAction(this.recorder, {
       title: `Replace file content: ${entry.name}`,
       description: "Overwrite an existing file's content.\n\n" +
-          approvalField("File", entry.name) +
-          approvalField("New content", content),
-      implementsRevert: false,
-      awaitDecision: true,
-      autoApprovable: true,
+          detailField("File", entry.name) +
+          detailField("New content", content),
       actionKind: WRITE_FILES_KIND,
-    });
-    return { ...entry, size: content.length };
+    }, files.replaceFileContent(this.transport, fileRef(driveId), itemId, content,
+        contentType ?? "text/plain"));
   }
 
   async deleteFile(driveId: string | null, itemId: string): Promise<void> {
-    const entry = itemId.startsWith("pending-")
-        ? { name: itemId }
-        : await runGraph(files.getItem(this.transport, fileRef(driveId), itemId));
-    const actionId = this.actions.submit({ type: "deleteFile", driveId, itemId });
-    await this.approvalQueue.submitAction(actionId, {
+    const entry = await runGraph(files.getItem(this.transport, fileRef(driveId), itemId));
+    await performAction(this.recorder, {
       title: `Delete: ${entry.name}`,
       description: "Delete a file or folder (it moves to the drive's recycle bin).\n\n" +
-          approvalField("Item", entry.name),
-      implementsRevert: false,
-      awaitDecision: true,
-      autoApprovable: true,
+          detailField("Item", entry.name),
       actionKind: DELETE_FILES_KIND,
-    });
+    }, files.deleteItem(this.transport, fileRef(driveId), itemId));
   }
 }
 
 // ── Microsoft Teams ─────────────────────────────────────────────────────────
-
-type TeamsAction =
-  | { type: "postToChat"; chatId: string; text: string }
-  | { type: "postToChannel"; teamId: string; channelId: string; text: string }
-  | { type: "createChat"; memberAddresses: string[]; topic?: string };
 
 const POST_MESSAGE_KIND: ActionKind = {
   tag: "microsoft.teams.message.post", label: "Post Teams messages",
@@ -972,7 +810,7 @@ const CREATE_CHAT_KIND: ActionKind = {
   tag: "microsoft.teams.chat.create", label: "Start Teams chats",
 };
 
-export class TeamsGatekeeperImpl extends MicrosoftGatekeeperBase<TeamsAction>
+export class TeamsGatekeeperImpl extends MicrosoftGatekeeperBase
     implements Gatekeeper<TeamsSession> {
   async describe(): Promise<ResourceDescription> {
     return {
@@ -984,89 +822,93 @@ export class TeamsGatekeeperImpl extends MicrosoftGatekeeperBase<TeamsAction>
     };
   }
 
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
-    // Offered for opt-in auto-approval per deployment policy; all default to manual review.
-    return [POST_MESSAGE_KIND, CREATE_CHAT_KIND];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return [
+      {
+        kind: POST_MESSAGE_KIND,
+        summary: "Post messages as you in your chats and team channels",
+        risk: {
+          // A posted message is visible to the whole conversation the moment it lands, and
+          // this session offers no way to delete one.
+          reversible: "no",
+          reach: "acts-on-world",
+          audience: "external",
+          freeform: true,
+        },
+      },
+      {
+        kind: CREATE_CHAT_KIND,
+        summary: "Start new chats with colleagues",
+        risk: {
+          // The chat exists but stays empty until a message is posted, and the participants
+          // are named rather than free-form content.
+          reversible: "manual",
+          reach: "creates-content",
+          audience: "shared",
+          freeform: false,
+        },
+      },
+    ];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<TeamsSession> {
-    return new TeamsSessionImpl(this.transport(), approvalQueue.dup(), this.actions());
-  }
-
-  async applyAction(actionId: number): Promise<void> {
-    const action = this.actions().get(actionId);
-    if (!action) throw new Error(`Unknown pending Teams action: ${actionId}`);
-    const transport = this.transport();
-    let result: Record<string, string>;
-    if (action.type === "createChat") {
-      // Graph binds chat members by user id or UPN; the signed-in user's own UPN comes from
-      // their profile.
-      const self = await runGraph(profile.getProfile(transport));
-      const created = await runGraph(teams.createChat(transport, self.id,
-          action.memberAddresses, action.topic));
-      result = { chatId: created.id };
-    } else {
-      const ref = action.type === "postToChat"
-          ? { kind: "chat" as const, chatId: this.resolveId(action.chatId, "chatId") }
-          : { kind: "channel" as const, teamId: action.teamId, channelId: action.channelId };
-      const sent = await runGraph(teams.sendMessage(transport, ref, action.text));
-      result = { messageId: sent.id };
-    }
-    this.ctx.storage.kv.put(`applied:action:${actionId}`, { type: action.type, ...result });
-    this.actions().remove(actionId);
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<TeamsSession> {
+    return new TeamsSessionImpl(this.transport(), recorder.dup());
   }
 }
 
 @validateRpc()
 class TeamsSessionImpl extends RpcTarget implements TeamsSession {
   constructor(private transport: GraphTransport,
-              private approvalQueue: RpcStub<ApprovalQueue>,
-              private actions: PendingActionStore<TeamsAction>) {
+              private recorder: RpcStub<ActionRecorder>) {
     super();
   }
 
   async listChats(): Promise<Cursor<TeamsChatInfo>> {
     const transport = this.transport;
-    return new GraphCursorImpl<TeamsChatInfo>(this.approvalQueue.dup(),
+    return new GraphCursorImpl<TeamsChatInfo>(this.recorder.dup(),
         () => Effect.map(teams.listChats(transport),
             page => ({ items: [...page.chats], next: page.next })),
         cursor => Effect.map(teams.nextChatPage(transport, cursor),
             page => ({ items: [...page.chats], next: page.next })),
         items => ({
+          observationKind: {tag: "microsoft.teams.read", label: "Read messages"},
           title: `List ${items.length} Teams chats`,
-          description: approvalField("Chats",
+          description: detailField("Chats",
               items.map(c => c.topic || `(${c.chatType})`).join("\n")),
         }));
   }
 
   async listTeams(): Promise<TeamInfo[]> {
     const joined = await runGraph(teams.listJoinedTeams(this.transport));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.teams.read", label: "Read messages"},
       title: `List ${joined.length} teams`,
-      description: approvalField("Teams", joined.map(t => t.name).join("\n")),
+      description: detailField("Teams", joined.map(t => t.name).join("\n")),
     });
     return joined;
   }
 
   async listChannels(teamId: string): Promise<ChannelInfo[]> {
     const channels = await runGraph(teams.listChannels(this.transport, teamId));
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.teams.read", label: "Read messages"},
       title: `List ${channels.length} channels`,
-      description: approvalField("Channels", channels.map(c => c.name).join("\n")),
+      description: detailField("Channels", channels.map(c => c.name).join("\n")),
     });
     return channels;
   }
 
   #messageCursor(ref: teams.ConversationRef, what: string): Cursor<TeamsMessageInfo> {
     const transport = this.transport;
-    return new GraphCursorImpl<TeamsMessageInfo>(this.approvalQueue.dup(),
+    return new GraphCursorImpl<TeamsMessageInfo>(this.recorder.dup(),
         () => Effect.map(teams.listMessages(transport, ref),
             page => ({ items: [...page.messages], next: page.next })),
         cursor => Effect.map(teams.nextTeamsMessagePage(transport, cursor),
             page => ({ items: [...page.messages], next: page.next })),
         items => ({
+          observationKind: {tag: "microsoft.teams.read", label: "Read messages"},
           title: `Read ${items.length} Teams messages (${what})`,
-          description: approvalField("From", items.map(m => m.from).join(", ")),
+          description: detailField("From", items.map(m => m.from).join(", ")),
         }));
   }
 
@@ -1079,41 +921,34 @@ class TeamsSessionImpl extends RpcTarget implements TeamsSession {
   }
 
   async createChat(memberAddresses: string[], topic?: string): Promise<{ id: string }> {
-    const actionId = this.actions.submit({ type: "createChat", memberAddresses, topic });
-    await this.approvalQueue.submitAction(actionId, {
+    // Graph binds chat members by user id or UPN; the signed-in user's own UPN comes from their
+    // profile, read before the chat is authorized so the action itself is one call.
+    const self = await runGraph(profile.getProfile(this.transport));
+    return performAction(this.recorder, {
       title: `Start Teams chat with ${memberAddresses.join(", ")}`,
       description: "Start a chat. The other participants see it once the first message is " +
           "posted.\n\n" +
-          approvalField("With", memberAddresses.join(", ")) +
-          (topic ? approvalField("Topic", topic) : ""),
-      implementsRevert: false,
-      awaitDecision: true,
-      autoApprovable: true,
+          detailField("With", memberAddresses.join(", ")) +
+          (topic ? detailField("Topic", topic) : ""),
       actionKind: CREATE_CHAT_KIND,
-    });
-    return { id: `pending-chat-${actionId}` };
+    }, teams.createChat(this.transport, self.id, memberAddresses, topic),
+        created => `Chat id: ${created.id}`);
   }
 
-  async #post(action: Exclude<TeamsAction, { type: "createChat" }>, where: string)
-      : Promise<{ id: string }> {
-    const actionId = this.actions.submit(action);
-    await this.approvalQueue.submitAction(actionId, {
+  async #post(ref: teams.ConversationRef, text: string, where: string): Promise<{ id: string }> {
+    return performAction(this.recorder, {
       title: `Post Teams message to ${where}`,
       description: "Post a message that is immediately visible to the other participants.\n\n" +
-          approvalField("Message", action.text),
-      implementsRevert: false,
-      awaitDecision: true,
-      autoApprovable: true,
+          detailField("Message", text),
       actionKind: POST_MESSAGE_KIND,
-    });
-    return { id: `pending-message-${actionId}` };
+    }, teams.sendMessage(this.transport, ref, text), sent => `Message id: ${sent.id}`);
   }
 
   async postToChat(chatId: string, text: string): Promise<{ id: string }> {
-    return this.#post({ type: "postToChat", chatId, text }, "a chat");
+    return this.#post({ kind: "chat", chatId }, text, "a chat");
   }
 
   async postToChannel(teamId: string, channelId: string, text: string): Promise<{ id: string }> {
-    return this.#post({ type: "postToChannel", teamId, channelId, text }, "a channel");
+    return this.#post({ kind: "channel", teamId, channelId }, text, "a channel");
   }
 }

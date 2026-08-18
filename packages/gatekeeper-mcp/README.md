@@ -40,24 +40,21 @@ let search = await env.MCP_LINEAR.searchIssues({ query: "state:open" });
 if (search.status !== "ok") throw new Error(search.message);
 let { text } = search;
 
-// Anything else: queued for approval, result collected afterwards.
-let queued = await env.MCP_LINEAR.createIssue({ title: "Fix the thing" });
-if (queued.status === "pending") {
-  let outcome = await env.MCP_LINEAR.getActionResult(queued.actionId);
-}
+// Anything else: runs immediately, recorded as an action with its outcome.
+let created = await env.MCP_LINEAR.createIssue({ title: "Fix the thing" });
 
 // The same call by its exact wire name, for a tool whose name cannot be a method.
 await env.MCP_LINEAR.callTool("search_issues", { query: "state:open" });
 ```
 
-Each generated method is a one-line delegate to `callTool`, so the scope check, approval queue, and
-observation record stay in one place. Tools whose names the RPC layer cannot deliver (`then`, `map`,
+Each generated method is a one-line delegate to `callTool`, so the scope check and the
+observation/action record stay in one place. Tools whose names the RPC layer cannot deliver (`then`, `map`,
 `dup`), names that are not identifiers (`2fa`), and both sides of a case collision (`list_issues`
 and `listIssues`) get no method and remain callable through `callTool`.
 
 The agent discovers tools statically: `describeGatekeeper()` sends it the binding name and the full
 generated `.d.ts`, where each method carries the tool's own description as JSDoc and states whether
-calling it needs approval. `listTools()` exists for runtime enumeration but is rarely needed.
+calling it is recorded as an observation or as an action. `listTools()` exists for runtime enumeration but is rarely needed.
 
 See `src/types.d.ts` in `@gadgets/mcp-shared` for the base session API.
 
@@ -82,8 +79,8 @@ For local development no credentials are needed. Set `MCP_ALLOW_INSECURE=true` i
 1. The user starts a connection and gets a form asking for the server's endpoint URL. The URL is
    validated against the host blocklist in `endpoint.ts` (no private, loopback, or metadata hosts;
    HTTPS required unless `MCP_ALLOW_INSECURE`). The form says plainly that connecting a server is a
-   decision to trust it, since the server's own annotations decide which of its tools run without
-   asking (see below).
+   decision to trust it, since the server's own annotation decides which of its tools count as
+   reads (see below).
 2. The gatekeeper opens a Streamable HTTP session and calls `initialize`. A server that completes
    the handshake unauthenticated is recorded as public and no token is demanded of it later.
 3. A `401` starts the official MCP client's OAuth flow:
@@ -127,10 +124,10 @@ Tools · Choose how much of this server the Gadget may call.
 ( ) All tools      Every tool this server offers (14 today), including ones it adds later.
 (•) Choose tools   Only the tools you tick. Anything else is refused, including tools added later.
 
-Allowed tools · 3 selected. Read-only tools return data straight away; the rest queue for approval.
+Allowed tools · 3 selected. Read-only tools are recorded as observations; the rest as actions.
 [ 🔍 Filter tools... ]
 ☑ Search issues                                                                        read-only
-☑ Create issue                                                                    needs approval
+☑ Create issue                                                                              acts
 ```
 
 The breadth is asked outright rather than inferred from whether every box is ticked: "all 14 ticked"
@@ -140,33 +137,25 @@ list stays on screen in both modes, disabled under **All tools**.
 Tools named `portal_*` are never grantable on an endpoint that identifies itself as a portal, since
 they let a session change which upstream servers it can reach.
 
-## Approvals and sharing
+## Recording and sharing
 
-A call to a tool the server annotates `readOnlyHint: true` is an observation and returns straight
-away. Every other call is queued via `submitAction()` and reaches the server only when the Overseer
-calls `applyAction()`. Annotations are optional in MCP and most servers publish none; every hint is
-tested with `=== true` or `=== false`, so an unannotated tool is an action, needs approval, and can
-never auto-apply.
+A call to a tool the server annotates `readOnlyHint: true` is recorded as an observation. Every
+other call is recorded as an action carrying that tool's own action kind, which the user sees at
+connect time and an administrator can disable deployment-wide. Annotations are optional in MCP and
+most servers publish none; the hint is tested with `=== true`, so an unannotated tool is an action.
 
-MCP's own guidance is that a client must treat tool annotations as untrusted unless they come from a
-trusted server. The trust tier is that distinction, and it is the deployment's to make rather than
-the server's: endpoints here are user-supplied rather than administrator-vetted, so they get `byo`.
-`readOnlyHint` classifies reads, but no claim the server makes can auto-apply a write.
-
-Honouring `readOnlyHint` on `byo` is a knowing departure from that rule, and the limit of what this
-connector can promise. A server that labels a destructive tool `readOnlyHint: true` gets that tool
-run without a prompt. Refusing the hint would mean an approval prompt for every `search` and `list`,
-which makes the connector unusable for the thing people connect it to do; and it would buy less than
-it looks, since a dishonest server can act on any call, including one the user did approve. What the
-tier does guarantee is that no BYO server gets a write *auto-applied*, and that every call trusted on
-the server's word is recorded as such.
+MCP's own guidance is that a client must treat tool annotations as untrusted. Honouring
+`readOnlyHint` is a knowing departure from that rule, and the limit of what this connector can
+promise: a server that labels a destructive tool `readOnlyHint: true` gets that call logged as a
+read of the world rather than a change to it. Refusing the hint would mean recording every `search`
+and `list` as an action against the user's grant, which makes the connector unusable for the thing
+people connect it to do; and it would buy less than it looks, since a dishonest server can act on
+any call.
 
 So the trust decision is made once, by the person pasting the URL, and the connect form says so
-plainly: an annotation is only as trustworthy as the server that sent it. Auto-approval requires a
-`vetted` endpoint, which only [`gatekeeper-mcp-portal`](../gatekeeper-mcp-portal/README.md) can
-produce. Every call records which side classified it (`McpToolInfo.classifiedBy`), so an audit can
-find each one taken on the server's word. See `tools.ts` in `@gadgets/mcp-shared` for the tier
-rules.
+plainly: an annotation is only as trustworthy as the server that sent it. Every call records which
+side classified it (`McpToolInfo.classifiedBy`), so an audit can find each one taken on the server's
+word. See `tools.ts` in `@gadgets/mcp-shared` for the rules.
 
 A Gadget bound to an MCP server can only be opened by its owner: `addObserver` refuses
 unconditionally. Being able to authenticate to a server is not evidence of being allowed to see what
@@ -180,10 +169,8 @@ connect their own server.
 
 ## Notes and current limitations
 
-- **No simulation.** MCP describes no way to predict a tool's effect, so a queued call is not
-  reflected in later reads. `awaitDecision` is set and the agent's turn suspends until the user
-  decides.
-- **No revert.** MCP describes no inverse for a tool call, so `implementsRevert` is false.
+- **No revert.** MCP describes no inverse for a tool call, so every capability this connector
+  declares carries `reversible: "no"`.
 - **No hooks.** `notifications/tools/list_changed` is session-scoped; a Gadget hook is durable and
   must survive restarts.
 - **No scoping below tool names.** MCP tools take arguments, not capabilities, so "this repo only"

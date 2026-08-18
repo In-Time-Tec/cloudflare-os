@@ -1,18 +1,18 @@
-// Helpers for the approval / action lifecycle of the Home Assistant gatekeeper.
+// Helpers for the action lifecycle of the Home Assistant gatekeeper.
 //
 // Responsibilities split out from `homeassistant.ts` to keep that file manageable:
 // - `describeAction()` — produces a human-readable ActionDescription from a raw action,
 //   given a registry snapshot for name lookups.
-// - `canRevert()` — returns whether we know how to undo this action.
 // - `resolveTargets()` — expands an HA service-call target into the concrete set of
 //   affected entity_ids using the registry snapshot.
-// - `applyRevertForEntity()` — given a captured prior state and the original action,
-//   issues the inverse service call to restore that state.
-// - `executeAction()` — actually performs the action against HA (REST or WS).
+// - `executeAction()` — actually performs the action against HA.
 
-import type { ActionDescription } from "@gadgets/workshop-shared/gatekeeper";
+import type {
+  ActionCapability,
+  ActionDescription,
+  ActionKind,
+} from "@gadgets/workshop-shared/gatekeeper";
 import {
-  HomeAssistantWebSocket,
   withWebSocket,
   type HomeAssistantCredentials,
   type RegistrySnapshot,
@@ -73,40 +73,62 @@ function formatValue(v: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// Revertibility
+// Action kinds
+//
+// Home Assistant drives physical devices, so every action here reaches the world. The three kinds
+// separate what a policy would want to govern differently: a service call moves a device, an event
+// triggers whatever automations listen for it, and a dashboard save rewrites shared UI.
 
-// Service names whose effect we know how to reverse via the prior-state snapshot.
-const REVERSIBLE_SERVICES = new Set([
-  "turn_on",
-  "turn_off",
-  "toggle",
-  "set_temperature",
-  "set_hvac_mode",
-  "set_fan_mode",
-  "set_cover_position",
-  "open_cover",
-  "close_cover",
-  "stop_cover",
-  "lock",
-  "unlock",
-  "volume_set",
-  "volume_mute",
-  "set_value",
-  "set_percentage",
-  "select_option",
-  "set_datetime",
-]);
+const SERVICE_CALL: ActionKind = {
+  tag: "homeassistant.service.call",
+  label: "Control devices",
+};
+const FIRE_EVENT: ActionKind = {
+  tag: "homeassistant.event.fire",
+  label: "Fire an event on the event bus",
+};
+const SAVE_DASHBOARD: ActionKind = {
+  tag: "homeassistant.dashboard.save",
+  label: "Rewrite a dashboard's configuration",
+};
 
-export function canRevert(action: HomeAssistantAction): boolean {
-  switch (action.type) {
-    case "callService":
-      return REVERSIBLE_SERVICES.has(action.service);
-    case "saveDashboard":
-      return true;
-    case "fireEvent":
-      return false;
-  }
-}
+/** Every side-effecting operation this gatekeeper performs, for consent and deployment policy. */
+export const ACTION_CATALOG: ActionCapability[] = [
+  {
+    kind: SERVICE_CALL,
+    summary: "Call a Home Assistant service, operating lights, locks, climate, and other devices",
+    risk: {
+      // Restoring the prior device state is a service call someone has to decide to make.
+      reversible: "manual",
+      reach: "acts-on-world",
+      // Anyone in the home sees a light turn on or a lock open.
+      audience: "shared",
+      // Service data is arbitrary JSON, and reaches services like notify and tts.
+      freeform: true,
+    },
+  },
+  {
+    kind: FIRE_EVENT,
+    summary: "Fire an arbitrary event on the event bus, triggering any automation listening for it",
+    risk: {
+      // An event that has already fired cannot be recalled, and its automations have already run.
+      reversible: "no",
+      reach: "acts-on-world",
+      audience: "shared",
+      freeform: true,
+    },
+  },
+  {
+    kind: SAVE_DASHBOARD,
+    summary: "Replace a Lovelace dashboard's configuration",
+    risk: {
+      reversible: "manual",
+      reach: "modifies-content",
+      audience: "shared",
+      freeform: true,
+    },
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Description authoring
@@ -141,7 +163,7 @@ function describeCallService(
         `(domain=${JSON.stringify(domain)}, service=${JSON.stringify(service)}). ` +
         `This indicates a programming error in the gadget that called callService(); ` +
         `it likely passed a single options object instead of positional arguments.`,
-      implementsRevert: false,
+      actionKind: SERVICE_CALL,
     };
   }
 
@@ -248,7 +270,7 @@ function describeCallService(
   return {
     title,
     description,
-    implementsRevert: canRevert(action),
+    actionKind: SERVICE_CALL,
   };
 }
 
@@ -260,7 +282,7 @@ function describeFireEvent(action: HomeAssistantAction & { type: "fireEvent" }):
       `Fires the \`${action.eventType}\` event on the Home Assistant event bus` +
       (dataStr ? ` with ${dataStr}` : "") +
       ".",
-    implementsRevert: false,
+    actionKind: FIRE_EVENT,
   };
 }
 
@@ -277,7 +299,7 @@ function describeSaveDashboard(
     description:
       `Replaces the configuration of the Lovelace dashboard \`${urlLabel}\` ` +
       `with ${viewCount} view${viewCount === 1 ? "" : "s"} and ${cardCount} card${cardCount === 1 ? "" : "s"}.`,
-    implementsRevert: true,
+    actionKind: SAVE_DASHBOARD,
   };
 }
 
@@ -393,7 +415,7 @@ function humanizeService(domain: string, service: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Action execution (called from applyAction)
+// Action execution
 //
 // All side-effecting actions go through the Home Assistant WebSocket API. The WS API is HA's
 // modern path; it supports the full target shape (entity_id, device_id, area_id, label_id,
@@ -426,157 +448,4 @@ export async function executeAction(
       }
     }
   });
-}
-
-/** Fetch the current dashboard config so we can store it as revert info. */
-export async function fetchDashboardConfig(
-  urlPath: string | null,
-  creds: HomeAssistantCredentials,
-): Promise<unknown> {
-  return await withWebSocket(creds, async (ws) => {
-    return await ws.send<unknown>({ type: "lovelace/config", url_path: urlPath });
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Revert execution
-//
-// The caller (HomeAssistantGatekeeperImpl.revertAction) opens a single WebSocket and calls this
-// helper once per entity in the prior-state snapshot, so we keep the WS connection open across
-// all reverts.
-
-export async function applyRevertForEntity(
-  prev: { entityId: string; state: string; attributes: Record<string, unknown> },
-  originalAction: HomeAssistantAction & { type: "callService" },
-  ws: HomeAssistantWebSocket,
-): Promise<void> {
-  const domain = prev.entityId.split(".")[0];
-  const target = { entity_id: prev.entityId };
-
-  switch (originalAction.service) {
-    case "turn_on":
-    case "turn_off":
-    case "toggle": {
-      if (prev.state === "on") {
-        const data = restorableOnAttrs(prev.attributes, domain);
-        await ws.callService(domain, "turn_on", data, target);
-      } else {
-        await ws.callService(domain, "turn_off", undefined, target);
-      }
-      return;
-    }
-    case "set_temperature": {
-      const data: Record<string, unknown> = {};
-      if (prev.attributes.temperature != null) {
-        data.temperature = prev.attributes.temperature;
-      }
-      if (prev.attributes.target_temp_low != null) {
-        data.target_temp_low = prev.attributes.target_temp_low;
-      }
-      if (prev.attributes.target_temp_high != null) {
-        data.target_temp_high = prev.attributes.target_temp_high;
-      }
-      if (Object.keys(data).length === 0) {
-        throw new Error("Cannot revert: prior climate setpoint is unknown.");
-      }
-      await ws.callService("climate", "set_temperature", data, target);
-      return;
-    }
-    case "set_hvac_mode": {
-      await ws.callService("climate", "set_hvac_mode", { hvac_mode: prev.state }, target);
-      return;
-    }
-    case "set_fan_mode": {
-      const fanMode = prev.attributes.fan_mode;
-      if (fanMode == null) throw new Error("Cannot revert: prior fan mode is unknown.");
-      await ws.callService("climate", "set_fan_mode", { fan_mode: fanMode }, target);
-      return;
-    }
-    case "set_cover_position":
-    case "open_cover":
-    case "close_cover":
-    case "stop_cover": {
-      const position = prev.attributes.current_position;
-      if (position == null) {
-        if (prev.state === "open") {
-          await ws.callService("cover", "open_cover", undefined, target);
-        } else if (prev.state === "closed") {
-          await ws.callService("cover", "close_cover", undefined, target);
-        } else {
-          throw new Error("Cannot revert: prior cover position is unknown.");
-        }
-        return;
-      }
-      await ws.callService("cover", "set_cover_position", { position }, target);
-      return;
-    }
-    case "lock":
-    case "unlock": {
-      // Restore the captured prior state rather than always inverting — otherwise a no-op
-      // apply (locking an already-locked door) would still flip the lock on revert.
-      if (prev.state === "locked") {
-        await ws.callService("lock", "lock", undefined, target);
-      } else if (prev.state === "unlocked") {
-        await ws.callService("lock", "unlock", undefined, target);
-      } else {
-        // Other states ("locking", "unlocking", "jammed") have no clean way to restore.
-        throw new Error(`Cannot revert: prior lock state was "${prev.state}".`);
-      }
-      return;
-    }
-    case "volume_set": {
-      const v = prev.attributes.volume_level;
-      if (typeof v !== "number") throw new Error("Cannot revert: prior volume unknown.");
-      await ws.callService("media_player", "volume_set", { volume_level: v }, target);
-      return;
-    }
-    case "volume_mute": {
-      const muted = prev.attributes.is_volume_muted;
-      if (typeof muted !== "boolean") throw new Error("Cannot revert: prior mute state unknown.");
-      await ws.callService("media_player", "volume_mute", { is_volume_muted: muted }, target);
-      return;
-    }
-    case "set_value": {
-      // input_number, number, input_text, text — the canonical value lives in `state`.
-      await ws.callService(domain, "set_value", { value: parseNumberOrText(prev.state) }, target);
-      return;
-    }
-    case "set_percentage": {
-      // fan.
-      await ws.callService(domain, "set_percentage", { percentage: Number(prev.state) }, target);
-      return;
-    }
-    case "select_option": {
-      await ws.callService(domain, "select_option", { option: prev.state }, target);
-      return;
-    }
-    case "set_datetime": {
-      // For input_datetime entities, `state` is "YYYY-MM-DD HH:MM:SS" or similar.
-      // Pass it back as `datetime`.
-      await ws.callService(domain, "set_datetime", { datetime: prev.state }, target);
-      return;
-    }
-    default:
-      throw new Error(`Cannot revert action: unknown service "${originalAction.service}".`);
-  }
-}
-
-// Pick attributes that are useful to restore when reverting a turn_off back to on (or vice
-// versa). Returns undefined if no special attrs apply (caller will pass undefined data).
-function restorableOnAttrs(attrs: Record<string, unknown>, domain: string): Record<string, unknown> | undefined {
-  if (domain !== "light") return undefined;
-  const out: Record<string, unknown> = {};
-  if (attrs.brightness != null) out.brightness = attrs.brightness;
-  if (Array.isArray(attrs.rgb_color)) out.rgb_color = attrs.rgb_color;
-  else if (Array.isArray(attrs.hs_color)) out.hs_color = attrs.hs_color;
-  else if (Array.isArray(attrs.xy_color)) out.xy_color = attrs.xy_color;
-  else if (attrs.color_temp != null) out.color_temp = attrs.color_temp;
-  else if (attrs.color_temp_kelvin != null) out.color_temp_kelvin = attrs.color_temp_kelvin;
-  return Object.keys(out).length > 0 ? out : undefined;
-}
-
-function parseNumberOrText(state: string): number | string {
-  const n = Number(state);
-  if (!Number.isNaN(n) && state.trim() !== "") return n;
-  return state;
 }

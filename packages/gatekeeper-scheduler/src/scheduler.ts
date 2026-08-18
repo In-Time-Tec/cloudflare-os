@@ -7,11 +7,11 @@ import {
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
 import type {
   AccountDescription,
-  ActionKind,
+  ActionCapability,
   AgentCatalog,
   AgentCatalogRequest,
   AppUiContext,
-  ApprovalQueue,
+  ActionRecorder,
   Gatekeeper,
   GatekeeperConnectCallback,
   GatekeeperConnectOptions,
@@ -80,7 +80,7 @@ type ControllerFactory = (
 export type ScheduleSessionDependencies = {
   accountId: string;
   workspaceId: string;
-  approvalQueue: NativeRpcStub<ApprovalQueue>;
+  recorder: NativeRpcStub<ActionRecorder>;
   controllerFactory: ControllerFactory;
   driver: SessionDriver;
   now?: () => number;
@@ -91,7 +91,7 @@ export type ScheduleSessionDependencies = {
 export class ScheduleSessionImpl extends RpcTarget implements ScheduleSession {
   readonly #accountId: string;
   readonly #workspaceId: string;
-  readonly #approvalQueue: NativeRpcStub<ApprovalQueue>;
+  readonly #recorder: NativeRpcStub<ActionRecorder>;
   readonly #controllerFactory: ControllerFactory;
   readonly #driver: SessionDriver;
   readonly #now: () => number;
@@ -101,7 +101,7 @@ export class ScheduleSessionImpl extends RpcTarget implements ScheduleSession {
     super();
     this.#accountId = dependencies.accountId;
     this.#workspaceId = dependencies.workspaceId;
-    this.#approvalQueue = dependencies.approvalQueue;
+    this.#recorder = dependencies.recorder;
     this.#controllerFactory = dependencies.controllerFactory;
     this.#driver = dependencies.driver;
     this.#now = dependencies.now ?? Date.now;
@@ -143,7 +143,7 @@ export class ScheduleSessionImpl extends RpcTarget implements ScheduleSession {
   /** Lists this workspace's enabled schedules after observation authorization. */
   async list(): Promise<ScheduleSummary[]> {
     const schedules = await this.#driver.listWorkspace(this.#workspaceId);
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: "List scheduled tasks",
       description: "List enabled schedules for this workspace.",
     });
@@ -151,7 +151,7 @@ export class ScheduleSessionImpl extends RpcTarget implements ScheduleSession {
   }
 
   [Symbol.dispose](): void {
-    this.#approvalQueue[Symbol.dispose]?.();
+    this.#recorder[Symbol.dispose]?.();
   }
 
   async #register(
@@ -172,7 +172,7 @@ export class ScheduleSessionImpl extends RpcTarget implements ScheduleSession {
       spec,
       ...normalized,
     });
-    await this.#approvalQueue.bindHook(
+    await this.#recorder.bindHook(
       // @ts-expect-error Workers currently widens the controller's hook type across bindHook RPC.
       controller,
       callback,
@@ -247,13 +247,13 @@ export class SchedulerGatekeeper
     return TYPES_CODE;
   }
 
-  /** Reports that Scheduled Tasks has no auto-applicable actions. */
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
+  /** Reports that Scheduled Tasks performs no side-effecting actions. */
+  async getActionCatalog(): Promise<ActionCapability[]> {
     return [];
   }
 
   /** Opens a session scoped only by this facet's inherited workspace ID. */
-  async startSession(approvalQueue: NativeRpcStub<ApprovalQueue>): Promise<ScheduleSession> {
+  async startSession(recorder: NativeRpcStub<ActionRecorder>): Promise<ScheduleSession> {
     const workspaceId = this.ctx.id.toString();
     // This account-ID comparison is only a smoke check. The workerd parent/facet inheritance test
     // verifies that the ID is the parent workspace scope, including across sibling facet names.
@@ -263,7 +263,7 @@ export class SchedulerGatekeeper
     return new ScheduleSessionImpl({
       accountId: this.ctx.props.accountId,
       workspaceId,
-      approvalQueue: approvalQueue.dup(),
+      recorder: recorder.dup(),
       controllerFactory: (props) => this.ctx.exports.ScheduleHookController({ props }),
       driver: this.ctx.exports.ScheduleDriver.getByName(this.ctx.props.accountId),
     });
@@ -283,22 +283,6 @@ export class SchedulerGatekeeper
   /** Removes a collaborator; no observer state is retained. */
   async removeObserver(_id: string): Promise<void> {}
 
-  /** Rejects action application because the scheduler is read-only. */
-  applyAction(_action: number): Promise<void> {
-    throw new Error("Scheduled Tasks is read-only and implements no actions.");
-  }
-
-  /** Rejects action rejection because the scheduler submits no actions. */
-  rejectAction(_action: number): Promise<void> {
-    throw new Error("Scheduled Tasks is read-only and implements no actions.");
-  }
-
-  /** Rejects action reversion because the scheduler submits no actions. */
-  revertAction(
-    _action: number,
-  ): Promise<void | { message?: string; canRetry?: boolean; restart?: boolean }> {
-    throw new Error("Scheduled Tasks is read-only and implements no actions.");
-  }
 }
 
 @validateRpc()

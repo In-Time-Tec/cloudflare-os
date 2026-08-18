@@ -8,10 +8,8 @@ import { classifyTool } from "../src/tools.js";
 import type { ClassifiedTool } from "../src/tools.js";
 import type { McpTool } from "../src/client.js";
 
-function tool(
-  declaration: McpTool, mode: "read" | "action" = "read", autoApprovable = false,
-): ClassifiedTool {
-  return { tool: declaration, mode, autoApprovable, classifiedBy: "server-annotation" };
+function tool(declaration: McpTool, mode: "read" | "action" = "read"): ClassifiedTool {
+  return { tool: declaration, mode, classifiedBy: "server-annotation" };
 }
 
 function generate(tools: ClassifiedTool[], baseTypes = "// base\n"): string {
@@ -21,7 +19,6 @@ function generate(tools: ClassifiedTool[], baseTypes = "// base\n"): string {
     serverName: "Acme CRM",
     endpoint: "https://acme.example/mcp",
     discriminator: "https://acme.example/mcp",
-    trust: "byo",
     tools,
   });
 }
@@ -303,17 +300,15 @@ describe("generateSessionTypes", { timeout: 15_000 }, () => {
     expect(output).toContain("What to look for.");
   });
 
-  it("tells the agent which calls resolve immediately and which are queued", () => {
+  it("tells the agent which calls are observations and which are recorded actions", () => {
     const output = generate([
       tool({ name: "read_it" }, "read"),
       tool({ name: "write_it" }, "action"),
     ]);
-    expect(output).toContain("recorded as an observation");
-    expect(output).toContain("queued for approval");
-    expect(output).toContain("return from that executeCode call");
-    expect(output).toContain("Approval resumes the agent;");
-    expect(output).toContain("denial ends the turn");
-    expect(output).toContain("supplied by the user, so no action is ever applied automatically");
+    expect(output).toContain("Read-only: recorded as an observation.");
+    expect(output).toContain("Action: runs immediately, and is recorded as an action");
+    // Nothing is ever pending, so the agent must not be told to return and wait for anything.
+    expect(output).not.toMatch(/approval|pending|executeCode/i);
   });
 
   it("tells the agent sharing will not work, so it does not build a flow that cannot succeed", () => {
@@ -342,7 +337,7 @@ describe("generateSessionTypes", { timeout: 15_000 }, () => {
     const output = generateSessionTypes({
       baseTypes: "", serverId: "s", serverName: "Acme */ evil\nmore",
       endpoint: "https://acme.example/mcp", discriminator: "https://acme.example/mcp",
-      trust: "byo", tools: [],
+      tools: [],
     });
     expect(output).not.toContain("*/ evil");
     expect(output).not.toContain("\nmore");
@@ -353,7 +348,7 @@ describe("generateSessionTypes", { timeout: 15_000 }, () => {
       baseTypes: MCP_BASE_TYPES, serverId: "s",
       serverName: "Acme\u2028export interface Evil { owned: true }\u2029more",
       endpoint: "https://acme.example/mcp", discriminator: "https://acme.example/mcp",
-      trust: "byo", tools: [],
+      tools: [],
     });
     expect(output).toContain(
       '// Generated from the tool catalog of "Acme export interface Evil { owned: true } more"');
@@ -399,10 +394,8 @@ describe("generateSessionTypes", { timeout: 15_000 }, () => {
     expect(output).toContain('callTool(name: "ping", args?: Record<string, never>)');
   });
 
-  it("always exposes listTools and getActionResult", () => {
-    const output = generate([]);
-    expect(output).toContain("listTools(): Promise<McpToolInfo[]>;");
-    expect(output).toContain("getActionResult(actionId: number): Promise<McpCallResult>;");
+  it("always exposes listTools", () => {
+    expect(generate([])).toContain("listTools(): Promise<McpToolInfo[]>;");
   });
 });
 
@@ -412,10 +405,10 @@ describe("generateSessionTypes", { timeout: 15_000 }, () => {
 // `session-methods-e2e.test.ts`, which is the only place able to catch the two drifting apart.
 it("names the wire tool in the doc comment when the method name differs", () => {
   const tools = ["save_issue", "whoami"]
-    .map(name => classifyTool({ name, annotations: { readOnlyHint: true } } as never, "byo"));
+    .map(name => classifyTool({ name, annotations: { readOnlyHint: true } } as never));
   const dts = generateSessionTypes({
     baseTypes: "", serverId: "s", serverName: "S", endpoint: "https://s.example/mcp",
-    discriminator: "https://s.example/mcp", trust: "byo", tools,
+    discriminator: "https://s.example/mcp", tools,
   });
 
   expect(dts).toContain("Calls `save_issue`.");

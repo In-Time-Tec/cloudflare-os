@@ -1,5 +1,5 @@
 // How much of a connected MCP endpoint one binding may call, encoded in the resource URL fragment.
-// The fragment is what the user approved, what `describe()` shows them, and what the facet enforces.
+// The fragment is what the user granted, what `describe()` shows them, and what the facet enforces.
 //
 //   <endpoint>                                  every tool the endpoint offers, now and later
 //   <endpoint>#server=github                    every tool of one portal upstream server
@@ -59,12 +59,12 @@ export function sameEndpoint(a: string, b: string): boolean {
 }
 
 /**
- * Endpoint identity for an action-kind scope tag, so persistent approval policy is namespaced by
+ * Endpoint identity for an action-kind scope tag, so action policy is namespaced by
  * exactly the identity `sameEndpoint` compares.
  *
  * Two endpoints share a tag if and only if `sameEndpoint` calls them the same, since both are
  * `endpointOfResourceUrl`. Anything coarser leaks authority between servers this connector treats
- * as unrelated: keying on the origin let one host's `/mcp` and `/mcp-v2` share an always-approve
+ * as unrelated: keying on the origin let one host's `/mcp` and `/mcp-v2` share one action-kind
  * decision for the same tool name. Anything finer -- the raw string -- would split one endpoint's
  * policy across two spellings of it.
  *

@@ -28,7 +28,6 @@ describe('WorkpiecePicker', () => {
         onExpandedChange={vi.fn<(expanded: boolean) => void>()}
         onSelect={vi.fn<(id: number) => void>()}
         onRename={vi.fn<(id: number, title: string) => void>()}
-        pendingActivityCount={0}
         onOpenActivity={vi.fn<() => void>()}
       />,
     ))

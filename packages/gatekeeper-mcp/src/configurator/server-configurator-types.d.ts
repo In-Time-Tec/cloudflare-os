@@ -24,6 +24,6 @@ export interface McpServerConfiguratorRpc {
   /** The connected server's MCP endpoint URL, which the chosen scope is appended to. */
   getEndpoint(): Promise<string>;
 
-  /** Every tool the server publishes, annotated with whether calls need approval. */
+  /** Every tool the server publishes, annotated with whether calls only read. */
   listToolOptions(): Promise<ConfiguratorUIOption[]>;
 }

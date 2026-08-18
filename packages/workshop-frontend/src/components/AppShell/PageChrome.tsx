@@ -7,11 +7,24 @@ export default function PageChrome({
   title,
   actions,
   children,
+  // Set when the page is rendered inside another page's chrome (e.g. a Settings tab), so it
+  // contributes its content without a second header or scroll container.
+  chromeless = false,
 }: {
   title: string
   actions?: ReactNode
   children: ReactNode
+  chromeless?: boolean
 }) {
+  if (chromeless) {
+    return (
+      <div className="flex flex-col gap-4">
+        {actions ? <div className="flex shrink-0 items-center justify-end gap-0.5">{actions}</div> : null}
+        {children}
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full w-full flex-col">
       <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-6">

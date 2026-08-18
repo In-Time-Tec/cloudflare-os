@@ -9,9 +9,9 @@ import { boundAgentCatalog, AuthenticatedIdentity,
 } from "@gadgets/workshop-shared/gatekeeper";
 import type {
   VendorDescription, AccountDescription, AgentCatalog, AgentCatalogRequest,
-  AppUiContext, GatekeeperUser, GatekeeperUiFrame, ApprovalQueue, ObservationAuthorizer,
+  AppUiContext, GatekeeperUser, GatekeeperUiFrame, ActionRecorder, ObservationAuthorizer,
   GatekeeperConnectCallback, GatekeeperConnectOptions, SupportedResource,
-  Gatekeeper, GatekeeperUserVerifier, ResourceDescription, ActionKind,
+  Gatekeeper, GatekeeperUserVerifier, ResourceDescription, ActionCapability,
   SlashCommandDescriptor, SlashCommandProvider, SlashCommandResult,
 } from "@gadgets/workshop-shared/gatekeeper";
 import { LibraryReadSession } from "./library-read.js";
@@ -284,8 +284,8 @@ export class ContextGatekeeper
     }
   }
 
-  async startSession(approvalQueue: NativeRpcStub<ApprovalQueue>): Promise<LibraryReadSession> {
-    return this.#newReadSession(approvalQueue);
+  async startSession(recorder: NativeRpcStub<ActionRecorder>): Promise<LibraryReadSession> {
+    return this.#newReadSession(recorder);
   }
 
   async getSlashCommandProvider():
@@ -354,8 +354,8 @@ export class ContextGatekeeper
     return catalog;
   }
 
-  /** Read-only gatekeeper: no side-effecting actions, so nothing is ever auto-approvable. */
-  async getAutoApprovableActions(): Promise<ActionKind[]> {
+  /** Read-only gatekeeper: it performs no side-effecting actions. */
+  async getActionCatalog(): Promise<ActionCapability[]> {
     return [];
   }
 
@@ -372,17 +372,6 @@ export class ContextGatekeeper
     this.#observers().removeObserver(id);
   }
 
-  /** Read-only gatekeeper: no actions are submitted, so these callbacks should never run. */
-  applyAction(_action: number): Promise<void> {
-    throw new Error("The Context Library is read-only and implements no actions.");
-  }
-  rejectAction(_action: number): Promise<void | { restart?: boolean }> {
-    throw new Error("The Context Library is read-only and implements no actions.");
-  }
-  revertAction(_action: number):
-      Promise<void | { message?: string; canRetry?: boolean; restart?: boolean }> {
-    throw new Error("The Context Library is read-only and implements no actions.");
-  }
 }
 
 // Vendor entrypoint. Binding props carry the sharing domain.

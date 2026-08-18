@@ -18,10 +18,7 @@
 //   3. `enrichCompanies(...)` / `enrichContacts(...)` turn those IDs into full records, spending
 //      credits (see each method).
 //
-// Enrichment is a two-step flow: an `enrich*` call returns an `EnrichmentTicket` handle right away,
-// and the enriched data is fetched separately with `getEnrichmentResult(ticket)`. The result may
-// not be available immediately, and an enrichment might not run at all — so treat the ticket as a
-// claim check and read the outcome when you need the data (see `getEnrichmentResult`).
+// Enrichment is performed inline: an `enrich*` call spends credits and returns the enriched data.
 
 import type { RpcTarget } from "cloudflare:workers";
 
@@ -81,8 +78,7 @@ export interface ZoomInfoSession extends RpcTarget {
   ): Promise<SearchPage<CompanyMatch>>;
 
   /**
-   * Enrich up to 25 companies into full records, selecting which `outputFields` to return. Returns
-   * a ticket; fetch the enriched records with `getEnrichmentResult(ticket)`.
+   * Enrich up to 25 companies into full records, selecting which `outputFields` to return.
    *
    * Cost: one credit per newly-enriched record; already-owned records and no-match/error results
    * are free.
@@ -94,12 +90,11 @@ export interface ZoomInfoSession extends RpcTarget {
   enrichCompanies(
     inputs: CompanyEnrichInput[],
     outputFields: CompanyOutputField[],
-  ): Promise<EnrichmentTicket>;
+  ): Promise<EnrichResult<CompanyRecord>[]>;
 
   /**
    * Enrich the corporate hierarchy (parentage + full family tree of subsidiaries, acquisitions,
-   * former names, and locations) for up to 25 companies. Returns a ticket; fetch the records with
-   * `getEnrichmentResult(ticket)`.
+   * former names, and locations) for up to 25 companies.
    *
    * Cost: one credit per matched record; already-owned records are free.
    *
@@ -110,17 +105,16 @@ export interface ZoomInfoSession extends RpcTarget {
   enrichCorporateHierarchy(
     inputs: CompanyRefInput[],
     outputFields: CorporateHierarchyOutputField[],
-  ): Promise<EnrichmentTicket>;
+  ): Promise<EnrichResult<CorporateHierarchyRecord>[]>;
 
   /**
-   * Fetch ZoomInfo hashtags (categorical business labels) for a single company. Returns a ticket;
-   * fetch the hashtags with `getEnrichmentResult(ticket)`.
+   * Fetch ZoomInfo hashtags (categorical business labels) for a single company.
    *
    * Cost: one credit for the company.
    *
    * @param companyId ZoomInfo company ID.
    */
-  enrichHashtags(companyId: string): Promise<EnrichmentTicket>;
+  enrichHashtags(companyId: string): Promise<CompanyHashtag[]>;
 
   // -------------------------------------------------------------------------
   // Contacts
@@ -137,8 +131,7 @@ export interface ZoomInfoSession extends RpcTarget {
   ): Promise<SearchPage<ContactMatch>>;
 
   /**
-   * Enrich up to 25 contacts into full records, selecting which `outputFields` to return. Returns a
-   * ticket; fetch the enriched records with `getEnrichmentResult(ticket)`.
+   * Enrich up to 25 contacts into full records, selecting which `outputFields` to return.
    *
    * Cost: one credit per newly-enriched record; already-owned records and no-match/error results
    * are free.
@@ -152,7 +145,7 @@ export interface ZoomInfoSession extends RpcTarget {
     inputs: ContactEnrichInput[],
     outputFields: ContactOutputField[],
     requiredFields?: ContactOutputField[],
-  ): Promise<EnrichmentTicket>;
+  ): Promise<EnrichResult<ContactRecord>[]>;
 
   // -------------------------------------------------------------------------
   // Intent
@@ -170,15 +163,14 @@ export interface ZoomInfoSession extends RpcTarget {
 
   /**
    * Retrieve intent signals for a single company across one or more topics, with optional
-   * top-signal-location detail. Returns a ticket; fetch the signals with
-   * `getEnrichmentResult(ticket)`.
+   * top-signal-location detail.
    *
    * Cost: one credit for the company; each returned signal counts as a record.
    */
   enrichIntent(
     criteria: IntentEnrichCriteria,
     page?: PageRequest,
-  ): Promise<EnrichmentTicket>;
+  ): Promise<SearchPage<IntentSignal>>;
 
   // -------------------------------------------------------------------------
   // Scoops
@@ -196,15 +188,14 @@ export interface ZoomInfoSession extends RpcTarget {
   ): Promise<SearchPage<Scoop>>;
 
   /**
-   * Retrieve Scoops for a single company. Returns a ticket; fetch the scoops with
-   * `getEnrichmentResult(ticket)`.
+   * Retrieve Scoops for a single company.
    *
    * Cost: one credit for the company; each returned scoop counts as a record.
    */
   enrichScoops(
     criteria: ScoopEnrichCriteria,
     page?: PageRequest,
-  ): Promise<EnrichmentTicket>;
+  ): Promise<SearchPage<Scoop>>;
 
   // -------------------------------------------------------------------------
   // News
@@ -220,32 +211,14 @@ export interface ZoomInfoSession extends RpcTarget {
   ): Promise<SearchPage<NewsArticle>>;
 
   /**
-   * Retrieve news articles for a single company. Returns a ticket; fetch the articles with
-   * `getEnrichmentResult(ticket)`.
+   * Retrieve news articles for a single company.
    *
    * Cost: one credit for the company; each returned article counts as a record.
    */
   enrichNews(
     criteria: NewsEnrichCriteria,
     page?: PageRequest,
-  ): Promise<EnrichmentTicket>;
-
-  // -------------------------------------------------------------------------
-  // Enrichment results
-  // -------------------------------------------------------------------------
-
-  /**
-   * Fetch the outcome of an enrichment, identified by the ticket returned from an `enrich*` method.
-   * Free; safe to poll.
-   *
-   * The outcome is one of: `"pending"` (not available yet — poll again), `"ready"` (the enriched
-   * payload is available), `"rejected"` (the enrichment did not run; no credits spent), or
-   * `"failed"` (ZoomInfo returned an error). On a `"ready"` outcome, narrow on `kind` (see
-   * `EnrichmentReady`) to get the correctly-typed `result`.
-   *
-   * @param ticket The ticket returned by the `enrich*` call.
-   */
-  getEnrichmentResult(ticket: EnrichmentTicket): Promise<EnrichmentOutcome>;
+  ): Promise<SearchPage<NewsArticle>>;
 
   // -------------------------------------------------------------------------
   // Recommendations & lookalikes (Copilot)
@@ -890,59 +863,6 @@ export type ContactOutputField =
   | "companyIndustries" | "companyIndustryCodes" | "companyPrimaryIndustry"
   | "companyPrimaryIndustryCode" | "companyPrimarySubIndustryCode"
   | "companySicCodes" | "companyNaicsCodes";
-
-// ===========================================================================
-// Enrichment tickets & outcomes
-// ===========================================================================
-
-/** Which enrichment operation a ticket refers to. */
-export type EnrichmentKind =
-  | "companies"
-  | "corporateHierarchy"
-  | "hashtags"
-  | "contacts"
-  | "intent"
-  | "scoops"
-  | "news";
-
-/**
- * Opaque handle for an enrichment. Returned by every `enrich*` method and passed back to
- * `getEnrichmentResult`. `kind` tells you which enrichment it is, which lines up with the `kind`
- * discriminant on the eventual `"ready"` outcome.
- */
-export type EnrichmentTicket = {
-  /** Identifier for this enrichment. */
-  id: number;
-  /** Which enrichment operation this ticket refers to. */
-  kind: EnrichmentKind;
-  /** A short human-readable summary of what was requested. */
-  summary: string;
-};
-
-/**
- * The enriched payload of a completed enrichment, discriminated by `kind`. Narrow on `kind` to get
- * the correctly-typed result: `EnrichResult<…>[]` for record enrichments, `CompanyHashtag[]` for
- * hashtags, and a `SearchPage<…>` for the intent/scoops/news company feeds.
- */
-export type EnrichmentReady =
-  | { kind: "companies"; result: EnrichResult<CompanyRecord>[] }
-  | { kind: "corporateHierarchy"; result: EnrichResult<CorporateHierarchyRecord>[] }
-  | { kind: "hashtags"; result: CompanyHashtag[] }
-  | { kind: "contacts"; result: EnrichResult<ContactRecord>[] }
-  | { kind: "intent"; result: SearchPage<IntentSignal> }
-  | { kind: "scoops"; result: SearchPage<Scoop> }
-  | { kind: "news"; result: SearchPage<NewsArticle> };
-
-/**
- * The outcome of an enrichment. `"pending"` while not yet available; `"rejected"` if the
- * enrichment did not run (no credits spent); `"ready"` with the enriched payload (see
- * `EnrichmentReady`); `"failed"` if ZoomInfo returned an error.
- */
-export type EnrichmentOutcome =
-  | { status: "pending" }
-  | { status: "rejected" }
-  | { status: "failed"; message: string }
-  | ({ status: "ready" } & EnrichmentReady);
 
 // ===========================================================================
 // Enrich result envelope

@@ -1,7 +1,7 @@
 import { RpcStub, RpcTarget, newHttpBatchRpcResponse, newWebSocketRpcSession, RpcSessionOptions } from "capnweb";
 import { validateRpc } from "capnweb-validate";
 import type { JWTPayload } from "jose";
-import { PublicApi, AuthenticatedApi, Overseer, ThreadMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, AiGatewayInfo, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ObserverConfigCallback, TemplateLibrarySummary, TemplatePublicInfo, TemplateUserSummary, TemplateBindingAssignment, AgentSpawnerConfig, WorkpieceId, TEMPLATE_SCREENSHOT_PATH_PREFIX, TEMPLATE_SCREENSHOT_R2_PREFIX, templateScreenshotUrl, ServerConfig, CloudflareUsageInfo, CloudflareAccountOption, LoginAttempt, GatekeeperAppInfo, AdminApi, GatekeeperVendorInfo, OutputFormatOffer, ListOutputsResult, createOpenThreadError, getOpenThreadErrorCode, OPEN_THREAD_ERROR_CODES, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
+import { PublicApi, AuthenticatedApi, Overseer, ThreadMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, AiGatewayInfo, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ObserverConfigCallback, TemplateLibrarySummary, TemplatePublicInfo, TemplateUserSummary, TemplateBindingAssignment, AgentSpawnerConfig, WorkpieceId, TEMPLATE_SCREENSHOT_PATH_PREFIX, TEMPLATE_SCREENSHOT_R2_PREFIX, templateScreenshotUrl, ServerConfig, CloudflareUsageInfo, CloudflareAccountOption, LoginAttempt, GatekeeperAppInfo, AdminApi, GatekeeperVendorInfo, OutputFormatOffer, ListOutputsResult, AccountCapabilityGroup, createOpenThreadError, getOpenThreadErrorCode, OPEN_THREAD_ERROR_CODES, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
 import type { UiFeatureFlags } from "@gadgets/workshop-shared/feature-flags";
 import { getServerConfig } from "./deployment-config.js";
 import { isPasswordAuthEnabled, getAuthGatekeeperAllowlist } from "./auth/config.js";
@@ -345,6 +345,14 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
 
   ensureAccountResources(accountId: number, resourceUrlPatterns: string[]): Promise<{url?: string}> {
     return this.#user.ensureAccountResources(accountId, resourceUrlPatterns);
+  }
+
+  listAccountCapabilities(accountId: number): Promise<AccountCapabilityGroup[]> {
+    return this.#user.listAccountCapabilities(accountId);
+  }
+
+  setAccountCapabilities(accountId: number, tags: string[], granted: boolean): Promise<void> {
+    return this.#user.setAccountCapabilities(accountId, tags, granted);
   }
 
   listAddableGatekeepers(): Promise<GatekeeperVendorInfo[]> {
