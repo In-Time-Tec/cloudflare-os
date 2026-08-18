@@ -122,3 +122,24 @@ PHASE 5 COMPLETE (commit 0909dfc): thread graph.
 All gates green (build EXIT:0, test EXIT:0, lint 74 warnings 0 errors).
 
 REMAINING: merge feat/threads-orbs -> main, pnpm deploy, verify deployed system, goal complete.
+
+DEPLOYED + VERIFIED (session 2026-08-18):
+- Merged to main: f017231 (main merge), 91348d8 (fix merge). Branch feat/threads-orbs @ bf42355.
+- Deployed to CF account fdf49c83 (dallenpyrah personal), workers intimetec-cloudflare-os*:
+  https://intimetec-cloudflare-os.dallenpyrah.workers.dev
+  Deploy env: CLOUDFLARE_API_TOKEN = wrangler OAuth token from
+  ~/Library/Preferences/.wrangler/config/default.toml (refresh by running `wrangler whoami`),
+  CLOUDFLARE_ACCOUNT_ID=fdf49c834717d675717353f8d0ef502b, OPENROUTER_API_TOKEN from
+  ~/.zshenv OPENROUTER_API_KEY, E2B_API_KEY from repo .env. MICROSOFT_* absent ->
+  password auth stays on (deploy.mjs fix, DISABLE_PASSWORD_AUTH follows MICROSOFT_CLIENT_ID).
+- E2E verification via e2e-verify/*.mjs (node clients driving wss://..../api Cap'n Web):
+  * thread creation OK, orbStatus in metadata OK
+  * agent turn OK (gpt-5.6-luna), executeShell in orb OK (echo orb-verify-42 -> output in reply)
+  * orb wake OK (none->running, orb.created in wrangler tail)
+  * thread spawn OK after fix 084ae0e (store ThreadGraphTarget plain props, NOT a ctx.exports
+    stub — stubs serialize as RpcPromise and storage.put throws), waitForThreads returns child
+    response ("CHILD SAID: Apple"), child nested in listThreads with parentThreadId
+  * Pierre UI verified in deployed bundle (thread chunk has shiki/pierre/FileTree, no monaco)
+  * orb idle-pause fix (alarm was deleted when no agents; now re-armed while orb running) —
+    pause-verify.mjs pending
+- Test account: e2everifier / e2e-verify-password-1
