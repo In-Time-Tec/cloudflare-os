@@ -80,7 +80,6 @@ export function startsAgentTurn(message: AiChatMessage): boolean {
   switch (message.type) {
     case "message": return message.author.type === "user" || message.author.type === "gadget";
     case "agentCallback": case "agentNudge": return true;
-    case "connectionRequest": return message.state === "accepted";
     default: return false;
   }
 }
@@ -121,24 +120,6 @@ export function foldProposedChanges(
   return {proposed, accepted};
 }
 
-/**
- * Earliest turn a checkpoint cannot absorb, or undefined if none. A pending connection request
- * carries live accept/deny state that only its own message can answer, so the boundary stays behind
- * it. Provisional gadget creations and binding additions need no such protection: the checkpoint
- * records them, and the registry rows they name are untouched by compaction.
- */
-export function findProtectedFromSequence(messages: AiChatMessage[]): number | undefined {
-  let protectedIndex = messages.findIndex(
-      message => message.type === "connectionRequest" && message.state === "pending");
-  if (protectedIndex < 0) return undefined;
-
-  // Protect from the start of the turn that raised it, so the tail keeps the exchange explaining
-  // what the user is being asked to connect.
-  for (let i = protectedIndex; i >= 0; --i) {
-    if (startsAgentTurn(messages[i])) return messages[i].sequence;
-  }
-  return messages[0]?.sequence;
-}
 
 /** One model message in the prompt, tagged with where it came from in the chat log. */
 export type CompactionProjectionMessage = {
@@ -234,11 +215,10 @@ export function buildSummaryPrompt(
 /**
  * Choose the first sequence to retain, or undefined if the boundary cannot advance. `contextTokens`
  * must be positive: the caller supplies an estimate when provider usage is unavailable.
- * `protectedFromSequence` is the first sequence holding state the checkpoint cannot own.
  */
 export function findCompactionBoundary(
     projection: CompactionProjectionMessage[], inputBudget: number, contextTokens: number,
-    compactedTo = 0, protectedFromSequence?: number): number | undefined {
+    compactedTo = 0): number | undefined {
   // Walk backward until the retained messages fill the target budget, then move the cut to a record
   // boundary. Provider tokenizers differ, so character weights divide the measured token count among
   // messages; the weights affect only where the cut lands.
@@ -262,8 +242,7 @@ export function findCompactionBoundary(
   }
   if (sequence === undefined) return;
 
-  let boundary = protectedFromSequence === undefined
-      ? sequence : Math.min(sequence, protectedFromSequence);
+  let boundary = sequence;
   return boundary > compactedTo ? boundary : undefined;
 }
 
@@ -324,11 +303,6 @@ export function buildCompactionState(
         name = `PARAMS_${++callbackNameCounter}`;
       } while (chatBindings.has(name));
       chatBindings.set(name, {type: "value", messageSequence: message.sequence});
-    } else if (message.type === "connectionRequest" && message.state === "accepted" &&
-               message.gatekeeperId !== undefined && message.bindingName !== undefined) {
-      if (!chatBindings.has(message.bindingName)) {
-        chatBindings.set(message.bindingName, {type: "workpiece", id: message.gatekeeperId});
-      }
     } else if (message.type === "changes") {
       for (let {gadgetId, bindingName} of message.createdGadgets ?? []) {
         if (!chatBindings.has(bindingName)) {

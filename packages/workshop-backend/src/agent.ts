@@ -20,7 +20,7 @@ import { AgentTurnError, completeText, httpStatusFromError, zeroUsage } from "./
 import type { ModelHandle } from "./ai-models";
 import {
   buildCompactionState, buildSummaryPrompt, COMPACTION_SYSTEM_PROMPT, estimateProjectionTokens,
-  findCompactionBoundary, findProtectedFromSequence, getModelTokenLimits, isCompactionTurn,
+  findCompactionBoundary, getModelTokenLimits, isCompactionTurn,
   protectRetainedReverts, shouldCompactChat,
   type CompactionProjectionMessage,
 } from "./agent-compaction";
@@ -329,7 +329,7 @@ export interface AgentHooks {
   activeAgentCallbackCount(chatId: number): number;
   rejectAllAgentCallbacks(chatId: number, error: string): void;
   consumeCapturedActions(chatId: number)
-      : {actions: number[], accessedGadget: boolean, awaitDecision: boolean} | undefined;
+      : {actions: number[], accessedGadget: boolean} | undefined;
   /**
    * Appends messages to the chat log and updates cost/token accounting. When both
    * `aiGatewayLogId` and `aiGatewayLogRoute` are present, the authoritative cost is fetched
@@ -378,41 +378,6 @@ export interface AgentHooks {
    */
   getInstanceInstructions(): Promise<string>;
 
-  /**
-   * Connection-request hooks for the agent.
-   *
-   * List the gatekeeper vendors the user could connect (id + display name). Used to populate the
-   * system prompt so the agent knows what it can request; resource patterns are fetched on demand
-   * via listConnectableResources().
-   */
-  listConnectableVendors(): Promise<{id: string, displayName: string}[]>;
-
-  /**
-   * Describe the resource types a given vendor offers (urlPattern + title + description), so the
-   * agent can construct a resourceUrl for requestConnection. Returns formatted text.
-   */
-  listConnectableResources(vendorId: string): Promise<string>;
-
-  /**
-   * Record a pending connection request for the given chat. `message` is the tool output text; when
-   * `requested` is true a request was created (captured and spliced into the chat as a
-   * "connectionRequest" message by the agent loop, see consumeCapturedConnectionRequests) and the
-   * turn should end so the agent waits for the user. When `requested` is false the request was
-   * rejected (e.g. it wouldn't resolve to a connectable resource); `message` explains what to fix
-   * and the agent should be allowed to retry within the same turn.
-   */
-  requestConnection(chatId: number, input: {
-    vendorId: string;
-    resourceUrl?: string;
-    reason: string;
-    bindingName: string;
-  }): Promise<{ requested: boolean; message: string }>;
-
-  /**
-   * Drain connection requests captured during the current step so they can be appended to the chat
-   * (analogous to consumeCapturedActions).
-   */
-  consumeCapturedConnectionRequests(chatId: number): AiChatMessageBody[];
 
   /**
    * Blueprint hooks for the agent.
@@ -690,21 +655,13 @@ Executes one-off JavaScript code, returning the output it logs to the console. T
 
 The 'env' object contains this chat's named bindings:
 * An entry for each Gadget in the workspace, under the name given in the system prompt's gadget list (or the name you passed to \`createGadget\`): an RPC stub pointing at the Gadget's server-side Durable Object. If the user asks you to interact with a Gadget directly, or asks if you can "see" it, use this stub (read the Gadget's server code to learn what RPC methods it exposes).
-* An entry for each external resource available to this chat: those listed in the system prompt, those the user grants in messages (shown as \`[Resource Title](env.SOME_NAME)\`), and those you obtain with \`requestConnection\`.
+* An entry for each external resource available to this chat: those listed in the system prompt, and those the user grants in messages (shown as \`[Resource Title](env.SOME_NAME)\`).
 
 Note that this differs from the \`env\` a Gadget's own code sees: a Gadget's server.js sees only that Gadget's own bindings (listed in the system prompt's gadget list), which are wired up separately with \`setGadgetBinding\`. Your bindings and a Gadget's bindings may point at the same resource under the same or different names.
 
 When the user asks you to just do a task that can be done with these bindings, you should use executeCode to perform the task, instead of adding code to a gadget to do it.
 
 The function also receives a \`self\` parameter which is a magic object that points back to this chat thread. Calling any method on \`self\`, like \`self.foo(123)\`, delivers a callback message to this chat and activates you to respond. \`self\` can be passed over RPC (e.g. to a subscription method) and stored in a Durable Object's KV storage for long-term callbacks. When an agent callback is received, it appears in your env under a name like \`PARAMS_1\`, with \`.args\` (the callback arguments), \`.resolve(value)\` (to return a value to the caller), and \`.reject(error)\` (to reject with an error).
-`.trim();
-
-let LIST_CONNECTABLE_RESOURCES_TOOL_DESCRIPTION = `
-List the resource types a gatekeeper vendor offers, so you can construct a resourceUrl for requestConnection. The system prompt lists which vendors exist; call this to learn a specific vendor's resource URL patterns before requesting a connection.
-`.trim();
-
-let REQUEST_CONNECTION_TOOL_DESCRIPTION = `
-Ask the user to connect a gatekeeper resource (e.g. a ClickHouse cluster, a GitHub repo). Pre-configure as much as you can: always pass vendorId, and pass resourceUrl when you can infer it (use listConnectableResources to learn the URL patterns). The request must resolve to a specific resource: if you pass a resourceUrl it must match one of the vendor's patterns, and if the vendor offers multiple resource types with no whole-instance option you MUST pass a matching resourceUrl. Otherwise the call is rejected with guidance and no card is shown — fix the request and try again. You also choose \`bindingName\`: the name the resource will have in your env once connected (you know why you want the resource, so pick a name that reflects its role). On success this shows the user an accept/deny card in the chat. It does NOT block: your turn ends after a successful call, and you will be resumed once the user accepts (the resource becomes available as \`env.<bindingName>\`, which you can describeBinding and use from executeCode; wire it into a Gadget with setGadgetBinding only if the Gadget's code needs it) or denies (your turn simply ends; wait for the user's next message).
 `.trim();
 
 let GIVE_UP_TOOL_DESCRIPTION = `
@@ -1772,8 +1729,6 @@ export async function runAgent(
                   toolOutput = {text: OBSERVE_USER_CHANGES_NOOP_RESULT};
                   break;
                 case "listBlueprints":
-                case "listConnectableResources":
-                case "requestConnection":
                   toolOutput = {text: toolCall.output ?? ""};
                   break;
                 default:
@@ -1968,60 +1923,6 @@ export async function runAgent(
         modelMessages.push({ role: "user", content: msg.text, timestamp: msgTimestamp });
         break;
 
-      case "connectionRequest": {
-        // Surface the outcome of a connection request to the agent. While pending, the name the
-        // agent chose is claimed in the chat's scope but there is nothing actionable to report
-        // (the agent already saw the tool's "awaiting" output and ended its turn). On accept the
-        // agent is resumed and reads this as a user message describing the result; on deny it
-        // isn't resumed (and the name is released), but the note is still surfaced here so the
-        // agent sees the outcome the next time the user messages it.
-        if (msg.state === "pending") {
-          if (msg.bindingName !== undefined) {
-            claimedNames.add(msg.bindingName);
-          }
-        } else if (msg.state === "accepted") {
-          if (msg.gatekeeperId !== undefined && msg.bindingName !== undefined) {
-            // The accepted resource enters the chat's env under the name recorded on the request
-            // (chosen by the agent, or stamped lazily for requests made before agents named their
-            // own).
-            let name = msg.bindingName;
-            if (!chatBindings.has(name)) {
-              chatBindings.set(name, { type: "workpiece", id: msg.gatekeeperId });
-            }
-            modelMessages.push({
-              role: "user",
-              content:
-                  `The user accepted your connection request for "${msg.vendorName}". ` +
-                  `The resource is available as \`env.${name}\` for use in executeCode ` +
-                  `in this conversation. Use describeBinding("${name}") to learn its API, then ` +
-                  `use it. If a Gadget's code needs it permanently, use setGadgetBinding to wire ` +
-                  `it into that gadget.`,
-              timestamp: msgTimestamp,
-            });
-          } else {
-            // Defensive: accept always records a gatekeeperId, so this shouldn't happen — but never
-            // leave a resumed agent with no context about the outcome.
-            modelMessages.push({
-              role: "user",
-              content:
-                  `The user accepted your connection request for "${msg.vendorName}", but the ` +
-                  `connected resource isn't available to you right now. Ask the user to try again ` +
-                  `or proceed without it.`,
-              timestamp: msgTimestamp,
-            });
-          }
-        } else if (msg.state === "denied") {
-          modelMessages.push({
-            role: "user",
-            content:
-                `The user denied your connection request for "${msg.vendorName}". ` +
-                `Do not retry the same request; wait for the user to tell you how to proceed.`,
-            timestamp: msgTimestamp,
-          });
-        }
-        break;
-      }
-
       case "action":
       case "useGadget":
       case "error":
@@ -2090,17 +1991,6 @@ export async function runAgent(
   // -- which replay shows the model verbatim -- matches what the model saw live.
   let toolErrorText = (error: unknown) =>
       error instanceof Error ? error.message : String(error);
-
-  // Set to true once the agent has successfully created a connection request this turn. Used by
-  // shouldStopAfterTurn to end the turn (the agent must wait for the user to accept/deny). A
-  // *rejected* requestConnection call leaves this false so the agent can fix the request and retry
-  // without the turn ending (which would strand it, since there'd be no card to accept/deny and
-  // thus no resume).
-  let connectionRequested = false;
-
-  // Latched by the turn_end barrier when this step submitted an awaitDecision action.
-  // shouldStopAfterTurn reads it afterwards to end the turn until approval resumes it.
-  let awaitingActionDecision = false;
 
   let flushCapturedYdocChanges = () => {
     if (capturedYdocChanges.length === 0 && pendingCreatedGadgets.length === 0 &&
@@ -2257,33 +2147,13 @@ export async function runAgent(
     // not look trigger the agent to browse blueprints.
     let standardFormats = await hooks.describeStandardFormats();
 
-    // Build connectable-vendors section. We only list vendor names here; the agent fetches a
-    // vendor's resource URL patterns on demand via listConnectableResources.
-    let connectableVendors = await hooks.listConnectableVendors();
-    let systemPromptConnections: string;
-    if (connectableVendors.length == 0) {
-      systemPromptConnections = "";
-    } else {
-      systemPromptConnections =
-          `\n\nIf you need access to an external resource that isn't already a binding, you can ask ` +
-          `the user to connect one with the requestConnection tool (pre-configure it as much as you ` +
-          `can; use listConnectableResources to learn a vendor's resource URL patterns first). The ` +
-          `user accepts or denies in the chat. If they accept, you'll be resumed and the resource ` +
-          `becomes available as a binding in your env; if they deny, your turn ends and you wait ` +
-          `for the user's next message.\n` +
-          `If one of these services likely holds information relevant to the task, consider ` +
-          `requesting a connection and reading from it before you answer, instead of answering from ` +
-          `guesswork — a connection often gives you the real information. Connectable vendors:\n` +
-          `${connectableVendors.map(v => `* ${v.id}: ${v.displayName}`).join("\n")}`;
-    }
-
     // Split the system prompt into static and dynamic parts for better caching.
     systemPromptSlots = [
       instanceInstructions
           ? `${SYSTEM_PROMPT}\n\n${instanceInstructions}`
           : SYSTEM_PROMPT,
       (standardFormats ? `${standardFormats}\n\n` : "") +
-          `${systemPromptWorkspace}${systemPromptConnections}` +
+          systemPromptWorkspace +
           (alwaysAvailableResourcesPrompt ? `\n\n${alwaysAvailableResourcesPrompt}` : ""),
     ];
   }
@@ -2319,7 +2189,7 @@ export async function runAgent(
 
     let compactedTo = findCompactionBoundary(
         projection, inputBudget, contextTokens,
-        checkpoint?.compactedTo, findProtectedFromSequence(chatMessages));
+        checkpoint?.compactedTo);
     compactedTo = protectRetainedReverts(compactedTo, chatMessages, checkpoint?.compactedTo);
     if (compactedTo !== undefined) {
       emitStreamEvent({type: "compacting"});
@@ -2818,87 +2688,6 @@ export async function runAgent(
       }
     }),
 
-    listConnectableResources: defineTool({
-      name: "listConnectableResources",
-      label: "List connectable resources",
-      description: LIST_CONNECTABLE_RESOURCES_TOOL_DESCRIPTION,
-      parameters: Type.Object({
-        vendorId: Type.String({
-          description: "Vendor id, as listed in the system prompt (e.g. 'github').",
-        }),
-      }),
-      execute: async (toolCallId, {vendorId}) => {
-        try {
-          let output = await hooks.listConnectableResources(vendorId);
-          return toolResult(output, { output });
-        } catch (error) {
-          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
-          throw error;
-        }
-      }
-    }),
-
-    requestConnection: defineTool({
-      name: "requestConnection",
-      label: "Request connection",
-      description: REQUEST_CONNECTION_TOOL_DESCRIPTION,
-      parameters: Type.Object({
-        vendorId: Type.String({
-          description: "Vendor id, as listed in the system prompt (e.g. 'github').",
-        }),
-        resourceUrl: Type.Optional(Type.String({
-          description:
-              "The specific resource URL, if known (matching a pattern from " +
-              "listConnectableResources). Omit if you don't know the exact resource; the user " +
-              "will pick it.",
-        })),
-        reason: Type.String({
-          description: "A short explanation of why you need this connection, shown to the user.",
-        }),
-        bindingName: Type.String({
-          description:
-              "Name under which the resource will appear in your env once the user accepts. " +
-              "Must be a JavaScript identifier not already in use; pick a name reflecting why " +
-              "you want the resource. Style: ALL_CAPS_WITH_UNDERSCORES.",
-        }),
-      }),
-      execute: async (toolCallId, input) => {
-        try {
-          // Validate the chosen name before creating anything. Like a server-side rejection,
-          // a bad name is returned as a fixable message (not an error) so the agent can retry
-          // within the same turn.
-          let nameProblem: string | undefined;
-          try {
-            validateBindingName(input.bindingName);
-          } catch (err) {
-            nameProblem = `${err instanceof Error ? err.message : err}`;
-          }
-          if (nameProblem === undefined && isNameInScope(input.bindingName)) {
-            nameProblem = `There is already a binding named "${input.bindingName}" in your ` +
-                `env. Choose a different name.`;
-          }
-          if (nameProblem !== undefined) {
-            let message = `Cannot request a connection: ${nameProblem}`;
-            return toolResult(message, { output: message });
-          }
-
-          let result = await hooks.requestConnection(chatId, input);
-          // Only end the turn if a request was actually created; a rejected request must let the
-          // agent retry within the same turn (see the connectionRequested flag /
-          // shouldStopAfterTurn).
-          if (result.requested) {
-            connectionRequested = true;
-            // The name is claimed in the chat's scope from request time (released only by
-            // denial), so nothing else in this step can take it.
-            claimedNames.add(input.bindingName);
-          }
-          return toolResult(result.message, { output: result.message });
-        } catch (error) {
-          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
-          throw error;
-        }
-      }
-    }),
   };
 
   // When the agent was started to handle callbacks, add the giveUp tool so it can bail out.
@@ -3080,16 +2869,8 @@ export async function runAgent(
           if (capturedActions.accessedGadget) {
             msgs.push({type: "useGadget"});
           }
-          if (capturedActions.awaitDecision) {
-            awaitingActionDecision = true;
-          }
         }
 
-        // Append any connection requests the agent made this step, after the assistant message
-        // that contains the requestConnection tool call (so ordering reads correctly).
-        for (let cr of hooks.consumeCapturedConnectionRequests(chatId)) {
-          msgs.push(cr);
-        }
 
         hooks.addChatMessages(chatId, author, msgs, message.usage.totalTokens,
             handle.lastResponse?.aiGatewayLogId, handle.aiGatewayLogRoute,
@@ -3134,14 +2915,6 @@ export async function runAgent(
           abortSignal.aborted ||
           // Hard cap on turns, as before.
           ++turnCount >= 30 ||
-          // End the turn once the agent has successfully requested a connection: it must wait
-          // for the user to respond, not keep reasoning in the meantime. (Accept resumes it on a
-          // fresh turn; deny just leaves the turn ended.) A rejected requestConnection (e.g.
-          // unresolvable resource) leaves this false so the agent can fix the request and retry
-          // in the same turn.
-          connectionRequested ||
-          // Wait for approval before continuing against state that may not reflect the action.
-          awaitingActionDecision ||
           // Auto-terminate when callback-initiated and all callbacks have been resolved/rejected.
           (callbackInitiated && hooks.activeAgentCallbackCount(chatId) === 0),
     }, emit, abortSignal, handle.stream);

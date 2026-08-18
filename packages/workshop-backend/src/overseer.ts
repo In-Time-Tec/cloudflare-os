@@ -7748,14 +7748,14 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     actions.subscribe(dbSubscriber);
     subscribed = true;
 
-    // Replay actions changed since `startAfter`; resolved actions use `appliedAt`,
-    // pending actions use `createdAt`.
+    // Replay entries changed since `startAfter`; completed actions use `completedAt`, and
+    // anything still in flight uses `createdAt`.
     if (startAfter !== undefined) {
       let startAfterTimestamp = startAfter.valueOf();
       for (let record of actions.list()) {
         if (disposed) break;
-        let appliedAt = record.type === "action" ? record.appliedAt : undefined;
-        let recordTimestamp = (appliedAt ?? record.createdAt).valueOf();
+        let completedAt = record.type === "action" ? record.completedAt : undefined;
+        let recordTimestamp = (completedAt ?? record.createdAt).valueOf();
         if (recordTimestamp > startAfterTimestamp) {
           subscriber.entry(actionRecordToLog(record)).catch(unsubscribe);
         }

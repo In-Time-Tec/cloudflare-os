@@ -1,9 +1,12 @@
 import { DurableObject, RpcStub, RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import { skipRpcValidation, validateRpc } from "capnweb-validate";
 import {
-  ApprovalQueue,
   stripTrailingSlashes,
+  type ActionCapability,
   type ActionDescription,
+  type ActionKind,
+  type ActionHandle,
+  type ActionRecorder,
   type AccountDescription,
   type Cursor,
   type Gatekeeper,
@@ -1395,6 +1398,21 @@ export class GitHubVerifier extends WorkerEntrypoint<Env, GitHubVerifierProps>
     }
   }
 }
+
+/** The activity-log kind each GitHub action is recorded under. */
+const GITHUB_ACTION_KINDS: Record<GitHubAction["type"], ActionKind> = {
+  createIssue: { tag: "github.issue.create", label: "Create an issue" },
+  createPullRequest: { tag: "github.pull.create", label: "Open a pull request" },
+  setTitle: { tag: "github.item.retitle", label: "Change a title" },
+  setBody: { tag: "github.item.edit", label: "Edit a body" },
+  addLabels: { tag: "github.item.label", label: "Change labels" },
+  removeLabels: { tag: "github.item.label", label: "Change labels" },
+  changeState: { tag: "github.item.state", label: "Close or reopen" },
+  postComment: { tag: "github.comment.post", label: "Post a comment" },
+  postReview: { tag: "github.review.post", label: "Submit a review" },
+  replyToDiffComment: { tag: "github.comment.post", label: "Post a comment" },
+  mergePullRequest: { tag: "github.pull.merge", label: "Merge a pull request" },
+};
 
 @validateRpc()
 export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImplProps>
@@ -3235,30 +3253,75 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions() {
-    return [];
+  async getActionCatalog(): Promise<ActionCapability[]> {
+    return [
+      {
+        kind: { tag: "github.issue.create", label: "Create an issue" },
+        summary: "Open a new issue in the repository.",
+        risk: { reversible: "manual", reach: "creates-content", audience: "external", freeform: true },
+      },
+      {
+        kind: { tag: "github.pull.create", label: "Open a pull request" },
+        summary: "Open a new pull request in the repository.",
+        risk: { reversible: "manual", reach: "creates-content", audience: "external", freeform: true },
+      },
+      {
+        kind: { tag: "github.item.retitle", label: "Change a title" },
+        summary: "Rename an existing issue or pull request.",
+        risk: { reversible: "manual", reach: "modifies-content", audience: "external", freeform: true },
+      },
+      {
+        kind: { tag: "github.item.edit", label: "Edit a body" },
+        summary: "Replace the body text of an issue or pull request.",
+        risk: { reversible: "manual", reach: "modifies-content", audience: "external", freeform: true },
+      },
+      {
+        kind: { tag: "github.item.label", label: "Change labels" },
+        summary: "Add or remove labels on an issue or pull request.",
+        risk: { reversible: "automatic", reach: "modifies-content", audience: "external", freeform: false },
+      },
+      {
+        kind: { tag: "github.item.state", label: "Close or reopen" },
+        summary: "Close or reopen an issue or pull request.",
+        risk: { reversible: "automatic", reach: "modifies-content", audience: "external", freeform: false },
+      },
+      {
+        kind: { tag: "github.comment.post", label: "Post a comment" },
+        summary: "Comment on an issue or pull request as you.",
+        risk: { reversible: "manual", reach: "creates-content", audience: "external", freeform: true },
+      },
+      {
+        kind: { tag: "github.review.post", label: "Submit a review" },
+        summary: "Submit a pull-request review as you, including approvals.",
+        risk: { reversible: "no", reach: "acts-on-world", audience: "external", freeform: true },
+      },
+      {
+        kind: { tag: "github.pull.merge", label: "Merge a pull request" },
+        summary: "Merge a pull request into its base branch.",
+        risk: { reversible: "no", reach: "acts-on-world", audience: "external", freeform: false },
+      },
+    ];
   }
 
-  async submitActionForApproval(
-    approvalQueue: RpcStub<ApprovalQueue>,
+  async recordAndPerform(
+    recorder: RpcStub<ActionRecorder>,
     action: GitHubAction,
-    description: ActionDescription,
+    description: Omit<ActionDescription, "actionKind">,
   ): Promise<void> {
-    this.#stageAction(action);
+    const handle = await recorder.authorizeAction(
+      { ...description, actionKind: GITHUB_ACTION_KINDS[action.type] });
     try {
-      await approvalQueue.submitAction(action.approvalId, description);
+      await this.#performAction(action);
+      await handle.succeeded();
     } catch (error) {
-      this.ctx.storage.kv.delete(this.#actionRecordKey(action.approvalId));
-      this.#pendingActionsCache = undefined;
+      await handle.failed(String(error), true);
       throw error;
     }
-
-    this.#markActionPending(action);
     this.#clearCaches();
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<GitHubRepoSession | GitHubIssue | GitHubPullRequest> {
-    const queue = approvalQueue.dup();
+  async startSession(recorder: RpcStub<ActionRecorder>): Promise<GitHubRepoSession | GitHubIssue | GitHubPullRequest> {
+    const queue = recorder.dup();
     switch (this.ctx.props.resourceKind) {
       case "repo":
         return new GitHubRepoSessionImpl(this, queue);
@@ -3269,13 +3332,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     }
   }
 
-  async applyAction(actionId: number): Promise<void> {
-    const record = this.#requireActionRecord(actionId);
-    if (record.state !== "pending" && record.state !== "staged") {
-      throw new Error(`GitHub action ${actionId} is no longer pending.`);
-    }
-
-    const action = record.action;
+  // Perform an already-authorized action against the GitHub API.
+  async #performAction(action: GitHubAction): Promise<void> {
     switch (action.type) {
       case "createIssue": {
         const response = await this.#withApi(api => api.createIssue(action.owner, action.repo, {
@@ -3285,7 +3343,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           assignees: action.options.assignees,
         }));
         this.#setProvisionalResource(action.provisionalId, { kind: "issue", realId: String(response.number) });
-        this.#markActionApproved(action);
         this.#clearCaches();
         return;
       }
@@ -3298,7 +3355,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           draft: action.options.draft,
         }));
         this.#setProvisionalResource(action.provisionalId, { kind: "pull", realId: String(response.number) });
-        this.#markActionApproved(action);
         this.#clearCaches();
         return;
       }
@@ -3306,7 +3362,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         const realId = action.targetId.startsWith("~") ? this.#resolveProvisionalId(action.targetId) : action.targetId;
         if (!realId) throw new Error(`Target ${action.targetId} has not been created on GitHub yet.`);
         await this.#withApi(api => api.updateIssue(action.owner, action.repo, Number(realId), { title: action.title }));
-        this.#markActionApproved(action);
         this.#clearCaches();
         return;
       }
@@ -3316,7 +3371,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         await this.#withApi(api => api.updateIssue(action.owner, action.repo, Number(realId), {
           body: this.#rewriteKnownReferences(action.bodyMarkdown, true),
         }));
-        this.#markActionApproved(action);
         this.#clearCaches();
         return;
       }
@@ -3324,7 +3378,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         const realId = action.targetId.startsWith("~") ? this.#resolveProvisionalId(action.targetId) : action.targetId;
         if (!realId) throw new Error(`Target ${action.targetId} has not been created on GitHub yet.`);
         await this.#withApi(api => api.addLabels(action.owner, action.repo, Number(realId), action.labels));
-        this.#markActionApproved(action);
         this.#clearCaches();
         return;
       }
@@ -3337,7 +3390,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           );
           return api.setLabels(action.owner, action.repo, Number(realId), remainingLabels);
         });
-        this.#markActionApproved(action);
         this.#clearCaches();
         return;
       }
@@ -3348,7 +3400,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           state: action.state,
           state_reason: denormalizeStateReason(action.reason),
         }));
-        this.#markActionApproved(action);
         this.#clearCaches();
         return;
       }
@@ -3365,7 +3416,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           type: "issueComment",
           commentId: response.id,
         };
-        this.#markActionApproved(action, revertInfo);
         this.#clearCaches();
         return;
       }
@@ -3417,8 +3467,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
             }
           }
         }
-
-        this.#markActionApproved(action);
         this.#clearCaches();
         return;
       }
@@ -3438,7 +3486,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           type: "reviewComment",
           commentId: response.id,
         };
-        this.#markActionApproved(action, revertInfo);
         this.#clearCaches();
         return;
       }
@@ -3451,7 +3498,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           commit_message: action.options?.commitMessage,
           sha: action.options?.expectedHeadSha,
         }));
-        this.#markActionApproved(action);
         this.#clearCaches();
         return;
       }
@@ -3496,94 +3542,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     return comment.in_reply_to_id ?? comment.id;
   }
 
-  async rejectAction(actionId: number): Promise<void | { restart?: boolean }> {
-    const record = this.#requireActionRecord(actionId);
-    const action = record.action;
-    if (record.state !== "pending" && record.state !== "staged") {
-      throw new Error(`GitHub action ${actionId} is no longer pending.`);
-    }
-
-    this.#markActionRejected(action);
-    if (action.type === "createIssue" || action.type === "createPullRequest") {
-      this.#rejectActionsForResource(action.type === "createIssue" ? "issue" : "pull", action.provisionalId);
-      this.ctx.storage.kv.delete(`provisional:${action.provisionalId}`);
-      this.#clearCaches();
-      return { restart: true };
-    }
-
-    if (action.type === "postReview") {
-      this.#rejectReplyDependencyChain((action.review.diffComments ?? []).map(comment => comment.provisionalCommentId));
-    } else if (action.type === "replyToDiffComment") {
-      this.#rejectReplyDependencyChain([action.provisionalCommentId]);
-    }
-
-    this.#clearCaches();
-    return;
-  }
-
-  async revertAction(actionId: number): Promise<void | { message?: string; canRetry?: boolean; restart?: boolean }> {
-    const record = this.#requireActionRecord(actionId);
-    const action = record.action;
-    const revertInfo = record.revertInfo;
-    switch (action.type) {
-      case "setTitle": {
-        const realId = action.targetId.startsWith("~") ? this.#resolveProvisionalId(action.targetId) : action.targetId;
-        if (!realId) return { message: "The target resource no longer exists on GitHub.", canRetry: false };
-        await this.#withApi(api => api.updateIssue(action.owner, action.repo, Number(realId), { title: action.previousTitle }));
-        this.#clearCaches();
-        return;
-      }
-      case "setBody": {
-        const realId = action.targetId.startsWith("~") ? this.#resolveProvisionalId(action.targetId) : action.targetId;
-        if (!realId) return { message: "The target resource no longer exists on GitHub.", canRetry: false };
-        await this.#withApi(api => api.updateIssue(action.owner, action.repo, Number(realId), { body: action.previousBodyMarkdown }));
-        this.#clearCaches();
-        return;
-      }
-      case "addLabels":
-      case "removeLabels": {
-        const realId = action.targetId.startsWith("~") ? this.#resolveProvisionalId(action.targetId) : action.targetId;
-        if (!realId) return { message: "The target resource no longer exists on GitHub.", canRetry: false };
-        await this.#withApi(api => api.setLabels(action.owner, action.repo, Number(realId), action.previousLabels));
-        this.#clearCaches();
-        return;
-      }
-      case "changeState": {
-        const realId = action.targetId.startsWith("~") ? this.#resolveProvisionalId(action.targetId) : action.targetId;
-        if (!realId) return { message: "The target resource no longer exists on GitHub.", canRetry: false };
-        await this.#withApi(api => api.updateIssue(action.owner, action.repo, Number(realId), {
-          state: action.previousState,
-          state_reason: denormalizeStateReason(action.previousReason),
-        }));
-        this.#clearCaches();
-        return;
-      }
-      case "postComment": {
-        if (revertInfo?.type !== "issueComment") {
-          return { message: "Missing issue comment revert information.", canRetry: false };
-        }
-        await this.#withApi(api => api.deleteIssueComment(action.owner, action.repo, revertInfo.commentId));
-        this.#clearCaches();
-        return;
-      }
-      case "replyToDiffComment": {
-        if (revertInfo?.type !== "reviewComment") {
-          return { message: "Missing review comment revert information.", canRetry: false };
-        }
-        await this.#withApi(api => api.deletePullRequestReviewComment(action.owner, action.repo, revertInfo.commentId));
-        this.#clearCaches();
-        return;
-      }
-      case "createIssue":
-      case "createPullRequest":
-      case "postReview":
-      case "mergePullRequest":
-        return {
-          message: "This GitHub action cannot be automatically reverted.",
-          canRetry: false,
-        };
-    }
-  }
 
   async repoMetadata(): Promise<GitHubRepoMetadata> {
     return this.#getRepoMetadata();
@@ -3817,21 +3775,21 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
 @validateRpc()
 class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
   #gatekeeper: GitHubGatekeeperImpl;
-  #approvalQueue: RpcStub<ApprovalQueue>;
+  #recorder: RpcStub<ActionRecorder>;
 
-  constructor(gatekeeper: GitHubGatekeeperImpl, approvalQueue: RpcStub<ApprovalQueue>) {
+  constructor(gatekeeper: GitHubGatekeeperImpl, recorder: RpcStub<ActionRecorder>) {
     super();
     this.#gatekeeper = gatekeeper;
-    this.#approvalQueue = approvalQueue;
+    this.#recorder = recorder;
   }
 
   [Symbol.dispose](): void {
-    (this.#approvalQueue as RpcStub<ApprovalQueue> & { [Symbol.dispose](): void })[Symbol.dispose]();
+    (this.#recorder as RpcStub<ActionRecorder> & { [Symbol.dispose](): void })[Symbol.dispose]();
   }
 
   async getMetadata(): Promise<GitHubRepoMetadata> {
     const metadata = await this.#gatekeeper.repoMetadata();
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: `Read repository metadata for ${metadata.fullName}`,
       description: `Read basic metadata for the GitHub repository ${metadata.fullName}.`,
     });
@@ -3840,44 +3798,42 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
 
   async createIssue(options: GitHubCreateIssueOptions): Promise<GitHubIssue> {
     const action = await this.#gatekeeper.prepareCreateIssue(options);
-    await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
+    await this.#gatekeeper.recordAndPerform(this.#recorder, action, {
       title: `Create issue ${options.title}`,
       description: `Create a new issue in ${action.owner}/${action.repo} titled "${options.title}".`,
-      implementsRevert: false,
     });
-    return new GitHubIssueImpl(this.#gatekeeper, this.#approvalQueue.dup(), action.provisionalId, "issue");
+    return new GitHubIssueImpl(this.#gatekeeper, this.#recorder.dup(), action.provisionalId, "issue");
   }
 
   async createPullRequest(options: GitHubCreatePullRequestOptions): Promise<GitHubPullRequest> {
     const action = await this.#gatekeeper.prepareCreatePullRequest(options);
-    await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
+    await this.#gatekeeper.recordAndPerform(this.#recorder, action, {
       title: `Create pull request ${options.title}`,
       description: `Create a new pull request in ${action.owner}/${action.repo} from ${options.head} into ${options.base}.`,
-      implementsRevert: false,
     });
-    return new GitHubPullRequestImpl(this.#gatekeeper, this.#approvalQueue.dup(), action.provisionalId);
+    return new GitHubPullRequestImpl(this.#gatekeeper, this.#recorder.dup(), action.provisionalId);
   }
 
   async getIssue(id: string): Promise<GitHubIssue> {
     const details = await this.#gatekeeper.openIssue(id);
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: `Open issue #${details.id}: ${details.title}`,
       description: `Open a capability for issue #${details.id} in ${details.repo.fullName}.`,
     });
-    return new GitHubIssueImpl(this.#gatekeeper, this.#approvalQueue.dup(), id, "issue");
+    return new GitHubIssueImpl(this.#gatekeeper, this.#recorder.dup(), id, "issue");
   }
 
   async getPullRequest(id: string): Promise<GitHubPullRequest> {
     const details = await this.#gatekeeper.openPullRequest(id);
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: `Open pull request #${details.id}: ${details.title}`,
       description: `Open a capability for pull request #${details.id} in ${details.repo.fullName}.`,
     });
-    return new GitHubPullRequestImpl(this.#gatekeeper, this.#approvalQueue.dup(), id);
+    return new GitHubPullRequestImpl(this.#gatekeeper, this.#recorder.dup(), id);
   }
 
   async listIssues(options?: GitHubIssueFilter): Promise<Cursor<GitHubIssueSummary>> {
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: `List issues`,
       description: `List issues in the GitHub repository.`,
     });
@@ -3885,7 +3841,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
   }
 
   async searchIssues(query: GitHubIssueSearch): Promise<Cursor<GitHubIssueSummary>> {
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: `Search issues for "${query.text}"`,
       description: `Search issues in the GitHub repository for "${query.text}".`,
     });
@@ -3893,7 +3849,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
   }
 
   async listPullRequests(options?: GitHubPullRequestFilter): Promise<Cursor<GitHubPullRequestSummary>> {
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: `List pull requests`,
       description: `List pull requests in the GitHub repository.`,
     });
@@ -3901,7 +3857,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
   }
 
   async searchPullRequests(query: GitHubPullRequestSearch): Promise<Cursor<GitHubPullRequestSummary>> {
-    await this.#approvalQueue.authorizeObservation({
+    await this.#recorder.authorizeObservation({
       title: `Search pull requests for "${query.text}"`,
       description: `Search pull requests in the GitHub repository for "${query.text}".`,
     });
@@ -3912,29 +3868,29 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
 @validateRpc()
 class GitHubIssueImpl extends RpcTarget implements GitHubIssue {
   protected gatekeeper: GitHubGatekeeperImpl;
-  protected approvalQueue: RpcStub<ApprovalQueue>;
+  protected recorder: RpcStub<ActionRecorder>;
   protected logicalId: string;
   protected kind: EntityKind;
 
   constructor(
     gatekeeper: GitHubGatekeeperImpl,
-    approvalQueue: RpcStub<ApprovalQueue>,
+    recorder: RpcStub<ActionRecorder>,
     logicalId: string,
     kind: EntityKind,
   ) {
     super();
     this.gatekeeper = gatekeeper;
-    this.approvalQueue = approvalQueue;
+    this.recorder = recorder;
     this.logicalId = logicalId;
     this.kind = kind;
   }
 
   [Symbol.dispose](): void {
-    (this.approvalQueue as RpcStub<ApprovalQueue> & { [Symbol.dispose](): void })[Symbol.dispose]();
+    (this.recorder as RpcStub<ActionRecorder> & { [Symbol.dispose](): void })[Symbol.dispose]();
   }
 
   protected async authorizeMutationPreparation(action: string): Promise<void> {
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
       title: `Read current state of #${this.logicalId}`,
       description: `Read the current state of #${this.logicalId} in order to ${action} and capture revert information.`,
     });
@@ -3942,7 +3898,7 @@ class GitHubIssueImpl extends RpcTarget implements GitHubIssue {
 
   async getDetails(): Promise<GitHubIssueDetails> {
     const details = await this.gatekeeper.openIssue(this.logicalId);
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
       title: `Read issue #${details.id}: ${details.title}`,
       description: `Read the full details of issue #${details.id} in ${details.repo.fullName}.`,
     });
@@ -3952,65 +3908,59 @@ class GitHubIssueImpl extends RpcTarget implements GitHubIssue {
   async setTitle(title: string): Promise<void> {
     await this.authorizeMutationPreparation("change its title");
     const action = await this.gatekeeper.prepareSetTitle(this.kind, this.logicalId, title);
-    await this.gatekeeper.submitActionForApproval(this.approvalQueue, action, {
+    await this.gatekeeper.recordAndPerform(this.recorder, action, {
       title: `Rename #${this.logicalId}`,
       description: `Change the title from "${action.previousTitle}" to "${title}".`,
-      implementsRevert: true,
     });
   }
 
   async setBody(bodyMarkdown: string): Promise<void> {
     await this.authorizeMutationPreparation("edit its body");
     const action = await this.gatekeeper.prepareSetBody(this.kind, this.logicalId, bodyMarkdown);
-    await this.gatekeeper.submitActionForApproval(this.approvalQueue, action, {
+    await this.gatekeeper.recordAndPerform(this.recorder, action, {
       title: `Edit body of #${this.logicalId}`,
       description: `Replace the Markdown body of #${this.logicalId}.`,
-      implementsRevert: true,
     });
   }
 
   async addLabels(labels: string[]): Promise<void> {
     await this.authorizeMutationPreparation("add labels");
     const action = await this.gatekeeper.prepareAddLabels(this.kind, this.logicalId, labels);
-    await this.gatekeeper.submitActionForApproval(this.approvalQueue, action, {
+    await this.gatekeeper.recordAndPerform(this.recorder, action, {
       title: `Add labels to #${this.logicalId}`,
       description: `Add labels ${labels.join(", ")} to #${this.logicalId}.`,
-      implementsRevert: true,
     });
   }
 
   async removeLabels(labels: string[]): Promise<void> {
     await this.authorizeMutationPreparation("remove labels");
     const action = await this.gatekeeper.prepareRemoveLabels(this.kind, this.logicalId, labels);
-    await this.gatekeeper.submitActionForApproval(this.approvalQueue, action, {
+    await this.gatekeeper.recordAndPerform(this.recorder, action, {
       title: `Remove labels from #${this.logicalId}`,
       description: `Remove labels ${labels.join(", ")} from #${this.logicalId}.`,
-      implementsRevert: true,
     });
   }
 
   async close(reason?: "completed" | "notPlanned"): Promise<void> {
     await this.authorizeMutationPreparation("close it");
     const action = await this.gatekeeper.prepareChangeState(this.kind, this.logicalId, "closed", reason);
-    await this.gatekeeper.submitActionForApproval(this.approvalQueue, action, {
+    await this.gatekeeper.recordAndPerform(this.recorder, action, {
       title: `Close #${this.logicalId}`,
       description: `Close #${this.logicalId}${reason ? ` with reason ${reason}` : ""}.`,
-      implementsRevert: true,
     });
   }
 
   async reopen(): Promise<void> {
     await this.authorizeMutationPreparation("reopen it");
     const action = await this.gatekeeper.prepareChangeState(this.kind, this.logicalId, "open");
-    await this.gatekeeper.submitActionForApproval(this.approvalQueue, action, {
+    await this.gatekeeper.recordAndPerform(this.recorder, action, {
       title: `Reopen #${this.logicalId}`,
       description: `Reopen #${this.logicalId}.`,
-      implementsRevert: true,
     });
   }
 
   async readDiscussion(options?: GitHubPageOptions): Promise<Cursor<GitHubDiscussionEntry>> {
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
       title: `Read discussion for #${this.logicalId}`,
       description: `Read the discussion thread for #${this.logicalId}.`,
     });
@@ -4019,23 +3969,22 @@ class GitHubIssueImpl extends RpcTarget implements GitHubIssue {
 
   async postComment(bodyMarkdown: string): Promise<void> {
     const action = await this.gatekeeper.preparePostComment(this.kind, this.logicalId, bodyMarkdown);
-    await this.gatekeeper.submitActionForApproval(this.approvalQueue, action, {
+    await this.gatekeeper.recordAndPerform(this.recorder, action, {
       title: `Comment on #${this.logicalId}`,
       description: `Post a new Markdown comment on #${this.logicalId}.`,
-      implementsRevert: true,
     });
   }
 }
 
 @validateRpc()
 class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest {
-  constructor(gatekeeper: GitHubGatekeeperImpl, approvalQueue: RpcStub<ApprovalQueue>, logicalId: string) {
-    super(gatekeeper, approvalQueue, logicalId, "pull");
+  constructor(gatekeeper: GitHubGatekeeperImpl, recorder: RpcStub<ActionRecorder>, logicalId: string) {
+    super(gatekeeper, recorder, logicalId, "pull");
   }
 
   async getDetails(): Promise<GitHubPullRequestDetails> {
     const details = await this.gatekeeper.openPullRequest(this.logicalId);
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
       title: `Read pull request #${details.id}: ${details.title}`,
       description: `Read the full details of pull request #${details.id} in ${details.repo.fullName}.`,
     });
@@ -4043,7 +3992,7 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
   }
 
   async readDiff(options?: GitHubPageOptions): Promise<GitHubPullRequestDiff> {
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
       title: `Read diff for #${this.logicalId}`,
       description: `Read the diff for pull request #${this.logicalId}.`,
     });
@@ -4051,7 +4000,7 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
   }
 
   async readDiffThreads(options?: GitHubPageOptions): Promise<Cursor<GitHubDiffThread>> {
-    await this.approvalQueue.authorizeObservation({
+    await this.recorder.authorizeObservation({
       title: `Read diff threads for #${this.logicalId}`,
       description: `Read diff discussion threads for pull request #${this.logicalId}.`,
     });
@@ -4060,10 +4009,9 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
 
   async postReview(review: GitHubPullRequestReviewDraft): Promise<void> {
     const action = await this.gatekeeper.preparePostReview(this.logicalId, review);
-    await this.gatekeeper.submitActionForApproval(this.approvalQueue, action, {
+    await this.gatekeeper.recordAndPerform(this.recorder, action, {
       title: `Submit review for #${this.logicalId}`,
       description: `Submit a ${review.decision} review for pull request #${this.logicalId}.`,
-      implementsRevert: false,
     });
   }
 
@@ -4074,19 +4022,17 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
       );
     }
     const action = await this.gatekeeper.prepareReplyToDiffComment(this.logicalId, commentId, bodyMarkdown);
-    await this.gatekeeper.submitActionForApproval(this.approvalQueue, action, {
+    await this.gatekeeper.recordAndPerform(this.recorder, action, {
       title: `Reply to diff thread on #${this.logicalId}`,
       description: `Reply to a diff discussion thread on pull request #${this.logicalId}.`,
-      implementsRevert: true,
     });
   }
 
   async merge(options?: GitHubPullRequestMergeOptions): Promise<void> {
     const action = await this.gatekeeper.prepareMergePullRequest(this.logicalId, options);
-    await this.gatekeeper.submitActionForApproval(this.approvalQueue, action, {
+    await this.gatekeeper.recordAndPerform(this.recorder, action, {
       title: `Merge pull request #${this.logicalId}`,
       description: `Merge pull request #${this.logicalId}${options?.method ? ` using ${options.method}` : ""}.`,
-      implementsRevert: false,
     });
   }
 }

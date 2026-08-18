@@ -13,7 +13,7 @@ import { CLOUDFLARE_WORKERS_AI_MODELS } from "@earendil-works/pi-ai/providers/cl
 import { GOOGLE_MODELS } from "@earendil-works/pi-ai/providers/google.models";
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models";
 import { OPENROUTER_MODELS } from "@earendil-works/pi-ai/providers/openrouter.models";
-import { ApprovalQueue, Gatekeeper, ResourceDescription, stripTrailingSlashes } from '@gadgets/workshop-shared/gatekeeper';
+import { ActionCapability, ActionRecorder, Gatekeeper, ResourceDescription, stripTrailingSlashes } from '@gadgets/workshop-shared/gatekeeper';
 import { LanguageModelBinding } from "./ai-model-binding";
 import AI_MODEL_BINDING_TYPES from "./ai-model-binding.txt";
 import { AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS, WORKERS_AI_OUTPUT_LIMIT }
@@ -702,27 +702,16 @@ export class LanguageModelGatekeeper
     return AI_MODEL_BINDING_TYPES;
   }
 
-  async getAutoApprovableActions() {
+  async getActionCatalog(): Promise<ActionCapability[]> {
     return [];
   }
 
-  async startSession(approvalQueue: RpcStub<ApprovalQueue>)
+  async startSession(recorder: RpcStub<ActionRecorder>)
       : Promise<LanguageModelBinding> {
     let model = getModel(this.env, this.ctx.props.config, this.ctx.props.initiator, {
       metadata: this.ctx.props.metadata,
     });
     return new LanguageModelBindingImpl(model);
-  }
-
-  applyAction(action: number): Promise<void> {
-    throw new Error("This gatekeeper implements no actions.");
-  }
-  rejectAction(action: number): Promise<void | {restart?: boolean}> {
-    throw new Error("This gatekeeper implements no actions.");
-  }
-  revertAction(action: number):
-      Promise<void | {message?: string, canRetry?: boolean, restart?: boolean}> {
-    throw new Error("This gatekeeper implements no actions.");
   }
 
   async addObserver(_id: string, _user: Fetcher): Promise<void> {
