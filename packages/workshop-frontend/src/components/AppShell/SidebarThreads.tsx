@@ -198,9 +198,6 @@ export function SidebarThreadsProvider({ children }: { children: ReactNode }) {
  * The Favorites section. Split from Recent so it can sit directly under the primary nav, above the
  * communications sections — both read the same memoized arrays from the provider, so the split
  * costs no extra state and no extra fetch.
- *
- * Collapsed, the rail shows one merged strip of threads owned by SidebarRecentThreads; this
- * renders nothing so that strip stays exactly as it was.
  */
 export function SidebarFavorites({ collapsed = false }: { collapsed?: boolean }) {
   const { favorites, childrenByParent, onTogglePin, onRename, onShare, onDelete } = useThreadsContext()
@@ -236,10 +233,8 @@ export function SidebarFavorites({ collapsed = false }: { collapsed?: boolean })
   )
 }
 
-/** Recent threads, plus the collapsed rail's merged strip of favorites and recents. */
 export function SidebarRecentThreads({ collapsed = false }: { collapsed?: boolean }) {
   const {
-    favorites,
     recent,
     childrenByParent,
     onTogglePin,
@@ -250,24 +245,7 @@ export function SidebarRecentThreads({ collapsed = false }: { collapsed?: boolea
 
   const [recentOpen, setRecentOpen] = useState(true)
 
-  if (collapsed) {
-    const compact = [...favorites, ...recent].slice(0, 8)
-    return (
-      <div className="flex flex-col gap-1 px-2">
-        {compact.map((g) => (
-          <SidebarGadgetRow
-            key={g.id}
-            gadget={g}
-            collapsed
-            onTogglePin={onTogglePin}
-            onRename={onRename}
-            onShare={onShare}
-            onDelete={onDelete}
-          />
-        ))}
-      </div>
-    )
-  }
+  if (collapsed) return null
 
   return (
     <div className="flex flex-col pb-3">

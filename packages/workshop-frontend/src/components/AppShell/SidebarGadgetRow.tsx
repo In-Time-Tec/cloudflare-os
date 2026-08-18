@@ -28,7 +28,6 @@ function OrbIcon({ size = 14 }: { size?: number }) {
 
 export default function SidebarGadgetRow({
   gadget,
-  collapsed = false,
   nested = false,
   onTogglePin,
   onRename,
@@ -36,8 +35,6 @@ export default function SidebarGadgetRow({
   onDelete,
 }: {
   gadget: ThreadMetadataWithTimestamps
-  collapsed?: boolean
-  /** Render indented as a child thread (spawned by the row above's agent). */
   nested?: boolean
   onTogglePin: (g: ThreadMetadataWithTimestamps) => void
   onRename: (g: ThreadMetadataWithTimestamps, newTitle: string) => void
@@ -47,7 +44,7 @@ export default function SidebarGadgetRow({
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(gadget.title || '')
   const inputRef = useRef<HTMLInputElement>(null)
-  const preview = collapsed || renaming ? undefined : threadPreview(gadget)
+  const preview = renaming ? undefined : threadPreview(gadget)
   const { rowRef, previewBind, previewPortal } = useRowPreview(preview)
   const pending = useLinkPending({ to: '/thread/$id', params: { id: gadget.id } })
 
@@ -63,12 +60,12 @@ export default function SidebarGadgetRow({
 
   const title = gadget.title || 'Untitled thread'
   const rowClass = hoverRowClassName({
-    hasActions: !collapsed && !renaming,
+    hasActions: !renaming,
     className: `h-7 gap-1.5 rounded-md pr-1 text-sm font-medium leading-5 tracking-normal text-kumo-default${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
   })
   const activeClass = hoverRowClassName({
     active: true,
-    hasActions: !collapsed && !renaming,
+    hasActions: !renaming,
     className: `h-7 gap-1.5 rounded-md pr-1 text-sm font-medium leading-5 tracking-normal text-kumo-strong${nested ? ' ml-5 border-l border-kumo-line pl-2' : ''}`,
   })
 
@@ -83,9 +80,8 @@ export default function SidebarGadgetRow({
         onClick={(event) => {
           if (renaming) event.preventDefault()
         }}
-        title={collapsed ? title : undefined}
         aria-busy={pending}
-        {...(renaming || collapsed ? {} : previewBind)}
+        {...(renaming ? {} : previewBind)}
       >
         <div
           className="flex h-7 w-7 shrink-0 items-center justify-center text-kumo-subtle"
@@ -96,61 +92,55 @@ export default function SidebarGadgetRow({
           </PendingIcon>
         </div>
 
-        {!collapsed && (
-          <>
-            {renaming ? (
-              <input
-                ref={inputRef}
-                value={renameValue}
-                onChange={(event) => setRenameValue(event.target.value)}
-                onBlur={commit}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') commit()
-                  if (event.key === 'Escape') setRenaming(false)
-                }}
-                className="min-w-0 flex-1 border-b border-kumo-brand bg-transparent text-sm font-medium leading-5 tracking-normal text-kumo-default outline-none"
-                onClick={(event) => event.preventDefault()}
-                onDoubleClick={(event) => event.preventDefault()}
-              />
-            ) : (
-              <HoverRowTrail>
-                <HoverFadeLabel className="text-sm font-medium leading-5 tracking-normal text-kumo-default">
-                  {title}
-                </HoverFadeLabel>
-                <HoverActionBar
-                  actions={[
-                    {
-                      label: gadget.pinned ? 'Unfavorite' : 'Favorite',
-                      icon: <Star size={12} weight={gadget.pinned ? 'fill' : 'regular'} />,
-                      onSelect: () => onTogglePin(gadget),
-                    },
-                    {
-                      label: 'Rename',
-                      icon: <Pencil size={12} />,
-                      onSelect: () => {
-                        setRenameValue(gadget.title || '')
-                        setRenaming(true)
-                      },
-                    },
-                    {
-                      label: 'Share',
-                      icon: <ShareNetwork size={12} />,
-                      onSelect: () => onShare(gadget),
-                    },
-                    {
-                      label: gadget.owner ? 'Dismiss' : 'Delete',
-                      icon: <Trash size={12} />,
-                      onSelect: () => onDelete(gadget),
-                      danger: true,
-                    },
-                  ]}
-                />
-              </HoverRowTrail>
-            )}
-          </>
+        {renaming ? (
+          <input
+            ref={inputRef}
+            value={renameValue}
+            onChange={(event) => setRenameValue(event.target.value)}
+            onBlur={commit}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commit()
+              if (event.key === 'Escape') setRenaming(false)
+            }}
+            className="min-w-0 flex-1 border-b border-kumo-brand bg-transparent text-sm font-medium leading-5 tracking-normal text-kumo-default outline-none"
+            onClick={(event) => event.preventDefault()}
+            onDoubleClick={(event) => event.preventDefault()}
+          />
+        ) : (
+          <HoverRowTrail>
+            <HoverFadeLabel className="text-sm font-medium leading-5 tracking-normal text-kumo-default">
+              {title}
+            </HoverFadeLabel>
+            <HoverActionBar
+              actions={[
+                {
+                  label: gadget.pinned ? 'Unfavorite' : 'Favorite',
+                  icon: <Star size={12} weight={gadget.pinned ? 'fill' : 'regular'} />,
+                  onSelect: () => onTogglePin(gadget),
+                },
+                {
+                  label: 'Rename',
+                  icon: <Pencil size={12} />,
+                  onSelect: () => {
+                    setRenameValue(gadget.title || '')
+                    setRenaming(true)
+                  },
+                },
+                {
+                  label: 'Share',
+                  icon: <ShareNetwork size={12} />,
+                  onSelect: () => onShare(gadget),
+                },
+                {
+                  label: gadget.owner ? 'Dismiss' : 'Delete',
+                  icon: <Trash size={12} />,
+                  onSelect: () => onDelete(gadget),
+                  danger: true,
+                },
+              ]}
+            />
+          </HoverRowTrail>
         )}
-
-        {collapsed && <span className="sr-only">{title}</span>}
       </Link>
       {previewPortal}
     </>
