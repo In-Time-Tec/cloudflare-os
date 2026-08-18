@@ -4,8 +4,14 @@
 import { act, type ReactNode, type Ref } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { SIDEBAR_PREVIEW_DELAY_MS, hoverRowClassName } from './sidebarHover'
-import { HoverActionBar, HoverFadeLabel, HoverRowTrail, useRowPreview } from './SidebarHoverRow'
+import { SIDEBAR_PREVIEW_DELAY_MS, SIDEBAR_PREVIEW_HANDOFF_MS, hoverRowClassName } from './sidebarHover'
+import {
+  HoverActionBar,
+  HoverFadeLabel,
+  HoverRowTrail,
+  SidebarHoverPreviewProvider,
+  useRowPreview,
+} from './SidebarHoverRow'
 import type { SidebarHoverPreview } from './sidebarHover'
 
 vi.mock('@cloudflare/kumo', () => ({
@@ -65,7 +71,9 @@ describe('SidebarHoverRow', () => {
     document.body.append(container)
     root = createRoot(container)
     act(() => root!.render(
-      <Harness onParent={onParent} onHide={onHide} preview={preview} />,
+      <SidebarHoverPreviewProvider>
+        <Harness onParent={onParent} onHide={onHide} preview={preview} />
+      </SidebarHoverPreviewProvider>,
     ))
     return { onParent, onHide, host: container! }
   }
@@ -104,5 +112,64 @@ describe('SidebarHoverRow', () => {
     expect(card!.textContent).toContain('Simplot Opsys')
     expect(card!.textContent).toContain('Ada: Ship the build')
     expect(card!.textContent).toContain('Operations')
+  })
+
+  it('updates the open preview immediately when moving to the next row', () => {
+    vi.useFakeTimers()
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    act(() => root!.render(
+      <SidebarHoverPreviewProvider>
+        <Harness
+          onParent={() => {}}
+          onHide={() => {}}
+          preview={{ title: 'First thread', meta: 'Updated 1m ago' }}
+        />
+        <Harness
+          onParent={() => {}}
+          onHide={() => {}}
+          preview={{ title: 'Second thread', meta: 'Updated 2m ago' }}
+        />
+      </SidebarHoverPreviewProvider>,
+    ))
+    const [first, second] = Array.from(container.querySelectorAll('a'))
+    act(() => {
+      first.focus()
+    })
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_PREVIEW_DELAY_MS)
+    })
+    const card = document.body.querySelector('[data-sidebar-preview]')
+    expect(card!.textContent).toContain('First thread')
+    act(() => {
+      first.blur()
+      second.focus()
+    })
+    const next = document.body.querySelector('[data-sidebar-preview]')
+    expect(next).toBe(card)
+    expect(next!.textContent).toContain('Second thread')
+    expect(next!.textContent).not.toContain('First thread')
+  })
+
+  it('hides the preview after the handoff delay when leaving the list', () => {
+    const { host } = render({ title: 'Simplot Opsys' })
+    vi.useFakeTimers()
+    const row = host.querySelector('a')!
+    act(() => {
+      row.focus()
+    })
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_PREVIEW_DELAY_MS)
+    })
+    expect(document.body.querySelector('[data-sidebar-preview]')).not.toBeNull()
+    act(() => {
+      row.blur()
+    })
+    expect(document.body.querySelector('[data-sidebar-preview]')).not.toBeNull()
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_PREVIEW_HANDOFF_MS)
+    })
+    expect(document.body.querySelector('[data-sidebar-preview]')).toBeNull()
   })
 })

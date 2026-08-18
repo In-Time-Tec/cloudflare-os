@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { asTime } from '../../query/time'
 
 export const SIDEBAR_PREVIEW_DELAY_MS = 160
+export const SIDEBAR_PREVIEW_HANDOFF_MS = 80
 
 export type SidebarHoverAction = {
   label: string

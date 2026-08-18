@@ -1,6 +1,9 @@
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FocusEvent,
@@ -12,6 +15,7 @@ import { createPortal } from 'react-dom'
 import { Tooltip } from '@cloudflare/kumo'
 import {
   SIDEBAR_PREVIEW_DELAY_MS,
+  SIDEBAR_PREVIEW_HANDOFF_MS,
   type SidebarHoverAction,
   type SidebarHoverPreview,
 } from './sidebarHover'
@@ -100,6 +104,84 @@ function PreviewCard({ preview, top, left }: {
   )
 }
 
+type ShownPreview = {
+  preview: SidebarHoverPreview
+  top: number
+  left: number
+}
+
+type PreviewController = {
+  show(preview: SidebarHoverPreview, row: HTMLElement): void
+  hide(): void
+}
+
+const PreviewContext = createContext<PreviewController | null>(null)
+
+function previewBox(row: HTMLElement): { top: number; left: number } {
+  const rect = row.getBoundingClientRect()
+  return {
+    left: Math.min(rect.right + 8, Math.max(8, window.innerWidth - 296)),
+    top: Math.max(8, Math.min(rect.top, window.innerHeight - 168)),
+  }
+}
+
+export function SidebarHoverPreviewProvider({ children }: { children: ReactNode }) {
+  const [shown, setShown] = useState<ShownPreview | null>(null)
+  const openRef = useRef(false)
+  const showTimerRef = useRef(0)
+  const hideTimerRef = useRef(0)
+
+  const clearTimers = useCallback(() => {
+    window.clearTimeout(showTimerRef.current)
+    window.clearTimeout(hideTimerRef.current)
+  }, [])
+
+  const close = useCallback(() => {
+    clearTimers()
+    openRef.current = false
+    setShown(null)
+  }, [clearTimers])
+
+  const show = useCallback((preview: SidebarHoverPreview, row: HTMLElement) => {
+    const hover = window.matchMedia?.('(hover: hover)')
+    const coarse = window.matchMedia?.('(pointer: coarse)')
+    if (hover?.matches === false && coarse?.matches === true) return
+    window.clearTimeout(hideTimerRef.current)
+    window.clearTimeout(showTimerRef.current)
+    const reveal = () => {
+      openRef.current = true
+      setShown({ preview, ...previewBox(row) })
+    }
+    if (openRef.current) reveal()
+    else showTimerRef.current = window.setTimeout(reveal, SIDEBAR_PREVIEW_DELAY_MS)
+  }, [])
+
+  const hide = useCallback(() => {
+    window.clearTimeout(showTimerRef.current)
+    window.clearTimeout(hideTimerRef.current)
+    hideTimerRef.current = window.setTimeout(close, SIDEBAR_PREVIEW_HANDOFF_MS)
+  }, [close])
+
+  useEffect(() => () => clearTimers(), [clearTimers])
+
+  useEffect(() => {
+    if (!shown) return
+    window.addEventListener('scroll', close, true)
+    return () => window.removeEventListener('scroll', close, true)
+  }, [shown, close])
+
+  const controller = useMemo(() => ({ show, hide }), [show, hide])
+
+  return (
+    <PreviewContext.Provider value={controller}>
+      {children}
+      {shown
+        ? createPortal(<PreviewCard preview={shown.preview} top={shown.top} left={shown.left} />, document.body)
+        : null}
+    </PreviewContext.Provider>
+  )
+}
+
 export function useRowPreview(preview: SidebarHoverPreview | undefined): {
   rowRef: RefObject<HTMLElement | null>
   previewBind: {
@@ -111,53 +193,32 @@ export function useRowPreview(preview: SidebarHoverPreview | undefined): {
   previewPortal: ReactNode
 } {
   const rowRef = useRef<HTMLElement | null>(null)
-  const [box, setBox] = useState<{ top: number; left: number } | null>(null)
-  const timerRef = useRef(0)
-
-  const clear = useCallback(() => {
-    window.clearTimeout(timerRef.current)
-    setBox(null)
-  }, [])
+  const controller = useContext(PreviewContext)
+  const previewRef = useRef(preview)
+  previewRef.current = preview
 
   const show = useCallback(() => {
-    if (!preview) return
-    const hover = window.matchMedia?.('(hover: hover)')
-    const coarse = window.matchMedia?.('(pointer: coarse)')
-    if (hover?.matches === false && coarse?.matches === true) return
-    window.clearTimeout(timerRef.current)
-    timerRef.current = window.setTimeout(() => {
-      const el = rowRef.current
-      if (!el) return
-      const rect = el.getBoundingClientRect()
-      setBox({
-        left: Math.min(rect.right + 8, Math.max(8, window.innerWidth - 296)),
-        top: Math.max(8, Math.min(rect.top, window.innerHeight - 168)),
-      })
-    }, SIDEBAR_PREVIEW_DELAY_MS)
-  }, [preview])
+    const next = previewRef.current
+    const row = rowRef.current
+    if (!next || !row) return
+    controller?.show(next, row)
+  }, [controller])
 
-  useEffect(() => () => window.clearTimeout(timerRef.current), [])
-
-  useEffect(() => {
-    if (!box) return
-    const onScroll = () => clear()
-    window.addEventListener('scroll', onScroll, true)
-    return () => window.removeEventListener('scroll', onScroll, true)
-  }, [box, clear])
+  const hide = useCallback(() => {
+    controller?.hide()
+  }, [controller])
 
   return {
     rowRef,
     previewBind: {
       onMouseEnter: show,
-      onMouseLeave: clear,
+      onMouseLeave: hide,
       onFocus: show,
       onBlur(event: FocusEvent<HTMLElement>) {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) clear()
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) hide()
       },
     },
-    previewPortal: box && preview
-      ? createPortal(<PreviewCard preview={preview} top={box.top} left={box.left} />, document.body)
-      : null,
+    previewPortal: null,
   }
 }
 

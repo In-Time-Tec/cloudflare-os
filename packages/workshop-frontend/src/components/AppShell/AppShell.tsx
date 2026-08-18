@@ -8,6 +8,7 @@ import Sidebar from './Sidebar'
 import { ConversationsProvider } from '../../conversations/ConversationsContext'
 import CommandPalette from './CommandPalette'
 import { OPEN_COMMAND_PALETTE_EVENT } from './commandPaletteBus'
+import { SidebarHoverPreviewProvider } from './SidebarHoverRow'
 
 const STORAGE_KEY_COLLAPSED = 'gadgets:sidebar-collapsed'
 
@@ -76,6 +77,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   }, [toggleCollapsed])
 
   return (
+    <SidebarHoverPreviewProvider>
     <div className="h-screen min-h-screen w-screen overflow-hidden bg-app-frame p-0 md:p-3">
       <div className="flex h-full w-full overflow-hidden bg-kumo-base md:rounded-2xl md:border md:border-kumo-line md:shadow-app-shell">
         {/* Desktop sidebar — hidden on mobile in favor of the drawer. */}
@@ -126,5 +128,6 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       </div>
     </div>
+    </SidebarHoverPreviewProvider>
   )
 }
