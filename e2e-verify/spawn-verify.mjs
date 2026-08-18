@@ -1,5 +1,5 @@
 // E2E: thread graph — agent spawns a child thread, waits for its response.
-import { newWebSocketRpcSession, RpcTarget } from "../packages/workshop-frontend/node_modules/capnweb/dist/index.js";
+import { newWebSocketRpcSession } from "../packages/workshop-frontend/node_modules/capnweb/dist/index.js";
 import { argon2id } from "../packages/workshop-frontend/node_modules/hash-wasm/dist/index.esm.js";
 import { SERVICE_SALT } from "./salt.mjs";
 

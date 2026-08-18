@@ -59,7 +59,7 @@ const prompt = "Use your executeShell tool to run this exact command: echo orb-v
     "Then reply with just the command output. Do not create any artifacts.";
 const chatId = await overseer.newChat(prompt, modelId);
 console.log("chatId:", chatId);
-const sub = await overseer.subscribeToChat(new ChatSub());
+await overseer.subscribeToChat(new ChatSub());
 
 // Poll orb status while the agent runs.
 const orbStatuses = new Set([meta.orbStatus]);
