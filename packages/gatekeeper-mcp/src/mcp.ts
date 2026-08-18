@@ -186,6 +186,12 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
     return mcpResources(fetchOptions(this.env).allowInsecure === true);
   }
 
+  async getCapabilities() {
+    // No separately grantable operations: the resource grant is the whole of this connection's
+    // access.
+    return {capabilities: [], groups: []};
+  }
+
   async getTypeScriptTypes(): Promise<string> {
     // Vendor-level types are the transport-neutral base only; the per-tool `callTool` overloads are
     // generated per resource in `McpGatekeeperImpl.getTypeScriptTypes()`.

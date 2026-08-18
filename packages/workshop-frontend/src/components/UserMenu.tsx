@@ -62,13 +62,7 @@ export default function UserMenu({
           onClick={() => navigate({ to: '/profile' })}
           className={MENU_ITEM}
         >
-          Profile
-        </DropdownMenu.Item>
-        <DropdownMenu.Item
-          onClick={() => navigate({ to: '/gatekeepers' })}
-          className={MENU_ITEM}
-        >
-          Connectors
+          Settings
         </DropdownMenu.Item>
         <DropdownMenu.Item
           onClick={() => navigate({ to: '/providers' })}

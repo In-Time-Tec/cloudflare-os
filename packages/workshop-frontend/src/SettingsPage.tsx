@@ -11,6 +11,7 @@ import { useAvatar, invalidateAvatarCache } from './useAvatar'
 import { compressAvatar, avatarBlobUrl } from './avatarUtils'
 import UsageSettings from './components/billing/UsageSettings'
 import { useDocumentTitle } from './useDocumentTitle'
+import { ConnectorsPage } from './routes/_authenticated/gatekeepers'
 
 // Shared, on-language control classes (match the rest of the app: Workspaces/Blueprints headers,
 // the gatekeepers toolbar, the command palette). Kept here so the profile page reads as part of the
@@ -86,8 +87,7 @@ function PasswordField({
   )
 }
 
-export default function SettingsPage() {
-  useDocumentTitle('Profile')
+function ProfileSettings() {
 
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
@@ -414,6 +414,59 @@ export default function SettingsPage() {
             </div>
           </section>
         )}
+      </div>
+    </div>
+  )
+}
+
+type SettingsTab = 'profile' | 'connectors'
+
+const SETTINGS_TABS: { value: SettingsTab; label: string }[] = [
+  { value: 'profile', label: 'Profile' },
+  { value: 'connectors', label: 'Connectors' },
+]
+
+/**
+ * Everything a user configures about themselves, in one place: who they are, and what the agent may
+ * reach on their behalf. Connectors used to be a separate page, which is where users went looking
+ * for their profile and vice versa.
+ */
+export default function SettingsPage() {
+  useDocumentTitle('Settings')
+  const [tab, setTab] = useState<SettingsTab>('profile')
+
+  return (
+    <div className="flex h-full w-full flex-col">
+      <header className="flex h-14 shrink-0 items-center gap-4 border-b border-kumo-line px-6">
+        <h1 className="min-w-0 truncate text-[14px] font-medium tracking-[-0.25px] text-kumo-default">
+          Settings
+        </h1>
+        <div className="flex items-center rounded-lg border border-kumo-line p-0.5">
+          {SETTINGS_TABS.map(entry => (
+            <button
+              key={entry.value}
+              type="button"
+              onClick={() => setTab(entry.value)}
+              aria-current={tab === entry.value}
+              className={`h-7 cursor-pointer rounded-md px-3 text-[13px] tracking-[-0.25px] transition-colors ${
+                tab === entry.value
+                  ? 'bg-kumo-fill text-kumo-default'
+                  : 'text-kumo-inactive hover:text-kumo-default'
+              }`}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </div>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {tab === 'profile'
+          ? <ProfileSettings />
+          : (
+            <div className="mx-auto h-full w-full max-w-4xl px-6 py-4 sm:px-10">
+              <ConnectorsPage embedded />
+            </div>
+          )}
       </div>
     </div>
   )

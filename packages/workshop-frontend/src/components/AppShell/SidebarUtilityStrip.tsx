@@ -50,7 +50,7 @@ function StripLink({
   label,
   children,
 }: {
-  to: '/gatekeepers'
+  to: '/profile'
   label: string
   children: React.ReactNode
 }) {
@@ -90,7 +90,7 @@ export default function SidebarUtilityStrip({ collapsed = false }: { collapsed?:
       {!collapsed && <div className="h-4 w-px shrink-0 bg-kumo-line" aria-hidden="true" />}
       <div className={collapsed ? 'flex flex-col items-center gap-2' : 'flex shrink-0 items-center gap-0.5'}>
         <ThemeModeButton />
-        <StripLink to="/gatekeepers" label="Connectors">
+        <StripLink to="/profile" label="Settings">
           <Plug size={15} />
         </StripLink>
       </div>

@@ -2721,6 +2721,47 @@ class OverseerImpl implements AgentHooks {
     }
   }
 
+  // Whether the account behind a gatekeeper still grants a capability. Grants live in the owner's
+  // user DO; reading them on every operation would put a cross-DO round trip in front of every read
+  // the agent makes, so they are cached briefly.
+  //
+  // The TTL is what bounds how long a withheld capability keeps working. It is deliberately short:
+  // a user who turns something off in Settings should not have to wonder whether it took. Pushing
+  // invalidation instead would mean the user DO fanning out to every workspace that ever bound the
+  // account, which is more machinery and more ways to miss one.
+  //
+  // An absent grant list means unrestricted -- a freshly connected account is usable before its
+  // owner visits settings. An empty list means everything is withheld, which is a real state.
+  static readonly #CAPABILITY_GRANT_TTL_MS = 5_000;
+  #capabilityGrants = new Map<number, {expires: number, grants: Promise<string[] | undefined>}>();
+
+  async #capabilityGranted(gatekeeperId: number, tag: string): Promise<boolean> {
+    let record = this.storage.gatekeepers.get(gatekeeperId);
+    let accountId = record?.creationSpec?.type === "gatekeeper"
+        ? record.creationSpec.accountId : undefined;
+    // No account behind it (an ambient singleton, an AI model, the agent spawner, or a record
+    // minted before grants existed): nothing to check against.
+    if (accountId === undefined) return true;
+
+    let now = Date.now();
+    let cached = this.#capabilityGrants.get(accountId);
+    if (!cached || cached.expires <= now) {
+      let grants = this.#ownerUserDo().getGrantedCapabilities(accountId).catch(err => {
+        this.logger.warn("failed to read capability grants", {
+          event: "capability.grants.read.failed", gatekeeperId, error: err,
+        });
+        this.#capabilityGrants.delete(accountId);
+        // Fail open on an infrastructure error rather than breaking a working connection: the
+        // resource grant is still enforced by OAuth scope, and the operation is still recorded.
+        return undefined;
+      });
+      cached = {expires: now + OverseerImpl.#CAPABILITY_GRANT_TTL_MS, grants};
+      this.#capabilityGrants.set(accountId, cached);
+    }
+    let tags = await cached.grants;
+    return tags === undefined || tags.includes(tag);
+  }
+
   async authorizeObservation(gatekeeperId: number, description: ObservationDescription,
                              caller: GatekeeperCaller): Promise<void> {
     if (description.prohibitAllSharing) {
@@ -2741,6 +2782,43 @@ class OverseerImpl implements AgentHooks {
     // observers-implementation-plan.md §5 Step 5.
     if (description.excludeObservers && description.excludeObservers.length > 0) {
       await this.#enforceExcludeObservers(description.excludeObservers);
+    }
+
+    // The read capability gate. The gatekeeper has already fetched the data by the time it calls
+    // this -- the contract requires that, so the description can describe what was really read --
+    // so withholding stops the data reaching the agent, the log, and the chat, not the fetch. The
+    // boundary that prevents the fetch is the resource grant, which decides the OAuth scopes.
+    if (description.observationKind &&
+        !(await this.#capabilityGranted(gatekeeperId, description.observationKind.tag))) {
+      let blockedId = this.storage.nextActionId.get();
+      this.storage.nextActionId.put(blockedId + 1);
+      let blockedOn = this.storage.gatekeepers.get(gatekeeperId);
+      this.storage.actions.put({
+        id: blockedId,
+        gatekeeperId,
+        caller,
+        resourceTitle: blockedOn?.resourceTitle,
+        resourceUrl: blockedOn?.resourceUrl,
+        createdAt: new Date(),
+        completedAt: new Date(),
+        state: "blocked",
+        type: "action",
+        description: {
+          title: description.title,
+          description: description.description,
+          actionKind: description.observationKind,
+        },
+        authorizedBy: this.#actionAuthority(caller),
+        failure: {message: `Reading "${description.observationKind.label}" is not enabled for this connection.`},
+      });
+      this.#associateAction(caller, blockedId);
+      this.logger.warn("observation blocked", {
+        event: "observation.blocked", actionId: blockedId, gatekeeperId,
+        resourceTitle: blockedOn?.resourceTitle,
+      });
+      throw new Error(
+          `Reading "${description.observationKind.label}" is not enabled for this connection. ` +
+          `The user can enable it in Settings.`);
     }
 
     let actionId = this.storage.nextActionId.get();
@@ -2986,6 +3064,11 @@ class OverseerImpl implements AgentHooks {
         block(`The "${description.actionKind.label}" action is disabled on this deployment by an ` +
               `administrator.`);
       }
+    }
+
+    if (!(await this.#capabilityGranted(gatekeeperId, description.actionKind.tag))) {
+      block(`"${description.actionKind.label}" is not enabled for this connection. The user can ` +
+            `enable it in Settings.`);
     }
 
     // Written as an unreported failure, not a success: the action has not run yet, and if this
@@ -7527,6 +7610,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       vendorId,
       resourceUrl,
       typeUrlPattern,
+      accountId,
     };
     let result = await this.impl.addGatekeeper(cls, creationSpec);
     await this.recordConnectionCreated(result, "gatekeeper", vendorId);

@@ -246,6 +246,7 @@ function messageCursor(transport: GraphTransport, recorder: RpcStub<ActionRecord
       () => Effect.map(fetchFirst(), asPage),
       cursor => Effect.map(mail.nextMessagePage(transport, cursor), asPage),
       items => ({
+        observationKind: {tag: "microsoft.mail.read", label: "Read mail"},
         title: `Read ${items.length} Outlook messages (${what})`,
         description: `Fetch a page of Outlook message summaries.\n\n` +
             detailField("Subjects", items.map(m => m.subject).join("\n")),
@@ -280,6 +281,7 @@ class MailSessionImpl extends RpcTarget implements OutlookMailSession {
   async listFolders(): Promise<MailFolderInfo[]> {
     const folders = await runGraph(mail.listFolders(this.transport));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.mail.read", label: "Read mail"},
       title: `List ${folders.length} mail folders`,
       description: detailField("Folders", folders.map(f => f.name).join("\n")),
     });
@@ -294,6 +296,7 @@ class MailSessionImpl extends RpcTarget implements OutlookMailSession {
   async getMessage(id: string): Promise<OutlookMessageDetail> {
     const detail = await runGraph(mail.getMessage(this.transport, id));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.mail.read", label: "Read mail"},
       title: `Read Outlook message: ${detail.subject || "(no subject)"}`,
       description: `Read the full content of one Outlook message.\n\n` +
           detailField("From", detail.from?.address ?? "unknown") +
@@ -328,6 +331,7 @@ class MailSessionImpl extends RpcTarget implements OutlookMailSession {
   async listAttachments(messageId: string): Promise<AttachmentInfo[]> {
     const attachments = await runGraph(mail.listAttachments(this.transport, messageId));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.mail.read", label: "Read mail"},
       title: `List ${attachments.length} attachments`,
       description: detailField("Attachments",
           attachments.map(a => `${a.name} (${a.size ?? "?"} bytes)`).join("\n")),
@@ -340,6 +344,7 @@ class MailSessionImpl extends RpcTarget implements OutlookMailSession {
     const content = await runGraph(
         mail.getAttachmentContent(this.transport, messageId, attachmentId));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.mail.read", label: "Read mail"},
       title: `Download attachment: ${content.name}`,
       description: `Download one email attachment's full content.\n\n` +
           detailField("Attachment", content.name),
@@ -497,6 +502,7 @@ class CalendarSessionImpl extends RpcTarget implements OutlookCalendarSession {
       events.push(...page.events);
     }
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.calendar.read", label: "Read calendar"},
       title: `Read ${events.length} calendar events`,
       description: `Read the agenda from ${from.toISOString()} to ${to.toISOString()}.\n\n` +
           detailField("Events", events.map(e => e.subject).join("\n")),
@@ -509,6 +515,7 @@ class CalendarSessionImpl extends RpcTarget implements OutlookCalendarSession {
     const map = await runGraph(
         calendar.getAvailability(this.transport, addresses, from, to));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.calendar.read", label: "Read calendar"},
       title: `Check availability for ${addresses.length} people`,
       description: `Read free/busy information.\n\n` +
           detailField("People", addresses.join(", ")),
@@ -643,6 +650,7 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
 
   async #authorizeListing(title: string, entries: FileEntry[]): Promise<void> {
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title,
       description: detailField("Entries", entries.map(e => e.name).join("\n")),
     });
@@ -666,6 +674,7 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
   async searchSites(query: string): Promise<SiteInfo[]> {
     const sites = await runGraph(files.searchSites(this.transport, query));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title: `Search SharePoint sites: ${query || "(all)"}`,
       description: detailField("Sites", sites.map(s => s.name).join("\n")),
     });
@@ -675,6 +684,7 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
   async listSiteDrives(siteId: string): Promise<{ id: string; name: string }[]> {
     const drives = await runGraph(files.listSiteDrives(this.transport, siteId));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title: "List SharePoint document libraries",
       description: detailField("Libraries", drives.map(d => d.name).join("\n")),
     });
@@ -700,6 +710,7 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
     const ref = fileRef(driveId);
     const entry = await runGraph(files.getItem(this.transport, ref, itemId));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title: `Read file metadata: ${entry.name}`,
       description: detailField("File", entry.name),
     });
@@ -711,6 +722,7 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
     const entry = await runGraph(files.getItem(this.transport, ref, itemId));
     const content = await runGraph(files.downloadTextContent(this.transport, ref, itemId));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title: `Read file content: ${entry.name}`,
       description: `Read a file's full text content (${content.length} characters).\n\n` +
           detailField("File", entry.name),
@@ -724,6 +736,7 @@ class FilesSessionImpl extends RpcTarget implements MicrosoftFilesSession {
     const entry = await runGraph(files.getItem(this.transport, ref, itemId));
     const bytes = await runGraph(files.downloadContent(this.transport, ref, itemId));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.files.read", label: "Read files"},
       title: `Download file: ${entry.name}`,
       description: `Download a file's full content (${bytes.byteLength} bytes).\n\n` +
           detailField("File", entry.name),
@@ -858,6 +871,7 @@ class TeamsSessionImpl extends RpcTarget implements TeamsSession {
         cursor => Effect.map(teams.nextChatPage(transport, cursor),
             page => ({ items: [...page.chats], next: page.next })),
         items => ({
+          observationKind: {tag: "microsoft.teams.read", label: "Read messages"},
           title: `List ${items.length} Teams chats`,
           description: detailField("Chats",
               items.map(c => c.topic || `(${c.chatType})`).join("\n")),
@@ -867,6 +881,7 @@ class TeamsSessionImpl extends RpcTarget implements TeamsSession {
   async listTeams(): Promise<TeamInfo[]> {
     const joined = await runGraph(teams.listJoinedTeams(this.transport));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.teams.read", label: "Read messages"},
       title: `List ${joined.length} teams`,
       description: detailField("Teams", joined.map(t => t.name).join("\n")),
     });
@@ -876,6 +891,7 @@ class TeamsSessionImpl extends RpcTarget implements TeamsSession {
   async listChannels(teamId: string): Promise<ChannelInfo[]> {
     const channels = await runGraph(teams.listChannels(this.transport, teamId));
     await this.recorder.authorizeObservation({
+      observationKind: {tag: "microsoft.teams.read", label: "Read messages"},
       title: `List ${channels.length} channels`,
       description: detailField("Channels", channels.map(c => c.name).join("\n")),
     });
@@ -890,6 +906,7 @@ class TeamsSessionImpl extends RpcTarget implements TeamsSession {
         cursor => Effect.map(teams.nextTeamsMessagePage(transport, cursor),
             page => ({ items: [...page.messages], next: page.next })),
         items => ({
+          observationKind: {tag: "microsoft.teams.read", label: "Read messages"},
           title: `Read ${items.length} Teams messages (${what})`,
           description: detailField("From", items.map(m => m.from).join(", ")),
         }));

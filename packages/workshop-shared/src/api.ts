@@ -563,6 +563,23 @@ export interface AuthenticatedApi extends RpcTarget {
   ensureAccountResources(accountId: number, resourceUrlPatterns: string[]): Promise<{url?: string}>;
 
   /**
+   * The capabilities a connected account offers, grouped, with the user's current grants folded in.
+   * This is the settings UI's whole model: what the account could do, and what it may do.
+   */
+  listAccountCapabilities(accountId: number): Promise<AccountCapabilityGroup[]>;
+
+  /**
+   * Grant or withhold capabilities on a connected account. Pass every tag being changed; tags are
+   * matched against the account's catalog and unknown ones are rejected, so a stale UI cannot grant
+   * a capability the gatekeeper no longer offers.
+   *
+   * Granting takes effect in every chat, including ones already open. Withholding takes effect on
+   * the next operation: a write is refused before it happens, while a read is refused after the
+   * gatekeeper fetched it, so the data stops at the Workshop rather than never being read.
+   */
+  setAccountCapabilities(accountId: number, tags: string[], granted: boolean): Promise<void>;
+
+  /**
    * List the auto-provisioning ("ambient") gatekeepers the user can opt into right now: those set to
    * 'optional' by the admin that the user hasn't added yet. Rendered as an "Available" section on the
    * Connectors page. ('enabled' ones are already provisioned; 'disabled' ones aren't offered.) Returns
@@ -785,6 +802,41 @@ export type BannerConfig = {
 export function isHexColor(value: unknown): value is string {
   return typeof value === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
 }
+
+/**
+ * One capability offered by a connected account, joined with whether the user has granted it. This
+ * is what the settings UI renders: the vocabulary comes from the gatekeeper, the `granted` flag
+ * from the user's own grants.
+ */
+export type AccountCapability = {
+  tag: string;
+  label: string;
+  summary: string;
+  mode: 'read' | 'write';
+  group: string;
+  granted: boolean;
+
+  /**
+   * True when the capability's group needs a resource grant the account does not hold yet, so the
+   * UI can ask for the OAuth scopes before offering the switch.
+   */
+  needsResourceGrant: boolean;
+};
+
+/** A group of capabilities on a connected account, with the user's grants folded in. */
+export type AccountCapabilityGroup = {
+  id: string;
+  label: string;
+  summary: string;
+
+  /** The resource whose OAuth scopes this group needs, when the vendor declares grantable ones. */
+  resourceUrlPattern?: string;
+
+  /** Whether the account currently holds that resource grant. */
+  resourceGranted: boolean;
+
+  capabilities: AccountCapability[];
+};
 
 /** A single gatekeeper resource type in the admin resource-config UI. */
 export type AdminResource = {
@@ -2953,6 +3005,13 @@ export type GatekeeperCreationSpec = {
   vendorId: string;        // identifies the gatekeeper adapter (e.g. "google")
   resourceUrl: string;
   typeUrlPattern: string;  // URL pattern from the vendor's SupportedResource (not the specific URL)
+
+  /**
+   * The connected account this capability was minted from. The Workshop reads that account's
+   * capability grants to decide whether an operation may proceed, so a record without it predates
+   * per-capability grants and is treated as unrestricted.
+   */
+  accountId?: number;
 } | {
   type: "aiModel";
   modelId: string;         // the user's configured model ID

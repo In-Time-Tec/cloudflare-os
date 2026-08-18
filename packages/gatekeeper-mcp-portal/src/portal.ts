@@ -204,6 +204,12 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
     return config ? [portalResource(config)] : [];
   }
 
+  async getCapabilities() {
+    // No separately grantable operations: the resource grant is the whole of this connection's
+    // access.
+    return {capabilities: [], groups: []};
+  }
+
   async getTypeScriptTypes(): Promise<string> {
     // Vendor-level types are the transport-neutral base only. The per-tool `callTool` overloads are
     // generated per resource, from the chosen upstream server's own catalog; see

@@ -642,6 +642,17 @@ export interface GatekeeperVendor extends WorkerEntrypoint {
                  options?: GatekeeperConnectOptions): Promise<{url: string}>;
 
   /**
+   * Every capability this vendor's resources offer, reads and writes alike, and the groups they
+   * fall into. Declared on the vendor rather than a live resource because it is static metadata:
+   * the settings UI lists what a user could grant before any resource capability is minted, and
+   * asking a Durable Object would mean instantiating one per resource just to render a form.
+   *
+   * A gatekeeper must not perform an operation whose capability is absent here or ungranted.
+   * Vendors with nothing separately grantable return empty lists.
+   */
+  getCapabilities(): Promise<{capabilities: Capability[], groups: CapabilityGroup[]}>;
+
+  /**
    * Get the list of resource types this vendor supports. Each entry describes a category of
    * resource the vendor can provide access to, along with a URL pattern for matching.
    *
@@ -887,6 +898,7 @@ export interface Gatekeeper<Session> extends DurableObject {
    * no side-effecting operations return [].
    */
   getActionCatalog(): Promise<ActionCapability[]>;
+
 
   /**
    * Get the capability representing this resource's RPC interface which will be provided to the
@@ -1153,6 +1165,14 @@ export type ObservationDescription = {
   title: string;
 
   /**
+   * The read capability this observation exercises, naming a `Capability` with `mode: "read"` from
+   * `GatekeeperVendor.getCapabilities()`. Withholding it makes `authorizeObservation()` throw, so
+   * the data never reaches the agent. Absent means the read is not separately grantable and is
+   * covered by the resource grant alone.
+   */
+  observationKind?: ActionKind;
+
+  /**
    * A complete description of the action to be taken, in Markdown-formatted natural language.
    * This will be displayed to the approver. It must include all details that might be relevant to
    * consider before approving.
@@ -1266,6 +1286,69 @@ export type ActionRisk = {
 
   /** True when the action can carry free-form content, and so can leak data. */
   freeform: boolean;
+};
+
+/**
+ * One capability a user can grant or withhold: a single operation the gatekeeper can perform on the
+ * granted resource, whether that operation reads or writes.
+ *
+ * A read capability is enforced differently from a write, and the difference is worth stating
+ * plainly because the UI promises it to users. A write is refused before it happens:
+ * `authorizeAction()` throws and nothing reaches the service. A read is refused after the
+ * gatekeeper has already fetched the data -- the contract requires that, so the observation can
+ * describe what was actually read -- so withholding a read capability stops the data reaching the
+ * agent, the activity log, and the chat, but does not stop the fetch. The coarse boundary that
+ * genuinely prevents a fetch is the resource grant itself, which decides which OAuth scopes the
+ * account holds.
+ */
+export type Capability = {
+  /** Stable tag policy is keyed on, e.g. "microsoft.teams.message.read". */
+  tag: string;
+
+  /** Display label, e.g. "Read messages". */
+  label: string;
+
+  /** One user-facing line describing what granting this allows. */
+  summary: string;
+
+  /**
+   * Whether this capability reads data out of the service or acts on it. See the note above on how
+   * each is enforced.
+   */
+  mode: "read" | "write";
+
+  /**
+   * The group this capability belongs to, so the UI can offer "all of Teams" as one switch. Groups
+   * are declared by `getCapabilityGroups()`; a tag naming an undeclared group is treated as
+   * ungrouped.
+   */
+  group: string;
+
+  /** Present for a write capability: the risk profile shown alongside it at grant time. */
+  risk?: ActionRisk;
+};
+
+/**
+ * A named set of capabilities the user can grant in one motion, e.g. "Teams" or "Mail". Groups are
+ * how a user says "all of Teams" without reading nine checkboxes, while still being able to open
+ * the group and withhold one operation inside it.
+ */
+export type CapabilityGroup = {
+  /** Stable id capabilities reference via `Capability.group`. */
+  id: string;
+
+  /** Display label, e.g. "Teams". */
+  label: string;
+
+  /** One user-facing line describing the area of the service this covers. */
+  summary: string;
+
+  /**
+   * The `urlPattern` of the `SupportedResource` this group belongs to, when the gatekeeper offers
+   * grantable resources. Granting any capability in the group requires that resource's OAuth
+   * scopes, so the UI asks for the resource grant first.
+   */
+  resourceUrlPattern?: string;
 };
 
 /**

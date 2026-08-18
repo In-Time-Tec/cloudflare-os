@@ -22,6 +22,7 @@ import {
   GatekeeperUser as GatekeeperUserIface, GatekeeperUserVerifier, VendorDescription,
   GatekeeperConnectCallback, GatekeeperConnectOptions, AccountDescription,
   SupportedResource, ResourceConfiguratorFrame, stripTrailingSlashes,
+  Capability, CapabilityGroup,
 } from "@gadgets/workshop-shared/gatekeeper";
 import {
   getOAuthConfig, buildAuthorizeUrl, generatePkce, exchangeCode, refreshTokens, validateIdToken,
@@ -31,6 +32,7 @@ import {
   MAILBOX_RESOURCE, CALENDAR_RESOURCE, FILES_RESOURCE, TEAMS_RESOURCE, SUPPORTED_RESOURCES,
   scopesForResources, resourceForUrl,
 } from "./resources.js";
+import { CAPABILITIES, CAPABILITY_GROUPS } from "./capabilities.js";
 import { VENDOR_ID } from "./vendor.js";
 import { obsContext } from "./observability.js";
 import TYPES_CODE from "./types.txt";
@@ -287,6 +289,10 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
 
   async getSupportedResources(): Promise<SupportedResource[]> {
     return SUPPORTED_RESOURCES;
+  }
+
+  async getCapabilities(): Promise<{capabilities: Capability[], groups: CapabilityGroup[]}> {
+    return {capabilities: CAPABILITIES, groups: CAPABILITY_GROUPS};
   }
 
   async getTypeScriptTypes(): Promise<string> {

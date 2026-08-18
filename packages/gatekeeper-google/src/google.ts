@@ -475,6 +475,12 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
     return SUPPORTED_RESOURCES;
   }
 
+  async getCapabilities() {
+    // No separately grantable operations: the resource grant is the whole of this connection's
+    // access.
+    return {capabilities: [], groups: []};
+  }
+
   async getTypeScriptTypes(): Promise<string> {
     return [
       TYPES_CODE, DOCS_TYPES_CODE, SHEETS_TYPES_CODE, CALENDAR_TYPES_CODE, BIGQUERY_TYPES_CODE,
