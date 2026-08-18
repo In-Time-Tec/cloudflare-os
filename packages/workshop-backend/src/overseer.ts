@@ -4680,10 +4680,20 @@ class OverseerImpl implements AgentHooks {
         Object.assign(seed, this.defaultBindingList());
       }
 
-      // Fold the ambient resources into the seed, each named by its gatekeeper's suggested
-      // binding name (deduped); skip any whose target already has a name in the seed.
+      // Fold in every gatekeeper the workspace holds, not just the ambient singletons. A resource
+      // the user connected is reachable the moment they grant it: it is theirs, they granted it
+      // deliberately, and there is no longer any in-chat affordance for attaching one afterwards.
+      // A gatekeeper bound into a gadget is already named by the loop above, so this only adds the
+      // ones no gadget references.
+      let connectedIds = [...this.storage.gatekeepers.list()]
+          .filter(gk => gk.creationSpec?.type !== "ambient")
+          .map(gk => gk.id)
+          .toSorted((a, b) => a - b);
+
+      // Ambient first so a singleton keeps its suggested name when a connected resource wants the
+      // same one.
       let seededTargets = new Set(Object.values(seed));
-      for (let id of ambientIds) {
+      for (let id of [...ambientIds, ...connectedIds]) {
         if (seededTargets.has(id)) continue;
         let gk = this.storage.gatekeepers.get(id);
         if (!gk) continue;  // disconnected since the freeze -- inert, no name needed
@@ -4702,6 +4712,28 @@ class OverseerImpl implements AgentHooks {
       dirty = true;
     }
     let seedMap = context.bindings;
+
+    // Top up an already-seeded chat with gatekeepers connected since it was seeded. The seed is
+    // frozen so replay stays deterministic, but a resource the user granted mid-conversation is
+    // exactly the case they expect to work without starting a new chat -- and with no in-chat
+    // way to attach one, a frozen seed would strand it until they did. Names already in the map
+    // are never reassigned, so nothing the log refers to can change target.
+    {
+      let boundTargets = new Set(Object.values(seedMap));
+      for (let gk of [...this.storage.gatekeepers.list()].toSorted((a, b) => a.id - b.id)) {
+        if (boundTargets.has(gk.id)) continue;
+        let suggested: string | undefined;
+        try {
+          suggested = (await this.getGatekeeperFacet(gk.id).describe()).suggestedBindingName;
+        } catch (err) {
+          this.logger.warn("failed to fetch suggested binding name for connected resource", {
+            event: "chat.binding.connected.describe.failed", gatekeeperId: gk.id, error: err,
+          });
+        }
+        seedMap[fallbackBindingName(suggested || "RESOURCE", name => name in seedMap)] = gk.id;
+        dirty = true;
+      }
+    }
 
     // --- The naming chokepoint: stamp binding names onto persisted messages that lack them. ---
     // First collect every name already in the chat's scope (and a target -> name map for reuse)

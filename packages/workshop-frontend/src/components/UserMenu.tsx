@@ -65,6 +65,12 @@ export default function UserMenu({
           Profile
         </DropdownMenu.Item>
         <DropdownMenu.Item
+          onClick={() => navigate({ to: '/gatekeepers' })}
+          className={MENU_ITEM}
+        >
+          Connectors
+        </DropdownMenu.Item>
+        <DropdownMenu.Item
           onClick={() => navigate({ to: '/providers' })}
           className={MENU_ITEM}
         >
