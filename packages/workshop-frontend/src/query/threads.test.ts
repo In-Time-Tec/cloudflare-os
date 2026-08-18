@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
 import { pinThreadOptions, renameThreadOptions } from './threads'
 import type { WorkshopSession } from '../session'
-import type { ThreadMetadataWithTimestamps } from '@threads/workshop-shared/api'
+import type { ThreadMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
 
 function thread(partial: Partial<ThreadMetadataWithTimestamps> & { id: string }): ThreadMetadataWithTimestamps {
   return {

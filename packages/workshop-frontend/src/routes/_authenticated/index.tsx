@@ -102,14 +102,14 @@ export function HomePageContent({ prompt }: HomeSearch) {
         ensureProvisionalGadget();
         const overseer = provisionalOverseerRef.current!.stub;
         // Pipeline both independent calls in one batch, but settle both before releasing the stub.
-        const [chat, {id}] = await Promise.all([
+        const [, {id}] = await Promise.all([
           overseer.newChat(message, modelId, capsules, attachments, formats),
           overseer.getMetadata(),
         ]);
         provisionalOverseerRef.current?.stub[Symbol.dispose]();
         provisionalOverseerRef.current = null;
-        // Open the conversation we just started.
-        navigate({ to: "/thread/$id", params: { id }, search: { chat } });
+        // Open the thread we just started (the thread IS the conversation).
+        navigate({ to: "/thread/$id", params: { id } });
       } catch (err) {
         const transient = logRpcFailure("Failed to create gadget:", err,
             { reportSite: "thread.create" });

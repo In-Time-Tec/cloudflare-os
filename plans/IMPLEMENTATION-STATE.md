@@ -12,7 +12,9 @@ DONE:
   resource names, keep until deploy step decides).
 - Sidebar label "Recent threads" -> "Threads". Build+lint+all tests green after each commit.
 
-PHASE 1c IN PROGRESS: gadget->artifact. CRITICAL meaning split:
+PHASE 1 COMPLETE (commits 7751536, 1e6a72f, 3a201d1). PHASE 2 IN PROGRESS: single conversation per thread.
+
+Old phase-1c notes: gadget->artifact. CRITICAL meaning split:
 - THREAD-meaning (legacy workspace==gadget): AuthenticatedApi.newGadget->newThread,
   openGadget->openThread, listGadgets->listThreads, GadgetMetadata(WithTimestamps)->ThreadMetadata,
   OPEN_GADGET_ERROR_CODES->OPEN_THREAD_*, createOpenGadgetError, dismissSharedGadget->dismissSharedThread,
@@ -36,3 +38,12 @@ needs CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN env; deployment/workers-dev.j
 Effect TS v4 (catalog: effect 4.0.0-rc.109, used by gatekeeper-microsoft/microsoft-graph) for NEW code:
 orb module, thread-graph services.
 GOAL a1a22e27 active. pnpm install done in worktree. Tests: `pnpm test` at root (concurrency 2).
+
+PHASE 2 PLAN (single conversation):
+- ThreadEditor.tsx + ChatInterface.tsx: remove chat-list mode; selectedChatId always 0 (or the
+  thread's only chat). Drop ?chat search param from thread.$id.tsx route.
+- workshop-shared api.ts: remove listChats/newChat/deleteChat from client surface, add
+  getConversation() boot; keep AiChatMetadata internally.
+- overseer.ts: newChat gates - thread's conversation is chat 0 created on first message.
+- Home (index.tsx): unchanged flow (newThread + first message) but title auto-gen from first msg.
+- Breaking: no migration of old multi-chat data.

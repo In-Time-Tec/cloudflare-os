@@ -69,7 +69,7 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
       setBindings(bindingList)
       // This tab shows one gadget, so drop hooks that wake a different one -- otherwise its
       // toggle/delete controls would operate on another gadget's hooks.
-      setHooks(hookList.filter((hook) => hook.gadgetId === id))
+      setHooks(hookList.filter((hook) => hook.artifactId === id))
       onHasGatekeepersChange?.(bindingList.length > 0)
     } catch (err) {
       // Loud on purpose: this panel has no retry path, so a quieted transient failure would

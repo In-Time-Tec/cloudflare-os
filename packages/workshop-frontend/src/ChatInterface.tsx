@@ -12,7 +12,6 @@ import {
   type ReactNode,
   type SetStateAction,
   type DragEvent as ReactDragEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { reportIssue } from './errorReporting'
 import ModelProviderMark from "./components/ModelProviderMark";
@@ -25,13 +24,10 @@ import {
 
 import {
   CaretDown,
-  CaretLeft,
   CaretRight,
   Check,
   X,
   Pencil,
-  Trash,
-  DotsThreeVertical,
   LinkSimple,
   Plug,
   Plus,
@@ -110,10 +106,9 @@ import ComposerFormatMenuItems from "./components/format/ComposerFormatMenuItems
 import { HookToggle } from "./components/HookToggle";
 import { handlePickerKeyDown } from "./pickerNavigation";
 import { normalizeResourceUrl } from "./resourceMatching";
-import DeleteConfirmationDialog from "./components/DeleteConfirmationDialog";
 import AutoApproveConfirmDialog from "./components/AutoApproveConfirmDialog";
 import { AlwaysApproveButton, ResolveButton } from "./components/ResolveButton";
-import { WorkshopButton, WorkshopIconButton, WorkshopInput } from "./components/WorkshopControls";
+import { WorkshopButton, WorkshopIconButton } from "./components/WorkshopControls";
 import { useActionEntries } from "./useActions";
 import { useAlwaysApproveTag } from "./useAlwaysApproveTag";
 import { useResolveAction } from "./useResolveAction";
@@ -138,8 +133,8 @@ export interface StreamingProposedChanges {
   count: number;
 }
 
-type CreatedGadgetCardInfo = {
-  gadgetId: WorkpieceId;
+type CreatedArtifactCardInfo = {
+  artifactId: WorkpieceId;
   title: string;
   isPending: boolean;
 
@@ -152,7 +147,7 @@ function CreatedGadgetChatCard({
   gadget,
   onOpen,
 }: {
-  gadget: CreatedGadgetCardInfo;
+  gadget: CreatedArtifactCardInfo;
   onOpen: () => void;
 }) {
   return (
@@ -216,14 +211,6 @@ type DraftUpdateEntry = {
 type DraftChatState = {
   entries: DraftUpdateEntry[];
   latestAuthor: AiChatAuthorInfo | null;
-};
-
-type ChatListScope = "direct" | "agents" | "all";
-
-const CHAT_LIST_SCOPE_LABELS: Record<ChatListScope, string> = {
-  all: "All",
-  direct: "Started by people",
-  agents: "Started by agents",
 };
 
 const SHOW_THINKING_TRACES_KEY = "showThinkingTraces";
@@ -630,7 +617,7 @@ function createCapsuleRemarkPlugin(mentionsByToken: Map<string, Mention>) {
 // Names the binding edge a gadget-binding tool call touched, as `GADGET.BINDING` when the record
 // says which gadget owns it. (Records written before named chat bindings carry only the binding
 // name, and a still-streaming call may not have either yet.)
-function formatGadgetBindingTarget(
+function formatArtifactBindingTarget(
   gadget: string | undefined,
   name: string | undefined,
 ): string | undefined {
@@ -646,11 +633,11 @@ type ToolOutputResolver = (tc: AiToolCall) => TemplateOutput | undefined;
 
 export function resolveToolCallOutput(
   tc: AiToolCall,
-  outputOfWorkpiece: (gadgetId: WorkpieceId) => TemplateOutput | undefined,
+  outputOfWorkpiece: (artifactId: WorkpieceId) => TemplateOutput | undefined,
 ): TemplateOutput | undefined {
   if (tc.toolName !== "createArtifact") return undefined;
-  const gadgetId = (tc.output as { gadgetId?: unknown } | undefined)?.gadgetId;
-  return typeof gadgetId === "number" ? outputOfWorkpiece(gadgetId) : undefined;
+  const artifactId = (tc.output as { artifactId?: unknown } | undefined)?.artifactId;
+  return typeof artifactId === "number" ? outputOfWorkpiece(artifactId) : undefined;
 }
 
 function getToolCallSummary(
@@ -676,7 +663,7 @@ function getToolCallSummary(
     case "setArtifactBinding":
       return {
         verb: "Wired up",
-        target: formatGadgetBindingTarget(tc.input.gadget, tc.input.name ?? tc.input.source),
+        target: formatArtifactBindingTarget(tc.input.artifact, tc.input.name ?? tc.input.source),
       };
     // Obsolete predecessor of `setArtifactBinding`; appears only in old chat logs.
     case "saveCapsuleAsBinding":
@@ -684,7 +671,7 @@ function getToolCallSummary(
     case "createArtifact": {
 
       const output = outputOf?.(tc);
-      return { verb: `Created ${output?.noun ?? "gadget"}`, target: tc.input.title };
+      return { verb: `Created ${output?.noun ?? "artifact"}`, target: tc.input.title };
     }
     case "executeCode": {
       // Prefer the first non-empty line as a preview. `code` may be absent while the tool call's
@@ -789,7 +776,7 @@ function describeToolCallCount(toolName: AiToolCall["toolName"], count: number):
     case "saveCapsuleAsBinding":
       return `Saved ${pluralize(count, "resource")}`;
     case "createArtifact":
-      return `Created ${pluralize(count, "gadget")}`;
+      return `Created ${pluralize(count, "artifact")}`;
     case "observeUserChanges":
       return `Observed ${pluralize(count, "change set")}`;
     case "giveUp":
@@ -911,7 +898,7 @@ function describeProvisionalToolCount(toolName: AiToolCall["toolName"], count: n
     case "setBindingHook": return `Connecting ${pluralize(count, "binding")}`;
     case "setArtifactBinding": return `Wiring up ${pluralize(count, "binding")}`;
     case "saveCapsuleAsBinding": return `Saving ${pluralize(count, "resource")}`;
-    case "createArtifact": return `Creating ${pluralize(count, "gadget")}`;
+    case "createArtifact": return `Creating ${pluralize(count, "artifact")}`;
     case "observeUserChanges": return `Observing ${pluralize(count, "change set")}`;
     case "giveUp": return "Stopping";
     case "listTemplates": return "Listing templates";
@@ -4328,74 +4315,17 @@ interface ChatInterfaceProps {
   // Called after an auto-approval rule is enabled from the chat thread, so the Activity pane's
   // Auto-approval list reflects it without a reload.
   onAutoApproveChange?: () => void;
-  sidebarMode?: boolean;
-  sidebarWidth?: number;
-  onSidebarResize?: (width: number) => void;
-  renderExtraTab?: () => React.ReactNode;
   onHasAnyCodeChange?: (hasAnyCode: boolean) => void;
   onSelectedChatHasProposedChangesChange?: (hasProposedChanges: boolean) => void;
   constrainChatWidth?: boolean;
-  onOpenGadget: (gadgetId: WorkpieceId) => void;
+  onOpenGadget: (artifactId: WorkpieceId) => void;
 
   // The output format a workpiece was built as, so a created-app card can name and draw it as the
   // Document (or whatever) it is rather than a generic app.
-  outputOfWorkpiece: (gadgetId: WorkpieceId) => TemplateOutput | undefined;
+  outputOfWorkpiece: (artifactId: WorkpieceId) => TemplateOutput | undefined;
   initialChats?: AiChatMetadata[];
   initialModels?: AiChatAuthorInfo[];
   initialHistory?: { chatId: number; page: AiChatHistoryPage };
-}
-
-// Bucket a chat's lastActive into a time grouping for the chat list.
-type ChatTimeBucket = "today" | "yesterday" | "thisWeek" | "earlier";
-
-const CHAT_TIME_BUCKET_LABELS: Record<ChatTimeBucket, string> = {
-  today: "Today",
-  yesterday: "Yesterday",
-  thisWeek: "Earlier this week",
-  earlier: "Earlier",
-};
-const CHAT_TIME_BUCKET_ORDER: ChatTimeBucket[] = [
-  "today",
-  "yesterday",
-  "thisWeek",
-  "earlier",
-];
-
-function startOfDay(d: Date): Date {
-  const out = new Date(d);
-  out.setHours(0, 0, 0, 0);
-  return out;
-}
-
-function getChatTimeBucket(date: Date, now: Date): ChatTimeBucket {
-  const diffDays = Math.round(
-    (startOfDay(now).getTime() - startOfDay(date).getTime()) / 86_400_000,
-  );
-  if (diffDays <= 0) return "today";
-  if (diffDays === 1) return "yesterday";
-  if (diffDays < 7) return "thisWeek";
-  return "earlier";
-}
-
-// Format a chat's lastActive for display in a row, given its bucket. Buckets
-// own the "date" half of the label (via the section header), so rows only show
-// what the header doesn't.
-function formatChatRowTime(date: Date, bucket: ChatTimeBucket, now: Date): string {
-  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (bucket === "today" || bucket === "yesterday") {
-    return time;
-  }
-  if (bucket === "thisWeek") {
-    const day = date.toLocaleDateString([], { weekday: "short" });
-    return `${day} ${time}`;
-  }
-  const sameYear = date.getFullYear() === now.getFullYear();
-  return date.toLocaleDateString(
-    [],
-    sameYear
-      ? { month: "short", day: "numeric" }
-      : { month: "short", day: "numeric", year: "numeric" },
-  );
 }
 
 /** A compaction checkpoint reported with a history page. */
@@ -4516,10 +4446,6 @@ function ChatInterface({
   onChatCountChange,
   onAgentActiveChange,
   onAutoApproveChange,
-  sidebarMode,
-  sidebarWidth = 280,
-  onSidebarResize,
-  renderExtraTab,
   onHasAnyCodeChange,
   onSelectedChatHasProposedChangesChange,
   constrainChatWidth,
@@ -4548,7 +4474,6 @@ function ChatInterface({
   // we've already auto-opened for, so dismissing it doesn't immediately reopen.
   const [usageModalOpen, setUsageModalOpen] = useState(false);
   const usageModalShownForRef = useRef<number | null>(null);
-  const [chatListScope, setChatListScope] = useState<ChatListScope>("all");
   const [chatListVersion, setChatListVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   // Fetching the page before the selected chat's compaction boundary.
@@ -4556,16 +4481,6 @@ function ChatInterface({
   const [updateCounter, setUpdateCounter] = useState(0); // Force re-render when cache updates
   const [proposedChangesVersion, setProposedChangesVersion] = useState(0); // Incremented only for change-affecting messages
   const [draftChangesVersion, setDraftChangesVersion] = useState(0);
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [titleInput, setTitleInput] = useState("");
-  const [renamingChatId, setRenamingChatId] = useState<number | null>(null);
-  const renamingChatIdRef = useRef<number | null>(null);
-  const [renamingInput, setRenamingInput] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<{
-    id: number;
-    title: string;
-  } | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [discardChangesTarget, setDiscardChangesTarget] = useState<{
     chatId: number;
   } | null>(null);
@@ -4608,45 +4523,6 @@ function ChatInterface({
   );
   const [selectedModel, setSelectedModel] = useState<string | null>(() =>
     initialModels ? getStoredSelectedModel(initialModels) : null,
-  );
-  const [sidebarActiveTab, setSidebarActiveTab] = useState<
-    "chat" | "connections"
-  >("chat");
-  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
-
-  // Sidebar resize handling.
-  //
-  // We use Pointer Events with setPointerCapture rather than global mousemove/
-  // mouseup listeners. The gadget runs in an iframe; if the user drags the
-  // resize handle and the cursor crosses into the iframe, the iframe captures
-  // mouse events and the parent window never receives mouseup. The drag would
-  // then "stick" to the cursor even after release. Pointer capture routes all
-  // pointermove/pointerup events to the handle until release, regardless of
-  // what's under the cursor — including iframes.
-  const handleSidebarPointerDown = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      setIsSidebarResizing(true);
-    },
-    [],
-  );
-  const handleSidebarPointerMove = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-      const newWidth = Math.max(200, Math.min(500, e.clientX));
-      onSidebarResize?.(newWidth);
-    },
-    [onSidebarResize],
-  );
-  const handleSidebarPointerUp = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      }
-      setIsSidebarResizing(false);
-    },
-    [],
   );
 
   const indexActionMessage = (msg: AiChatMessage) => {
@@ -4714,17 +4590,6 @@ function ChatInterface({
     })();
   };
 
-  // Apply page-level cursor + user-select only while a resize is in progress.
-  useEffect(() => {
-    if (!isSidebarResizing) return;
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "col-resize";
-    return () => {
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-    };
-  }, [isSidebarResizing]);
-
   // Refs for accessing current values in subscriber callbacks
   const selectedChatIdRef = useRef<number | null>(null);
   const onNavigateToChatRef = useRef(onNavigateToChat);
@@ -4767,47 +4632,6 @@ function ChatInterface({
     ),
     [chatListVersion],
   );
-  const {
-    visibleChatList,
-    chatListNow,
-    bucketedVisibleChats,
-    chatListScopes,
-  } = useMemo(() => {
-    const directCount = chatList.filter((chat) => !chat.spawnerName).length;
-    const agentCount = chatList.length - directCount;
-    const visible = chatList.filter((chat) => {
-      if (chatListScope === "direct") return !chat.spawnerName;
-      if (chatListScope === "agents") return Boolean(chat.spawnerName);
-      return true;
-    });
-    const now = new Date();
-    const buckets = new Map<ChatTimeBucket, AiChatMetadata[]>();
-    for (const chat of visible) {
-      const bucket = getChatTimeBucket(chat.lastActive, now);
-      let arr = buckets.get(bucket);
-      if (!arr) {
-        arr = [];
-        buckets.set(bucket, arr);
-      }
-      arr.push(chat);
-    }
-
-    return {
-      visibleChatList: visible,
-      chatListNow: now,
-      bucketedVisibleChats: CHAT_TIME_BUCKET_ORDER.flatMap((bucket) => {
-        const items = buckets.get(bucket);
-        if (!items || items.length === 0) return [];
-        return [{ bucket, items }];
-      }),
-      chatListScopes: [
-        { value: "all" as const, count: chatList.length },
-        { value: "direct" as const, count: directCount },
-        { value: "agents" as const, count: agentCount },
-      ],
-    };
-  }, [chatList, chatListScope]);
-
   // Notify parent when chat list changes. Gated on chatListReady so that we
   // don't report 0 from the empty initial cache before listChats() has completed.
   const onChatCountChangeRef = useRef(onChatCountChange);
@@ -4828,18 +4652,6 @@ function ChatInterface({
       onHasAnyCodeChangeRef.current?.(anyHasProposedChanges);
     }
   }, [anyHasProposedChanges, chatListReady]);
-
-  // In sidebar mode, auto-select the most recent chat when none is selected.
-  useEffect(() => {
-    if (
-      sidebarMode &&
-      selectedChatId === null &&
-      chatListReady &&
-      chatList.length > 0
-    ) {
-      onNavigateToChatRef.current(chatList[0].id, { replace: true });
-    }
-  }, [sidebarMode, selectedChatId, chatListReady, chatList]);
 
   // Get messages for selected chat (filter out any undefined slots in sparse array)
   // Memoized to prevent creating new array on every render
@@ -4984,7 +4796,7 @@ function ChatInterface({
   const currentDraftChangesCount = currentDraftState?.entries.length ?? 0;
 
   const provisionalToolCalls = currentProvisionalState?.toolCalls ?? [];
-  const useConstrainedChatWidth = sidebarMode || constrainChatWidth;
+  const useConstrainedChatWidth = constrainChatWidth;
 
   const currentStreamingChanges = currentProvisionalState?.codeUpdates;
   const currentStreamingChangesCount = currentStreamingChanges?.length ?? 0;
@@ -5090,13 +4902,6 @@ function ChatInterface({
   useEffect(() => {
     setDiscardChangesTarget(null);
   }, [selectedChatId]);
-
-  // Initialize title input when selecting a chat
-  useEffect(() => {
-    if (currentChatMetadata) {
-      setTitleInput(currentChatMetadata.title);
-    }
-  }, [currentChatMetadata?.title]);
 
   // Update selected model when switching chats
   useEffect(() => {
@@ -5536,8 +5341,6 @@ function ChatInterface({
     setExpandedActions(new Set());
     setExpandedErrors(new Set());
     setIsLoadingEarlier(false);
-    setIsEditingTitle(false);
-    setSidebarActiveTab("chat");
   }, [selectedChatId]);
 
 
@@ -5661,29 +5464,6 @@ function ChatInterface({
     }
   };
 
-  // Handle creating a new chat from the sidebar (always creates, never sends to existing)
-  const handleNewChatSend = async (
-    messageText?: string | SlashCommandRequest,
-    modelId?: string | null,
-    capsules?: CapsuleSpecifier[],
-    attachments?: ChatAttachmentHandle[],
-    formats?: MessageFormatRef[],
-  ) => {
-    const message = typeof messageText === "string" ? messageText.trim() : messageText ?? "";
-    if (!message && (!attachments || attachments.length === 0)) return;
-    const model = modelId !== undefined ? modelId : selectedModel;
-    try {
-      const newChatId = await overseer.newChat(
-          message, model, capsules, attachments, formats);
-      onNavigateToChatRef.current(newChatId);
-    } catch (err) {
-      if (!logRpcFailure("Failed to create new chat:", err, { reportSite: "chat.new" })) {
-        toasts.add({ title: "Failed to start conversation", variant: "error" });
-      }
-      throw err;
-    }
-  };
-
   // Handle model change
   const handleModelChange = (modelId: string | null) => {
     setSelectedModel(modelId);
@@ -5699,102 +5479,6 @@ function ChatInterface({
     } catch (err) {
       console.error("Failed to stop agent:", err);
       toasts.add({ title: "Failed to stop agent", variant: "error" });
-    }
-  };
-
-  // Handle saving chat title
-  const handleSaveChatTitle = async () => {
-    if (selectedChatId === null || !titleInput.trim()) {
-      return;
-    }
-
-    try {
-      await overseer.setChatTitle(selectedChatId, titleInput.trim());
-
-      // Update the cache with the new title
-      const chat = cacheRef.current.chats.get(selectedChatId);
-      if (chat) {
-        cacheRef.current.chats.set(selectedChatId, {
-          ...chat,
-          title: titleInput.trim(),
-        });
-        forceUpdate();
-      }
-
-      setIsEditingTitle(false);
-      toasts.add({ title: "Chat title updated successfully", variant: "success" });
-    } catch (err) {
-      console.error("Failed to update chat title:", err);
-      toasts.add({ title: "Failed to update chat title", variant: "error" });
-    }
-  };
-
-  // Handle canceling title edit
-  const handleCancelTitleEdit = () => {
-    setTitleInput(currentChatMetadata?.title || "");
-    setIsEditingTitle(false);
-  };
-
-  // Handle deleting a chat. Can be called from the chat header (no args) or the
-  // chat list (with explicit chatId/title).
-  const handleDeleteChat = (chatId?: number, chatTitle?: string) => {
-    const id = chatId ?? selectedChatId;
-    const title = chatTitle ?? currentChatMetadata?.title ?? "this chat";
-    if (id === null || id === undefined) return;
-    setDeleteTarget({ id, title });
-  };
-
-  const handleDeleteConfirm = async () => {
-    if (!deleteTarget) return;
-    setIsDeleting(true);
-    try {
-      await overseer.deleteChat(deleteTarget.id);
-      toasts.add({ title: "Chat deleted successfully", variant: "success" });
-    } catch (err) {
-      console.error("Failed to delete chat:", err);
-      toasts.add({ title: "Failed to delete chat", variant: "error" });
-    }
-    setIsDeleting(false);
-    setDeleteTarget(null);
-  };
-
-  const cancelListRename = () => {
-    renamingChatIdRef.current = null;
-    setRenamingChatId(null);
-  };
-
-  const startListRename = (chatId: number, title: string) => {
-    renamingChatIdRef.current = chatId;
-    setRenamingInput(title);
-    setRenamingChatId(chatId);
-  };
-
-  // Handle saving a renamed chat from the list view
-  const handleSaveListRename = async (chatId: number) => {
-    if (renamingChatIdRef.current !== chatId) return;
-
-    renamingChatIdRef.current = null;
-    setRenamingChatId(null);
-
-    const trimmed = renamingInput.trim();
-    const existing = cacheRef.current.chats.get(chatId);
-    // Cancel on empty or no-op so commit-on-blur doesn't fire pointless RPCs.
-    if (!trimmed || trimmed === existing?.title) return;
-
-    try {
-      await overseer.setChatTitle(chatId, trimmed);
-      if (existing) {
-        cacheRef.current.chats.set(chatId, {
-          ...existing,
-          title: trimmed,
-        });
-        bumpChatListVersion();
-        forceUpdate();
-      }
-      toasts.add({ title: "Chat title updated successfully", variant: "success" });
-    } catch (err) {
-      console.error("Failed to update chat title:", err);
-      toasts.add({ title: "Failed to update chat title", variant: "error" });
     }
   };
 
@@ -6263,10 +5947,10 @@ function ChatInterface({
 
   // Accepted creations remain in the transcript; reverted ones disappear.
   const createdArtifactsByTurnItemSeq = useMemo(() => {
-    const out = new Map<number, CreatedGadgetCardInfo[]>();
+    const out = new Map<number, CreatedArtifactCardInfo[]>();
     let lastAgentMessageSeq: number | null = null;
     let lastVisibleWorkSeq: number | null = null;
-    let creations: CreatedGadgetCardInfo[] = [];
+    let creations: CreatedArtifactCardInfo[] = [];
     let creationAnchorSeq: number | null = null;
 
     const currentAnchorSeq = () => lastAgentMessageSeq ?? lastVisibleWorkSeq;
@@ -6322,11 +6006,11 @@ function ChatInterface({
       if (status === "reverted" || !m.createdArtifacts) continue;
       creations = [
         ...creations,
-        ...m.createdArtifacts.map(({ gadgetId, title }) => ({
-          gadgetId,
+        ...m.createdArtifacts.map(({ artifactId, title }) => ({
+          artifactId,
           title,
           isPending: status === "pending",
-          output: outputOfWorkpiece(gadgetId),
+          output: outputOfWorkpiece(artifactId),
         })),
       ];
       attachCreations();
@@ -6697,380 +6381,15 @@ function ChatInterface({
     );
   };
 
-  // ─── sidebar list content (reused in both modes) ──────────────────────────
-  const chatListPanel = (
-    <div className="flex h-full min-h-0 flex-1 flex-col">
-      {/* Chat list header — title doubles as the scope switcher */}
-      <div className="flex h-12 flex-shrink-0 items-center border-b border-kumo-line px-4">
-        <DropdownMenu>
-          <DropdownMenu.Trigger
-            render={
-              <button
-                type="button"
-                className="group flex h-8 -ml-1.5 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left transition-colors duration-150 ease-out hover:bg-kumo-tint/60 focus-visible:bg-kumo-tint/60 focus-visible:outline-none data-[popup-open]:bg-kumo-tint/60"
-                aria-label="Filter conversations"
-              >
-                <span className="text-[13px] leading-[18px] font-medium tracking-[-0.25px] text-kumo-default">
-                  {CHAT_LIST_SCOPE_LABELS[chatListScope]}
-                </span>
-                <CaretDown
-                  size={10}
-                  weight="bold"
-                  className="text-kumo-inactive transition-transform duration-150 ease-out group-data-[popup-open]:rotate-180"
-                />
-              </button>
-            }
-          />
-          <DropdownMenu.Content className="themed-floating-shadow !z-[1100] !min-w-[200px] rounded-lg border border-kumo-line bg-kumo-base p-1">
-            {chatListScopes.map((scope) => {
-              const active = chatListScope === scope.value;
-              return (
-                <DropdownMenu.Item
-                  key={scope.value}
-                  onClick={() => setChatListScope(scope.value)}
-                  className="!h-auto rounded-md !px-2.5 !py-1.5 text-[12px] leading-4 tracking-[-0.2px] text-kumo-default transition-colors data-highlighted:bg-kumo-tint"
-                >
-                  <span className="mr-2 inline-flex h-3 w-3 items-center justify-center text-kumo-default">
-                    {active ? <Check size={11} weight="bold" /> : null}
-                  </span>
-                  <span className="flex-1">{CHAT_LIST_SCOPE_LABELS[scope.value]}</span>
-                  <span className="ml-3 font-mono text-[11px] text-kumo-inactive">
-                    {scope.count}
-                  </span>
-                </DropdownMenu.Item>
-              );
-            })}
-          </DropdownMenu.Content>
-        </DropdownMenu>
-      </div>
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="chat-panel min-h-0 flex-1 overflow-y-auto">
-        <div className="p-3 pb-8">
-        {!chatListReady ? (
-          null
-        ) : chatList.length === 0 ? (
-          <p className="text-sm text-kumo-inactive text-center py-8">
-            No conversations yet
-          </p>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {visibleChatList.length === 0 ? (
-              // Only reachable when a non-"all" scope filters everything out;
-              // the all-empty case is handled by the outer chatList.length check.
-              <div className="py-8 text-center">
-                <p className="text-[13px] leading-[18px] text-kumo-inactive">
-                  No conversations started by {chatListScope === "agents" ? "agents" : "people"} yet
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setChatListScope("all")}
-                  className="mt-2 cursor-pointer rounded-md px-2 py-1 text-[12px] leading-4 font-medium text-kumo-subtle transition-colors duration-150 ease-out hover:text-kumo-default focus-visible:text-kumo-default focus-visible:outline-none"
-                >
-                  Show all
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-4">
-                {bucketedVisibleChats.map(({ bucket, items }) => (
-                  <section key={bucket} className="flex flex-col gap-0.5">
-                    <p className="mb-1 px-1 text-[11px] font-medium uppercase tracking-[0.08em] text-kumo-inactive">
-                      {CHAT_TIME_BUCKET_LABELS[bucket]}
-                    </p>
-                    {items.map((chat) => (
-              <div key={chat.id} className="relative">
-                {(() => {
-                  const isRenaming = renamingChatId === chat.id;
-                  return (
-                  <div
-                    onClick={isRenaming ? undefined : () => onNavigateToChat(chat.id)}
-                    className={`group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-[background-color] duration-150 ease-out ${
-                      isRenaming
-                        ? "cursor-default bg-kumo-base ring-1 ring-kumo-ring/40"
-                        : sidebarMode && chat.id === selectedChatId
-                          ? "cursor-pointer bg-kumo-recessed"
-                          : "cursor-pointer hover:bg-kumo-tint"
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex min-w-0 items-center gap-2">
-                        {isRenaming ? (
-                          <input
-                            type="text"
-                            value={renamingInput}
-                            onChange={(e) => setRenamingInput(e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                handleSaveListRename(chat.id);
-                              } else if (e.key === "Escape") {
-                                e.preventDefault();
-                                cancelListRename();
-                              }
-                            }}
-                            onBlur={() => handleSaveListRename(chat.id)}
-                            autoFocus
-                            spellCheck={false}
-                            autoCapitalize="off"
-                            autoCorrect="off"
-                            aria-label={`Rename ${chat.title}`}
-                            className="min-w-0 flex-1 bg-transparent text-[13px] leading-[18px] font-medium tracking-[-0.25px] text-kumo-default outline-none placeholder:text-kumo-inactive"
-                          />
-                        ) : (
-                          <span className="truncate text-[13px] leading-[18px] font-medium tracking-[-0.25px] text-kumo-default">
-                            {chat.title}
-                          </span>
-                        )}
-                        {!isRenaming && chat.activeAgent ? (
-                          <span className="inline-flex flex-shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-4 font-medium text-kumo-brand">
-                            <span className="h-1.5 w-1.5 rounded-full bg-kumo-brand animate-pulse" />
-                            Working
-                          </span>
-                        ) : !isRenaming && chat.hasProposedChanges ? (
-                          <Tooltip content="This conversation has pending changes" asChild>
-                            <span className="inline-flex flex-shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-4 font-medium text-kumo-warning">
-                              <span className="h-1.5 w-1.5 rounded-full bg-kumo-warning" />
-                              Pending changes
-                            </span>
-                          </Tooltip>
-                        ) : null}
-                      </div>
-                      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-kumo-inactive">
-                        {chat.spawnerName && (
-                          <>
-                            <span className="truncate">Agent · {chat.spawnerName}</span>
-                            <span className="flex-shrink-0" aria-hidden="true">·</span>
-                          </>
-                        )}
-                        <span className="flex-shrink-0">
-                          {formatChatRowTime(chat.lastActive, bucket, chatListNow)}
-                        </span>
-                        {chat.totalCost != null && (
-                          <>
-                            <span className="flex-shrink-0" aria-hidden="true">·</span>
-                            <span className="flex-shrink-0 font-mono">
-                              ${chat.totalCost.toFixed(4)}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    {!isRenaming && (
-                      <DropdownMenu>
-                        <DropdownMenu.Trigger
-                          render={
-                            <WorkshopIconButton
-                              aria-label={`Actions for ${chat.title}`}
-                              onClick={(e) => e.stopPropagation()}
-                              className="!h-7 !w-7 flex-shrink-0 text-kumo-inactive opacity-0 focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
-                            >
-                              <DotsThreeVertical size={14} />
-                            </WorkshopIconButton>
-                          }
-                        />
-                        <DropdownMenu.Content
-                          onClick={(event) => event.stopPropagation()}
-                          className="themed-floating-shadow !z-[1100] !min-w-[144px] rounded-lg border border-kumo-line bg-kumo-base p-1"
-                        >
-                          <DropdownMenu.Item
-                            icon={<Pencil size={12} className="mr-2" />}
-                            onClick={() => startListRename(chat.id, chat.title)}
-                            className="!h-auto rounded-md !px-2.5 !py-1.5 text-[12px] leading-4 tracking-[-0.2px] text-kumo-default transition-colors data-highlighted:bg-kumo-tint"
-                          >
-                            Rename
-                          </DropdownMenu.Item>
-                          <DropdownMenu.Item
-                            icon={<Trash size={12} className="mr-2" />}
-                            variant="danger"
-                            onClick={() => handleDeleteChat(chat.id, chat.title)}
-                            className="!h-auto rounded-md !px-2.5 !py-1.5 text-[12px] leading-4 tracking-[-0.2px] transition-colors data-highlighted:bg-kumo-danger-tint"
-                          >
-                            Delete
-                          </DropdownMenu.Item>
-                        </DropdownMenu.Content>
-                      </DropdownMenu>
-                    )}
-                  </div>
-                  );
-                })()}
-              </div>
-                    ))}
-                  </section>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        </div>
-        <div aria-hidden className={styles.transcriptFade} />
-        </div>
-        <div className="shrink-0">
-          <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
-          <ChatInput
-            key={threadId}
-            createCapsuleGatekeeper={(accountId, url) =>
-              overseer.newGatekeeper(accountId, url)
-            }
-            getOverseer={getOverseer}
-            onSend={handleNewChatSend}
-            isAgentActive={false}
-            models={availableModels}
-            selectedModel={selectedModel}
-            onModelChange={handleModelChange}
-            showThinkingTraces={showThinkingTraces}
-            onToggleThinkingTraces={toggleShowThinkingTraces}
-            minRows={2}
-            newChat
-            docked
-            draftStorageKey={currentUser && threadId
-              ? composerDraftStorageKey(currentUser.id, `thread:${threadId}:new`)
-              : undefined}
-          />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
 
   // ─── main render ─────────────────────────────────────────────────────────────
+  // The thread IS the conversation: no chat list, no chat navigation — just the transcript.
   return (
-    <div
-      className={`flex h-full min-h-0 bg-kumo-base ${sidebarMode ? "flex-row" : "flex-col"}`}
-    >
-      {/* ── Sidebar mode: conversations list on the left ───────────────────── */}
-      {sidebarMode && (
-        <>
-          <div
-            className="flex flex-col border-r border-kumo-line flex-shrink-0"
-            style={{ width: sidebarWidth }}
-          >
-            {chatListPanel}
-          </div>
-          {/* Resize handle */}
-          <div
-            className="w-1 flex-shrink-0 bg-kumo-line hover:bg-kumo-brand cursor-col-resize transition-colors relative touch-none"
-            onPointerDown={handleSidebarPointerDown}
-            onPointerMove={handleSidebarPointerMove}
-            onPointerUp={handleSidebarPointerUp}
-            onPointerCancel={handleSidebarPointerUp}
-          >
-            <div className="absolute inset-y-0 -left-1 -right-1" />
-          </div>
-        </>
-      )}
-
-      {/* ── Non-sidebar mode: show list OR chat ────────────────────────────── */}
-      {!sidebarMode && selectedChatId === null ? (
-        chatListPanel
-      ) : selectedChatId !== null ? (
+    <div className="flex h-full min-h-0 flex-col bg-kumo-base">
+      {selectedChatId !== null ? (
         <div className="flex-1 flex flex-col overflow-auto">
-          {/* Tab bar — in sidebar mode, show Chat / Connections tabs */}
-          {sidebarMode && (
-            <div className="flex h-12 flex-shrink-0 items-center gap-5 border-b border-kumo-line px-4">
-              <button
-                type="button"
-                onClick={() => setSidebarActiveTab("chat")}
-                className={`relative flex h-full cursor-pointer items-center text-[13px] leading-[18px] tracking-[-0.25px] transition-colors ${
-                  sidebarActiveTab === "chat"
-                    ? "font-medium text-kumo-default after:absolute after:inset-x-1 after:bottom-0 after:h-0.5 after:rounded-full after:bg-kumo-contrast/70"
-                    : "font-normal text-kumo-subtle hover:text-kumo-default"
-                }`}
-              >
-                Chat
-              </button>
-              <button
-                type="button"
-                onClick={() => setSidebarActiveTab("connections")}
-                className={`relative flex h-full cursor-pointer items-center text-[13px] leading-[18px] tracking-[-0.25px] transition-colors ${
-                  sidebarActiveTab === "connections"
-                    ? "font-medium text-kumo-default after:absolute after:inset-x-1 after:bottom-0 after:h-0.5 after:rounded-full after:bg-kumo-contrast/70"
-                    : "font-normal text-kumo-subtle hover:text-kumo-default"
-                }`}
-              >
-                Connections
-              </button>
-            </div>
-          )}
-
-          {/* Connections tab content */}
-          {sidebarMode &&
-            sidebarActiveTab === "connections" &&
-            renderExtraTab && (
-              <div className="flex-1 overflow-auto">{renderExtraTab()}</div>
-            )}
-
-          {/* Chat content — hidden when connections tab is active in sidebar mode */}
-          {(!sidebarMode || sidebarActiveTab === "chat") && (
-            <>
-              {/* Chat sub-header — hidden in sidebar mode (list is always visible) */}
-              {!sidebarMode && (
-                <div className="flex h-12 flex-shrink-0 items-center justify-between gap-2 border-b border-kumo-line px-4">
-                  <WorkshopIconButton
-                    onClick={() => onNavigateToChat(null)}
-                    className="!h-8 !w-8 flex-shrink-0"
-                    title="Back to conversations"
-                    aria-label="Back to conversations"
-                  >
-                    <CaretLeft size={14} />
-                  </WorkshopIconButton>
-
-                  {isEditingTitle ? (
-                    <div className="flex items-center gap-1 flex-1 min-w-0">
-                      <WorkshopInput
-                        type="text"
-                        value={titleInput}
-                        onChange={(e) => setTitleInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleSaveChatTitle();
-                          if (e.key === "Escape") handleCancelTitleEdit();
-                        }}
-                        autoFocus
-                        className="!h-8 min-w-0 flex-1 bg-kumo-tint text-[13px] font-medium"
-                      />
-                      <WorkshopIconButton
-                        onClick={handleSaveChatTitle}
-                        disabled={!titleInput.trim()}
-                        className="!h-8 !w-8 hover:text-kumo-brand disabled:opacity-30"
-                        aria-label="Save chat title"
-                      >
-                        <Check size={13} />
-                      </WorkshopIconButton>
-                      <WorkshopIconButton
-                        onClick={handleCancelTitleEdit}
-                        className="!h-8 !w-8"
-                        aria-label="Cancel title edit"
-                      >
-                        <X size={13} />
-                      </WorkshopIconButton>
-                    </div>
-                  ) : (
-                    <>
-                      <span className="min-w-0 flex-1 truncate text-[13px] leading-[18px] font-medium tracking-[-0.25px] text-kumo-default">
-                        {currentChatMetadata?.title || "Chat"}
-                      </span>
-                      <WorkshopIconButton
-                        onClick={() => setIsEditingTitle(true)}
-                        className="!h-8 !w-8 flex-shrink-0 text-kumo-inactive hover:text-kumo-subtle"
-                        title="Rename chat"
-                        aria-label="Rename chat"
-                      >
-                        <Pencil size={11} />
-                      </WorkshopIconButton>
-                    </>
-                  )}
-
-                  <WorkshopIconButton
-                    onClick={() => handleDeleteChat()}
-                    danger
-                    className="!h-8 !w-8 flex-shrink-0 text-kumo-inactive"
-                    title="Delete chat"
-                    aria-label="Delete chat"
-                  >
-                    <Trash size={14} />
-                  </WorkshopIconButton>
-                </div>
-              )}
-
+          {/* Chat content */}
+          <>
               {/* Messages */}
               <div className="flex min-h-0 flex-1 flex-col">
               <div
@@ -7291,9 +6610,9 @@ function ChatInterface({
                             ))}
                             {createdArtifacts.map((created) => (
                               <CreatedGadgetChatCard
-                                key={created.gadgetId}
+                                key={created.artifactId}
                                 gadget={created}
-                                onOpen={() => onOpenGadget(created.gadgetId)}
+                                onOpen={() => onOpenGadget(created.artifactId)}
                               />
                             ))}
                           </div>
@@ -7473,9 +6792,9 @@ function ChatInterface({
 
                             {createdArtifacts.map((created) => (
                               <CreatedGadgetChatCard
-                                key={created.gadgetId}
+                                key={created.artifactId}
                                 gadget={created}
-                                onOpen={() => onOpenGadget(created.gadgetId)}
+                                onOpen={() => onOpenGadget(created.artifactId)}
                               />
                             ))}
 
@@ -7741,7 +7060,7 @@ function ChatInterface({
                       const awaitingFirstResponse =
                         !lastMessage ||
                         lastMessage.author.type === "user" ||
-                        lastMessage.author.type === "gadget";
+                        lastMessage.author.type === "artifact";
                       const showThinking =
                         !isCompacting &&
                         awaitingFirstResponse &&
@@ -7968,20 +7287,8 @@ function ChatInterface({
                 </div>
               </div>
             </>
-          )}
         </div>
       ) : null}
-
-      <DeleteConfirmationDialog
-        open={deleteTarget !== null}
-        title="Delete conversation?"
-        description={<>This removes <span className="font-medium text-kumo-default">{deleteTarget?.title}</span>. You can&apos;t undo this.</>}
-        isDeleting={isDeleting}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-        onConfirm={handleDeleteConfirm}
-      />
 
       {autoApproveConfirm && (
         <AutoApproveConfirmDialog

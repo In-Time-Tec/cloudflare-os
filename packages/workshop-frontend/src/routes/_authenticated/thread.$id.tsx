@@ -3,9 +3,8 @@ import ThreadEditor from '../../ThreadEditor'
 import { aiConfigOptions, threadsOptions, modelsOptions } from '../../query/hooks'
 import { ensureThreadBoot } from '../../query/thread-session'
 
-type GadgetSearch = {
-  chat?: number
-  // Selected workpiece (gadget) ID. Workpiece IDs start at 0, so parsing must not treat 0 as
+type ThreadSearch = {
+  // Selected workpiece (artifact) ID. Workpiece IDs start at 0, so parsing must not treat 0 as
   // absent.
   w?: number
 }
@@ -21,13 +20,10 @@ function parseIntParam(value: unknown): number | undefined {
 
 export const Route = createFileRoute('/_authenticated/thread/$id')({
   component: ThreadEditor,
-  validateSearch: (search: Record<string, unknown>): GadgetSearch => ({
-    chat: typeof search.chat === 'number' ? search.chat
-      : typeof search.chat === 'string' ? Number(search.chat) || undefined
-      : undefined,
+  validateSearch: (search: Record<string, unknown>): ThreadSearch => ({
     w: parseIntParam(search.w),
   }),
-  loaderDeps: ({ search }) => ({ chat: search.chat, w: search.w }),
+  loaderDeps: ({ search }) => ({ w: search.w }),
   loader: async ({ context, params, cause }) => {
     await Promise.all([
       context.queryClient.ensureQueryData({

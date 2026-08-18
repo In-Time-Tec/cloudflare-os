@@ -216,9 +216,13 @@ pass. Blueprint→Template and Gadget→Artifact renames ride this phase too (se
 1. **Rename phase** (mechanical, no behavior): workspace→thread, blueprint→template,
    gadget→artifact across shared/backend/frontend; routes, sidebar labels, agent prompt copy.
    Breaking renames allowed (no users). Kernel diff kept small and separate.
-2. **Single-conversation phase**: delete the chat-list surface outright; thread = conversation
-   (chat 0), home creates thread, auto-title. No migration or history mode for old multi-chat
-   data — drop it.
+2. **Thread-is-the-conversation phase**: there is NO "conversation" concept nested inside a
+   thread at all — the thread IS the conversation. Delete the chat-list surface, the `?chat`
+   param, the scope switcher, the back-to-conversations affordance, and any "new conversation"
+   affordance (a new conversation is a new thread, started from Home). A fresh thread renders
+   as an empty thread (composer ready), not a "new chat" view. Internally chatId 0 remains a
+   storage detail of the Overseer DO (draft branches key off it); it never reaches the UI or
+   user-facing API vocabulary. No migration for old multi-chat data — drop it.
 3. **Pierre UI phase**: monaco out, Pierre diffs + file tree in, read-only files.
 4. **Orb phase**: E2B integration (create/pause/resume, alarm, status in sidebar), orb proxy +
    short-lived token, agent shell tool in orb.

@@ -418,9 +418,7 @@ export default function ThreadEditor() {
   const navigate = useNavigate()
   const { authenticatedApi } = useAuthenticatedApi()
 
-  const { chat: chatParam, w: workpieceParam } = useSearch({ strict: false }) as
-    { chat?: number; w?: number }
-  const urlChatId = chatParam !== undefined ? chatParam : null
+  const { w: workpieceParam } = useSearch({ strict: false }) as { w?: number }
   const urlWorkpieceId = workpieceParam !== undefined ? workpieceParam : null
   const [bootId, setBootId] = useState(id)
   const [boot, setBoot] = useState(() => id ? takeThreadBoot(id) : null)
@@ -610,32 +608,19 @@ export default function ThreadEditor() {
   } | null>(null)
   const [hasCode, setHasCode] = useState<boolean | null>(null)
   const [chatCount, setChatCount] = useState<number | null>(() => boot ? boot.chats.length : null)
-  const [hasChatZero, setHasChatZero] = useState(() => boot?.chats.some(chat => chat.id === 0) ?? false)
   const [_hasBindings, setHasBindings] = useState(false)
   const [isAgentActive, setIsAgentActive] = useState(false)
   const [hasAnyProposedChanges, setHasAnyProposedChanges] = useState(false)
   const [selectedChatHasProposedChanges, setSelectedChatHasProposedChanges] = useState(false)
-  const selectedChatId = urlChatId
+  // The thread IS the conversation: chat 0 is the thread's only conversation. chatId remains
+  // an internal storage detail (draft branches key off it) but never reaches the URL or UI.
   const chatListReady = chatCount !== null
-  const singleInitialChat = chatCount === 1 && hasChatZero
-  const [userNavigatedToList, setUserNavigatedToList] = useState(false)
-  // Note: raw `hasCode` (not `effectiveHasCode` below) is deliberate here, to avoid a dependency
-  // cycle: the effective value depends on the selected workpiece, whose pending-gadget visibility
-  // depends on `effectiveSelectedChatId`, which depends on this pin. When no gadget is selected
-  // yet, `hasCode` is null and the pin stays on -- the right behavior for new threads.
-  const pinInitialChatSelection =
-    singleInitialChat && hasCode !== true && !userNavigatedToList
-
-  // Before any code has been merged, a single-thread gadget conceptually only
-  // has one useful conversation, so keep chat 0 selected even if the URL has
-  // not caught up yet. As soon as merged code exists, dropping back to the chat
-  // list should become possible.
-  const effectiveSelectedChatId = selectedChatId ?? (pinInitialChatSelection ? 0 : null)
+  const effectiveSelectedChatId = 0
 
   // ── workpiece selection ──────────────────────────────────────────────────────
   const allGadgets = useMemo(() => {
     return [...workpieces.values()]
-      .filter(w => w.type === 'gadget')
+      .filter(w => w.type === 'artifact')
       .toSorted((a, b) => a.id - b.id)
   }, [workpieces])
 
@@ -747,7 +732,7 @@ export default function ThreadEditor() {
     let cancelled = false
     overseer.stub.listHooks()
       .then(hooks => {
-        if (!cancelled) setHookedGadgetIds(new Set(hooks.filter(h => h.enabled).map(h => h.gadgetId)))
+        if (!cancelled) setHookedGadgetIds(new Set(hooks.filter(h => h.enabled).map(h => h.artifactId)))
       })
       .catch(err => reportIssue('gadget-hook-indicators.load', err))
     // Clear on teardown so a thread switch never shows the previous thread's indicators.
@@ -775,8 +760,7 @@ export default function ThreadEditor() {
   const layoutModeReady = chatListReady && (codeStateReady || hasCodeRelatedState)
 
   // Wait for all initial subscriptions before choosing the new-thread chat-only layout.
-  const simpleMode = layoutModeReady && !hasCodeRelatedState && singleInitialChat
-    && visibleGadgets.length <= 1
+  const simpleMode = layoutModeReady && !hasCodeRelatedState && visibleGadgets.length <= 1
   const hasAnyApps = allGadgets.length > 0
   const showingActivity = threadView?.mode === 'activity'
   const showFullEditor = layoutModeReady && (
@@ -934,9 +918,8 @@ export default function ThreadEditor() {
   }, [])
 
   // ── chat count / auto-switch ─────────────────────────────────────────────────
-  const handleChatCountChange = useCallback((count: number, chatZeroExists: boolean) => {
+  const handleChatCountChange = useCallback((count: number, _chatZeroExists: boolean) => {
     setChatCount(count)
-    setHasChatZero(chatZeroExists)
   }, [])
 
   const turnOutputRef = useRef<{
@@ -998,7 +981,6 @@ export default function ThreadEditor() {
     const currentBoot = bootRef.current
     const fromBoot = currentBoot && currentBoot.id === id ? currentBoot : null
     setChatCount(fromBoot ? fromBoot.chats.length : null)
-    setHasChatZero(fromBoot ? fromBoot.chats.some(chat => chat.id === 0) : false)
     setHasAnyProposedChanges(false)
     setSelectedChatHasProposedChanges(false)
     setThreadView(getStoredThreadView(id))
@@ -1011,62 +993,31 @@ export default function ThreadEditor() {
     setWorkpiecesReady(seeded !== undefined)
     knownWorkpieceIdsRef.current = null
     turnOutputRef.current = null
-    setUserNavigatedToList(false)
   }, [id])
 
   // ── navigation helper ────────────────────────────────────────────────────────
+  // The thread IS the conversation, so there is no chat navigation. This is kept only as the
+  // ChatInterface callback contract; it clears the draft workpiece selection when the current
+  // pending app's branch is left (e.g. after changes are accepted or reverted).
   const navigateToChat = useCallback(
-    (chatId: number | null, options?: { replace?: boolean }) => {
-      setUserNavigatedToList(chatId === null)
-      // Draft apps can only be previewed from their creating conversation.
+    (_chatId: number | null, options?: { replace?: boolean }) => {
       const pendingChatId = selectedGadgetSummary?.chatId
-      const leavingPendingApp = pendingChatId !== undefined && chatId !== pendingChatId
-      if (leavingPendingApp) {
-        setThreadTransitionEnabled(true)
-        if (threadView?.mode === 'activity') {
-          activityReturnViewRef.current = { mode: 'chat' }
-        } else {
-          setThreadView({ mode: 'chat' })
-        }
+      if (pendingChatId === undefined) return
+      setThreadTransitionEnabled(true)
+      if (threadView?.mode === 'activity') {
+        activityReturnViewRef.current = { mode: 'chat' }
+      } else {
+        setThreadView({ mode: 'chat' })
       }
       navigate({
         to: '/thread/$id',
         params: { id: id! },
-        // Keep committed selections, but clear draft selections outside their branch.
-        search: (prev: Record<string, unknown>) => ({
-          ...prev,
-          chat: chatId !== null ? chatId : undefined,
-          w: leavingPendingApp
-            ? undefined
-            : typeof prev.w === 'number' ? prev.w : undefined,
-        }),
+        search: (prev: Record<string, unknown>) => ({ ...prev, w: undefined }),
         replace: options?.replace,
       })
     },
     [id, navigate, selectedGadgetSummary?.chatId, threadView?.mode]
   )
-
-  // ── keep single-chat routing aligned with the current mode ──────────────────
-  // Keep the URL aligned with simple mode's implied chat-0 selection.
-  useEffect(() => {
-    if (!layoutModeReady) return
-
-    if (simpleMode) {
-      if (urlChatId === 0) {
-        navigate({
-          to: '/thread/$id',
-          params: { id: id! },
-          search: (prev: Record<string, unknown>) => ({ ...prev, chat: undefined }),
-          replace: true,
-        })
-      }
-      return
-    }
-
-    if (pinInitialChatSelection && urlChatId === null) {
-      navigateToChat(0, { replace: true })
-    }
-  }, [layoutModeReady, simpleMode, pinInitialChatSelection, urlChatId, navigateToChat, navigate, id])
 
   // ── resize handle ─────────────────────────────────────────────────────────────
   //

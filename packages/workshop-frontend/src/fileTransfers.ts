@@ -12,7 +12,7 @@ export function makeTemplateFilename(title: string, version: number): string {
 }
 
 export function makeExportFilename(title: string, extension: string): string {
-  return `${makeFilename(title, 'gadget')}${extension}`
+  return `${makeFilename(title, 'artifact')}${extension}`
 }
 
 type SaveFileHandle = {
