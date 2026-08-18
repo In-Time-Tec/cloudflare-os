@@ -29,6 +29,8 @@ import {
   LinkSimple,
   Plug,
   Plus,
+  Paperclip,
+  ArrowUp,
   Swap,
   ArrowUUpLeft,
   ArrowsClockwise,
@@ -2915,12 +2917,12 @@ export const ChatInput = ({
         </div>
       )}
 
-      <div className={docked ? "relative px-4" : "relative"}>
+      <div className={docked ? "relative px-4 pb-3 pt-1" : "relative"}>
       <div
         ref={promptCardRef}
         className={
           docked
-            ? "relative overflow-visible rounded-t-2xl border-x border-t border-b-0 border-kumo-line bg-kumo-base"
+            ? "relative overflow-visible rounded-2xl border border-kumo-line bg-kumo-base"
             : "themed-prompt-card-shadow relative overflow-visible rounded-2xl border border-kumo-line bg-kumo-control transition-shadow duration-150 ease-out"
         }
         onDragEnter={handleAttachmentDragEnter}
@@ -2929,7 +2931,7 @@ export const ChatInput = ({
         onDrop={handleAttachmentDrop}
       >
         {isAttachmentDragActive && (
-          <div className={`themed-inset-outline pointer-events-none absolute inset-0 z-20 grid place-items-center border-2 border-dashed p-4 backdrop-blur-[1px] transition-[opacity,transform] duration-150 ease-out ${docked ? "rounded-t-2xl" : "rounded-2xl"} ${canAttachMore ? "border-kumo-brand/55 bg-kumo-brand/10" : "border-kumo-warning/60 bg-kumo-warning/10"}`}>
+          <div className={`themed-inset-outline pointer-events-none absolute inset-0 z-20 grid place-items-center border-2 border-dashed p-4 backdrop-blur-[1px] transition-[opacity,transform] duration-150 ease-out rounded-2xl ${canAttachMore ? "border-kumo-brand/55 bg-kumo-brand/10" : "border-kumo-warning/60 bg-kumo-warning/10"}`}>
             <div className={`themed-floating-shadow flex items-center gap-2 rounded-full border bg-kumo-base/90 px-3 py-2 text-[13px] font-medium leading-4 tracking-[-0.2px] text-kumo-default ${canAttachMore ? "border-kumo-brand/25" : "border-kumo-warning/30"}`}>
               <span className={`grid h-7 w-7 place-items-center rounded-full ${canAttachMore ? "bg-kumo-brand/12 text-kumo-brand" : "bg-kumo-warning/15 text-kumo-warning"}`}>
                 <FileIcon size={16} weight="duotone" />
@@ -3143,7 +3145,7 @@ export const ChatInput = ({
                     className="group flex h-8 w-8 flex-shrink-0 cursor-pointer items-center justify-center rounded-lg text-kumo-inactive transition-[background-color,color,transform] duration-150 ease-out hover:bg-kumo-tint hover:text-kumo-subtle focus-visible:bg-kumo-tint focus-visible:text-kumo-subtle focus-visible:outline-none active:scale-[0.96] data-[popup-open]:bg-kumo-tint data-[popup-open]:text-kumo-subtle"
                     aria-label="Open chat options"
                   >
-                    <Plus size={18} />
+                    <Paperclip size={16} />
                   </button>
                 }
               />
@@ -3234,12 +3236,12 @@ export const ChatInput = ({
                 <WorkshopIconButton
                   onClick={onStop}
                   tone="primary"
-                  className="!h-8 !w-8"
+                  className="!h-7 !w-7 !rounded-full"
                   aria-label="Stop agent"
                 >
                   <svg
-                    width="14"
-                    height="14"
+                    width="12"
+                    height="12"
                     viewBox="0 0 24 24"
                     fill="currentColor"
                   >
@@ -3251,21 +3253,10 @@ export const ChatInput = ({
                   onClick={submitMessage}
                   disabled={!canSend}
                   tone="primary"
-                  className="!h-8 !w-8 disabled:cursor-not-allowed disabled:opacity-30"
+                  className="!h-7 !w-7 !rounded-full disabled:cursor-not-allowed disabled:opacity-30"
                   aria-label="Send message"
                 >
-                  {/* Arrow-up icon */}
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                  >
-                    <line x1="12" y1="19" x2="12" y2="5" />
-                    <polyline points="5 12 12 5 19 12" />
-                  </svg>
+                  <ArrowUp size={14} weight="bold" />
                 </WorkshopIconButton>
               )}
           </div>
