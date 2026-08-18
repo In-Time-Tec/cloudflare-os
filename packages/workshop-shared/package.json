@@ -3,9 +3,21 @@
   "version": "1.0.0",
   "type": "module",
   "exports": {
+    "./agent-types": {
+      "types": "./src/agent-types.ts",
+      "import": "./src/agent-types.ts"
+    },
     "./api": {
       "types": "./src/api.ts",
       "import": "./src/api.ts"
+    },
+    "./cloudflare-gatekeeper": {
+      "types": "./src/cloudflare-gatekeeper.ts",
+      "import": "./src/cloudflare-gatekeeper.ts"
+    },
+    "./external-message-gateway": {
+      "types": "./src/external-message-gateway.ts",
+      "import": "./src/external-message-gateway.ts"
     },
     "./feature-flags": {
       "types": "./src/feature-flags.ts",
@@ -15,17 +27,13 @@
       "types": "./src/gatekeeper.ts",
       "import": "./src/gatekeeper.ts"
     },
-    "./cloudflare-gatekeeper": {
-      "types": "./src/cloudflare-gatekeeper.ts",
-      "import": "./src/cloudflare-gatekeeper.ts"
-    },
     "./limits": {
       "types": "./src/limits.ts",
       "import": "./src/limits.ts"
     },
-    "./external-message-gateway": {
-      "types": "./src/external-message-gateway.ts",
-      "import": "./src/external-message-gateway.ts"
+    "./orb-harness": {
+      "types": "./src/orb-harness.ts",
+      "import": "./src/orb-harness.ts"
     },
     "./theme": {
       "types": "./src/theme.ts",
@@ -39,7 +47,8 @@
   },
   "dependencies": {
     "@cloudflare/workers-types": "^5.20260722.1",
-    "capnweb": "catalog:"
+    "capnweb": "catalog:",
+    "@earendil-works/pi-ai": "0.83.0"
   },
   "devDependencies": {
     "typescript": "catalog:"

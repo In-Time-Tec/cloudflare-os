@@ -369,11 +369,4 @@ export function filterEnabledResources(
  * Wrap the admin instructions in a clearly-delimited block for the system prompt, or "" when unset.
  * Callers are responsible for separating this from the preceding prompt with a blank line.
  */
-export function formatInstanceInstructions(instructions: string): string {
-  let trimmed = instructions.trim();
-  if (!trimmed) return "";
-  return `# Deployment-specific instructions\n\n` +
-      `The administrator of this deployment has provided the following additional instructions. ` +
-      `Follow them unless they conflict with the user's safety or the instructions above.\n\n` +
-      `<deployment_instructions>\n${trimmed}\n</deployment_instructions>`;
-}
+export { formatInstanceInstructions } from "@gadgets/agent-core";

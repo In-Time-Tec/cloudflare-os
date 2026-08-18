@@ -3,14 +3,11 @@ import {
   AGENT_CATALOG_MAX_ID_LENGTH, AGENT_CATALOG_MAX_TITLE_LENGTH,
 } from "@gadgets/workshop-shared/gatekeeper";
 import type { AgentCatalog } from "@gadgets/workshop-shared/gatekeeper";
-import { createWorkshopLogger } from "./observability";
+import { createLogger } from "@gadgets/backend-utils/logger";
+import type { AgentCatalogSnapshot } from "@gadgets/workshop-shared/agent-types";
+export type { AgentCatalogSnapshot };
 
-const logger = createWorkshopLogger("workshop.agent.catalog");
-
-export type AgentCatalogSnapshot = {
-  gatekeeperId: number;
-  catalog: AgentCatalog | null;
-};
+const logger = createLogger<{gatekeeperId?: number; error?: unknown}>({ component: "agent-core.catalog" });
 
 function normalizeText(value: string, maxLength: number): string {
   return value.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim().slice(0, maxLength);

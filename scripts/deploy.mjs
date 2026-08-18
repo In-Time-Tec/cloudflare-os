@@ -218,6 +218,14 @@ export function getDeploymentSecrets(config, environment = process.env) {
     console.warn("E2B_API_KEY is not configured; deploying with thread orbs disabled.");
   }
 
+  // Signing key for orb-facing tokens (turn inference grants). Optional: absent = orb-executed
+  // turns unavailable (the proxy refuses every grant), no code change to enable.
+  if (environment.ORB_TOKEN_SIGNING_KEY) {
+    backend.ORB_TOKEN_SIGNING_KEY = environment.ORB_TOKEN_SIGNING_KEY;
+  } else {
+    console.warn("ORB_TOKEN_SIGNING_KEY is not configured; orb inference proxy refuses all requests.");
+  }
+
   // Microsoft Entra is the deployment's only sign-in method. Its app-registration credentials are
   // deploy-time secrets (MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET / MICROSOFT_TENANT_ID);
   // until all three are configured the gatekeeper deploys unconfigured and sign-in shows its

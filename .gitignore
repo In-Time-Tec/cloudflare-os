@@ -10,6 +10,7 @@ packages/gatekeeper-*/src/generated/app.txt
 # Bundled format templates (regenerated at build time from FORMAT_TEMPLATES_DIR).
 packages/workshop-backend/src/generated/format-templates.ts
 packages/workshop-backend/src/generated/browser-export-runtime.txt
+packages/workshop-backend/src/generated/orb-harness-bundle.ts
 
 # TypeScript build info
 *.tsbuildinfo

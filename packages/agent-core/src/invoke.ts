@@ -1,5 +1,5 @@
 import type { Message, Usage } from "@earendil-works/pi-ai";
-import type { ModelHandle } from "./ai-models.js";
+import type { ModelHandle } from "@gadgets/workshop-shared/agent-types";
 
 /**
  * An all-zeros pi Usage record, for synthesizing assistant messages that were never actually

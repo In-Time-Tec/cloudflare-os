@@ -6,7 +6,7 @@ import {
 import {
   completeAgentCatalogSnapshot, formatAgentCatalogPrompt,
   formatAlwaysAvailableResourcesPrompt, normalizeAgentCatalog,
-} from "../src/agent-catalog";
+} from "../src/catalog.js";
 
 describe("normalizeAgentCatalog", () => {
   it("sorts entries, strips control characters, and truncates long fields to the max bounds", () => {

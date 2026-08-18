@@ -36,6 +36,9 @@ jobs:
       OPENROUTER_API_TOKEN: ${{ secrets.OPENROUTER_API_TOKEN }}
       # E2B credential for thread orbs (sandboxes); optional — absent means orbs deploy disabled.
       E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+      # Signs orb-facing tokens (turn inference grants); the orb inference proxy refuses all
+      # requests when absent.
+      ORB_TOKEN_SIGNING_KEY: ${{ secrets.ORB_TOKEN_SIGNING_KEY }}
       # Microsoft Entra sign-in (the only login method). Until all three are configured the
       # gatekeeper deploys unconfigured and sign-in shows its "not configured" page.
       MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}

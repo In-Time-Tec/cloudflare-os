@@ -4,10 +4,10 @@ import {type AiChatAuthorInfo, type AiChatMessage, type AiChatMessageBody}
 import {
   buildCompactionState, buildSummaryPrompt, findCompactionBoundary,
   getModelTokenLimits, isCompactionTurn, protectRetainedReverts, shouldCompactChat, startsAgentTurn,
-} from "../src/agent-compaction";
+} from "../src/compaction.js";
 import * as Y from "yjs";
 import type {Api, AssistantMessage, Message, Model} from "@earendil-works/pi-ai";
-import type {ChatBindingEntry} from "../src/agent";
+import type {ChatBindingEntry} from "@gadgets/workshop-shared/agent-types";
 
 const user: AiChatAuthorInfo = {type: "user", id: "user", name: "User"};
 const agent: AiChatAuthorInfo = {type: "agent", id: "model", name: "Agent"};

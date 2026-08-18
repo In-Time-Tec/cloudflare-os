@@ -1,7 +1,7 @@
 import { DurableObject, RpcStub, RpcTarget } from "cloudflare:workers";
 import { validateRpc } from "capnweb-validate";
 import type {
-  AnthropicMessagesCompat, Api, AssistantMessageEventStream, Context, Model, ModelCost,
+  AnthropicMessagesCompat, Api, Model, ModelCost,
   OpenAICompletionsCompat, ProviderHeaders, SimpleStreamOptions, StreamFunction,
 } from "@earendil-works/pi-ai";
 import { stream as anthropicMessagesStream } from "@earendil-works/pi-ai/api/anthropic-messages";
@@ -24,8 +24,9 @@ import {
   getManagedAiConfig,
   type AiGatewayLogRoute,
 } from "./ai-gateway.js";
-import { completeText } from "./ai-invoke.js";
-import { bridgePdfAttachments } from "./chat-attachment-pdf.js";
+import { bridgePdfAttachments, completeText } from "@gadgets/agent-core";
+import type { ModelHandle, ModelStreamOptions } from "@gadgets/workshop-shared/agent-types";
+export type { ModelHandle, ModelStreamOptions };
 
  /**
   * Routing to bill a user's own Cloudflare account for inference (BYOK path once the free tier is
@@ -59,54 +60,6 @@ type ModelRoutingOptions = {
   sessionAffinity?: string;
   userGateway?: UserGatewayRouting;
   metadata?: GatewayMetadataContext;
-};
-
-/**
- * Per-call stream options accepted by a ModelHandle, extending pi's own options with
- * handle-level knobs.
- */
-export type ModelStreamOptions = SimpleStreamOptions & {
-  /**
-   * When false, suppress the handle's per-API thinking/reasoning defaults so the request runs
-   * without extended thinking (as far as the model allows). Used by completeText(): one-shot
-   * calls -- titles, binding names, compaction summaries, artifact model bindings -- should be
-   * quick, and none of them benefit from cross-step reasoning. Default: true.
-   */
-  thinking?: boolean;
-};
-
-/**
- * A resolved model plus everything needed to stream from it: `stream` closes over the routing
- * (endpoint, auth headers, gateway attribution metadata, session affinity) chosen by getModel(),
- * so callers never handle credentials themselves. pi streams never throw/reject for provider
- * failures; failures surface as a final AssistantMessage with stopReason "error"/"aborted".
- */
-export type ModelHandle = {
-  /** pi model descriptor (plain data; pi dispatches purely on `model.api`). */
-  model: Model<Api>;
-
-  /**
-   * Streams a response. Merges the handle's routing/auth and per-API options into whatever
-   * per-call options the caller (e.g. the agent loop) passes. Assignable to pi-agent-core's
-   * StreamFn (the extra ModelStreamOptions knobs are optional).
-   */
-  stream: (model: Model<Api>, context: Context, options?: ModelStreamOptions)
-      => AssistantMessageEventStream;
-
-  /**
-   * Route for retrieving this model's AI Gateway logs for cost accounting. Absent when requests
-   * don't flow through an AI Gateway (direct provider access, direct Workers AI REST).
-   */
-  aiGatewayLogRoute?: AiGatewayLogRoute;
-
-  /**
-   * Status and AI Gateway log id of the most recent HTTP response observed by `stream`. Reset at
-   * the start of every request and set from pi's onResponse callback (which fires only once a
-   * response arrives -- an SDK-level failure leaves this undefined), so consumers must read it
-   * right after the request they care about completes. Turns run requests sequentially, so this
-   * is safe.
-   */
-  lastResponse?: { status: number; aiGatewayLogId?: string };
 };
 
 function buildMetadata(initiator: AiChatAuthorInfo, context?: GatewayMetadataContext): GatewayMetadata {
@@ -263,21 +216,31 @@ function getHeader(headers: Record<string, string>, name: string): string | unde
   return undefined;
 }
 
-type HandleArgs = {
+/**
+ * Everything `getModel` decides about *where* a request goes and *how* it authenticates, separated
+ * from the pi stream function that consumes it. Naming this lets two callers share one routing
+ * decision: `makeHandle` (in-process inference) and the orb inference proxy (which rewrites an
+ * untrusted client's request onto `model.baseUrl` and attaches these credentials server-side).
+ */
+export type ModelRouting = {
   model: Model<Api>;
-  // Provider auth: a plain API key (pi turns it into the SDK's native auth) and/or headers.
-  // A null header value suppresses a default header ({Authorization: null, "x-api-key": null}
-  // alongside cf-aig-authorization makes pi skip SDK auth entirely).
+  /**
+   * Provider auth: a plain API key (pi turns it into the SDK's native auth) and/or headers.
+   * A null header value suppresses a default header ({Authorization: null, "x-api-key": null}
+   * alongside cf-aig-authorization makes pi skip SDK auth entirely).
+   */
   apiKey?: string;
   headers?: ProviderHeaders;
-  // Structured gateway attribution; sent as `cf-aig-metadata` on gateway-routed requests only
-  // (pi does not forward options.metadata to that header itself).
+  /**
+   * Structured gateway attribution; sent as `cf-aig-metadata` on gateway-routed requests only
+   * (pi does not forward options.metadata to that header itself).
+   */
   gatewayMetadata?: GatewayMetadata;
   sessionAffinity?: string;
   aiGatewayLogRoute?: AiGatewayLogRoute;
 };
 
-function makeHandle(args: HandleArgs): ModelHandle {
+function makeHandle(args: ModelRouting): ModelHandle {
   const streamFn = API_STREAMS[args.model.api];
   if (!streamFn) {
     throw new Error(`Unsupported model API "${args.model.api}".`);
@@ -361,6 +324,18 @@ function makeHandle(args: HandleArgs): ModelHandle {
 export function getModel(env: Cloudflare.Env, config: AiModelConfig,
                          initiator: AiChatAuthorInfo,
                          options: ModelRoutingOptions = {}): ModelHandle {
+  return makeHandle(resolveModelRouting(env, config, initiator, options));
+}
+
+/**
+ * Resolve where a model's requests go and how they authenticate, without building a pi stream
+ * function. `getModel` wraps this for in-process inference; the orb inference proxy uses it to
+ * rewrite a sandbox's request onto the real provider endpoint with deployment credentials that
+ * never leave the Worker.
+ */
+export function resolveModelRouting(env: Cloudflare.Env, config: AiModelConfig,
+                                    initiator: AiChatAuthorInfo,
+                                    options: ModelRoutingOptions = {}): ModelRouting {
   // Managed mode is a hard allowlist. Resolve a fresh configuration from the deployment catalog so
   // stale personal-provider records cannot retain their token, custom URL, or model after policy is
   // enabled. A managed direct provider intentionally takes precedence over user-funded billing.
@@ -404,7 +379,7 @@ function getModelViaUserGateway(
   metadata: GatewayMetadata,
   userGateway: UserGatewayRouting,
   sessionAffinity?: string,
-): ModelHandle {
+): ModelRouting {
   // Route through the user's AI Gateway data plane, speaking each provider's native API (see
   // gatewayNativeModel; unified *billing* has no API requirements). Auth is the connected user's
   // Cloudflare token via `cf-aig-authorization` (authorized by its `aig.run` scope); the
@@ -415,7 +390,7 @@ function getModelViaUserGateway(
   if (!model) {
     throw new Error(`Provider "${config.provider}" is not supported via unified billing.`);
   }
-  return makeHandle({
+  return ({
     model,
     // The Google SDK requires an API key and sends it as `x-goog-api-key`, which the gateway
     // forwards verbatim unless it recognizes the token as gateway auth -- same stored-key flow
@@ -443,7 +418,7 @@ function getModelViaGateway(
   config: AiModelConfig,
   initiator: AiChatAuthorInfo,
   options: ModelRoutingOptions,
-): ModelHandle {
+): ModelRouting {
   const metadata = buildMetadata(initiator, options.metadata);
   const gatewayAuthHeaders: ProviderHeaders = {
     // pi's API impls explicitly recognize cf-aig-authorization and skip SDK auth; the null
@@ -475,7 +450,7 @@ function getModelViaGateway(
       ...modelTokenWindow(config, catalog),
       compat: workersAiCompat(catalog),
     };
-    return makeHandle({
+    return ({
       model,
       apiKey: gwConfig.apiToken,
       sessionAffinity: options.sessionAffinity,
@@ -494,7 +469,7 @@ function getModelViaGateway(
     );
   }
 
-  return makeHandle({
+  return ({
     model,
     // The google API impl requires an apiKey (it doesn't recognize header-owned auth), and the
     // @google/genai SDK sends it as `x-goog-api-key` on every request -- which AI Gateway treats
@@ -511,12 +486,12 @@ function getModelViaGateway(
 }
 
 // Direct provider access using the credentials in the model config itself (no AI Gateway).
-function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelHandle {
+function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelRouting {
   const catalog = catalogModel(config.provider, config.model);
   const window = modelTokenWindow(config, catalog);
   switch (config.provider) {
     case "openrouter":
-      return makeHandle({
+      return ({
         model: {
           id: config.model,
           name: SUGGESTED_MODELS.openrouter[config.model]?.name ?? catalog?.name ?? config.model,
@@ -534,7 +509,7 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
         sessionAffinity,
       });
     case "anthropic":
-      return makeHandle({
+      return ({
         model: {
           id: config.model,
           name: catalog?.name ?? config.model,
@@ -561,7 +536,7 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
             "This Workers AI model has no Cloudflare credentials. Re-add it with your " +
             "Cloudflare account ID and an API token that permits Workers AI.");
       }
-      return makeHandle({
+      return ({
         model: {
           id: config.model,
           name: catalog?.name ?? config.model,
@@ -579,7 +554,7 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
       });
     }
     case "google":
-      return makeHandle({
+      return ({
         model: {
           id: config.model,
           name: catalog?.name ?? config.model,
@@ -604,7 +579,7 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
       // local proxy may reject an unexpected bearer token): the OpenAI SDK requires *some* key,
       // so give it a placeholder while a null default header deletes the Authorization header
       // the SDK derives from it.
-      return makeHandle({
+      return ({
         model: {
           id: config.model,
           name: config.model,
@@ -646,7 +621,7 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
         sessionAffinity,
       });
     case "openai":
-      return makeHandle({
+      return ({
         model: {
           id: config.model,
           name: catalog?.name ?? config.model,
