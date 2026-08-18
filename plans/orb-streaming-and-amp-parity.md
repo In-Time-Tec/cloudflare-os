@@ -1,5 +1,10 @@
 # Orbs: streaming, background work, and Amp parity
 
+> **Superseded in part by plans/pi-in-orb.md**: the "keep the loop in the Overseer DO" decision
+> is reversed — the agent loop moves into the orb behind a credential broker. Phases 1–2 below
+> (envd streaming, background processes, envdAccessToken) remain valid prerequisites; Phase 3's
+> workspace features land after the executor migration.
+
 Research inputs: web survey of Amp orbs (ampcode.com manual/news/security), industry agent-sandbox
 architectures (Codex cloud, Claude Code web, Copilot coding agent, Devin, Cursor, E2B/Modal/LangChain
 guidance), and the envd wire protocol read from source (e2b-dev/infra packages/envd). Key findings are
