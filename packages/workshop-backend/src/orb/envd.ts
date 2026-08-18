@@ -90,11 +90,11 @@ function parseConnectStream(body: string): CommandOutput {
   let stdout = "";
   let stderr = "";
   let exitCode = 0;
-  // Frames may also arrive newline-separated when proxies re-chunk; accept both by scanning
-  // for JSON object boundaries.
-  for (const match of body.matchAll(/\{[^\0]*?\}(?=\s*[\x00-\x1f{]|\s*$)/g)) {
+  // Frames are length-prefixed envelopes, but proxies may re-chunk; scan for balanced
+  // top-level JSON objects instead of trusting the framing bytes.
+  for (const candidate of extractJsonObjects(body)) {
     try {
-      const frame = JSON.parse(match[0]) as {
+      const frame = JSON.parse(candidate) as {
         event?: {
           data?: { stdout?: string; stderr?: string };
           end?: { exitCode?: number };
@@ -110,6 +110,35 @@ function parseConnectStream(body: string): CommandOutput {
     }
   }
   return { stdout, stderr, exitCode };
+}
+
+/** Yield each balanced top-level {...} object found in a re-chunked stream body. */
+function extractJsonObjects(body: string): string[] {
+  const objects: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      if (depth > 0 && --depth === 0 && start >= 0) {
+        objects.push(body.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return objects;
 }
 
 /** envd encodes byte payloads as base64 in JSON frames; pass printable text through as-is. */
