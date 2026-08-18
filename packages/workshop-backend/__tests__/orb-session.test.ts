@@ -82,4 +82,19 @@ describe("orbTurnUnavailableReason", () => {
       PUBLIC_BASE_URL: "https://example.com/",
     } as Cloudflare.Env)).toBeUndefined();
   });
+
+  it("rejects a loopback PUBLIC_BASE_URL the sandbox cannot call", () => {
+    const ready = {
+      E2B_API_KEY: "k",
+      ORB_TOKEN_SIGNING_KEY: "test-signing-key-at-least-32-bytes-long",
+    };
+    expect(orbTurnUnavailableReason({
+      ...ready,
+      PUBLIC_BASE_URL: "http://localhost:8787",
+    } as Cloudflare.Env)).toMatch(/public http\(s\) origin/);
+    expect(orbTurnUnavailableReason({
+      ...ready,
+      PUBLIC_BASE_URL: "http://127.0.0.1",
+    } as Cloudflare.Env)).toMatch(/public http\(s\) origin/);
+  });
 });
