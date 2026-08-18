@@ -109,6 +109,7 @@ test("generates the workers.dev composition", async () => {
   assert.equal(generated.microsoft.workers_dev, false);
   assert.equal(generated.microsoft.vars.BASE_URL,
       "https://acme-os.acme.workers.dev/gatekeeper/microsoft");
+  assert.equal(generated.backend.vars.PUBLIC_BASE_URL, "https://acme-os.acme.workers.dev");
   assert.equal(generated.backend.vars.DEPLOYMENT_AI_PROVIDERS, "openrouter");
   assert.equal(generated.backend.vars.DEPLOYMENT_AI_DEFAULT_MODEL, "openai/gpt-5.6-luna");
   assert.deepEqual(generated.backend.ai, { binding: "WORKERS_AI" });

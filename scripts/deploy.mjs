@@ -118,19 +118,19 @@ export function generateConfigs(config, accountId, bases, resources, environment
 
   const scheduler = setCommon(bases.scheduler, accountId, config.workers.scheduler);
 
+  const publicBaseUrl =
+      `https://${config.workers.router}.${resources.workersSubdomain}.workers.dev`;
   const microsoft = setCommon(bases.microsoft, accountId, config.workers.microsoft);
   microsoft.vars = {
     ...microsoft.vars,
-    // The public origin is the router's workers.dev URL; the router proxies
-    // /gatekeeper/microsoft/* to this Worker.
-    BASE_URL: `https://${config.workers.router}.${resources.workersSubdomain}.workers.dev` +
-        "/gatekeeper/microsoft",
+    BASE_URL: `${publicBaseUrl}/gatekeeper/microsoft`,
   };
 
   const backend = setCommon(bases.backend, accountId, config.workers.backend);
   backend.vars = {
     ...backend.vars,
     ADMINS: config.auth.admins,
+    PUBLIC_BASE_URL: publicBaseUrl,
     // Microsoft Entra is the preferred sign-in method: allowlist it and disable password auth.
     // But when its app-registration secrets are absent the gatekeeper deploys unconfigured, and
     // disabling password auth too would lock everyone out (auth/config.ts guards the same way) —
