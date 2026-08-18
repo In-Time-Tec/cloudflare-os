@@ -599,11 +599,13 @@ type ExternalMessageRecord = {
 } & (
   | {
       status: "waiting";
-      chatGatewayRpcTarget: NativeRpcStub<ChatGatewayRpcTarget>;
+      chatGatewayRpcTarget?: NativeRpcStub<ChatGatewayRpcTarget>;
+      threadGraph?: ThreadGraphTarget;
     }
   | {
       status: "ready";
-      chatGatewayRpcTarget: NativeRpcStub<ChatGatewayRpcTarget>;
+      chatGatewayRpcTarget?: NativeRpcStub<ChatGatewayRpcTarget>;
+      threadGraph?: ThreadGraphTarget;
       responseText: string;
     }
   | {
@@ -612,9 +614,20 @@ type ExternalMessageRecord = {
     }
 );
 
+/**
+ * Plain-props delivery target for a thread-graph message (a parent thread's spawnThread /
+ * sendToThread). Stored instead of an RPC stub — stubs constructed from ctx.exports are not
+ * storable — and resolved to the parent's DO stub at delivery time.
+ */
+type ThreadGraphTarget = {
+  parentThreadId: string;
+  messageKey: string;
+};
+
 type ExternalMessageResponseTargetRegistration = {
   idempotencyKey: string;
-  chatGatewayRpcTarget: NativeRpcStub<ChatGatewayRpcTarget>;
+  chatGatewayRpcTarget?: NativeRpcStub<ChatGatewayRpcTarget>;
+  threadGraph?: ThreadGraphTarget;
 };
 
 type ExternalMessageResponseTargetRegistrationDecision =
@@ -639,7 +652,12 @@ type ExternalMessageSubmitInput = {
   externalChatKey: string;
   idempotencyKey: string;
   prompt: string;
-  chatGatewayRpcTarget: NativeRpcStub<ChatGatewayRpcTarget>;
+  /**
+   * Response target for the completed agent turn. Omitted for thread-graph messages
+   * (`parentThreadId` set): the receiving DO stores plain props (ThreadGraphTarget) and resolves
+   * the parent's DO stub at delivery time, because RPC stubs are not storable across restarts.
+   */
+  chatGatewayRpcTarget?: NativeRpcStub<ChatGatewayRpcTarget>;
   title: string;
 };
 
@@ -1415,7 +1433,7 @@ class OverseerImpl implements AgentHooks {
   #deleteExternalMessageResponseDeliveryRecord(record: ExternalMessageRecord): void {
     this.storage.artifactResponseDeliveries.delete(record.idempotencyKey);
     if (record.status !== "delivered") {
-      record.chatGatewayRpcTarget[Symbol.dispose]();
+      record.chatGatewayRpcTarget?.[Symbol.dispose]();
     }
   }
 
@@ -3754,7 +3772,7 @@ class OverseerImpl implements AgentHooks {
           responseTargetRegistration.idempotencyKey,
           chatId,
           promptSequence,
-          responseTargetRegistration.chatGatewayRpcTarget,
+          responseTargetRegistration,
         );
       }
       if (externalChatKey) {
@@ -3832,7 +3850,7 @@ class OverseerImpl implements AgentHooks {
           responseTargetRegistration.idempotencyKey,
           chatId,
           promptSequence,
-          responseTargetRegistration.chatGatewayRpcTarget,
+          responseTargetRegistration,
         );
       }
     });
@@ -3854,12 +3872,27 @@ class OverseerImpl implements AgentHooks {
     idempotencyKey: string,
     chatId: number,
     promptSequence: number,
-    chatGatewayRpcTarget: NativeRpcStub<ChatGatewayRpcTarget>,
+    registration: ExternalMessageResponseTargetRegistration,
   ): void {
     if (this.storage.artifactResponseDeliveries.undeliveredByChatId.get(chatId)) {
       throw new Error("This chat already has an undelivered thread response target.");
     }
-    chatGatewayRpcTarget = chatGatewayRpcTarget.dup();
+    if (registration.threadGraph) {
+      // Thread-graph target: plain props only, resolved to the parent DO at delivery time.
+      this.storage.artifactResponseDeliveries.put({
+        idempotencyKey,
+        chatId,
+        promptSequence,
+        threadGraph: registration.threadGraph,
+        createdAt: Date.now(),
+        status: "waiting",
+      });
+      return;
+    }
+    if (!registration.chatGatewayRpcTarget) {
+      throw new Error("External message registration is missing its response target.");
+    }
+    let chatGatewayRpcTarget = registration.chatGatewayRpcTarget.dup();
     try {
       this.storage.artifactResponseDeliveries.put({
         idempotencyKey,
@@ -3940,9 +3973,17 @@ class OverseerImpl implements AgentHooks {
     if (record.status !== "ready") return;
 
     try {
-      await record.chatGatewayRpcTarget.onArtifactResponse({
-        text: record.responseText,
-      });
+      if (record.threadGraph) {
+        // Thread-graph delivery: call the parent thread's DO directly from the stored props.
+        let ns = this.ctx.exports.OverseerDurableObject;
+        let parent = ns.get(ns.idFromString(record.threadGraph.parentThreadId));
+        await parent.deliverChildThreadResponse(
+            this.ctx.id.toString(), record.threadGraph.messageKey, record.responseText);
+      } else if (record.chatGatewayRpcTarget) {
+        await record.chatGatewayRpcTarget.onArtifactResponse({
+          text: record.responseText,
+        });
+      }
     } catch (err) {
       this.logger.error("failed to deliver external message response", {
         event: "external.message.response.delivery.failed",
@@ -3959,7 +4000,7 @@ class OverseerImpl implements AgentHooks {
       createdAt: record.createdAt,
       deliveredAt: Date.now(),
     });
-    record.chatGatewayRpcTarget[Symbol.dispose]();
+    record.chatGatewayRpcTarget?.[Symbol.dispose]();
   }
 
   async deliverReadyExternalMessageResponses(): Promise<void> {
@@ -5829,8 +5870,8 @@ class OverseerImpl implements AgentHooks {
    * Spawn a child thread and send it an initial prompt. The child is a full thread: a fresh
    * Overseer DO owned by the same user, registered in their thread index with
    * `parentThreadId` set, running its own agent turn (and its own orb). The child's response
-   * is delivered back through a ThreadGraphLoopback response target into `childThreads`,
-   * where waitForThread picks it up.
+   * is delivered back through the external-message machinery (a stored ThreadGraphTarget)
+   * into `childThreads`, where waitForThreads picks it up.
    */
   async spawnChildThread(title: string, prompt: string): Promise<string> {
     if (!this.ownerId) throw new Error("Thread has been deleted.");
@@ -5868,25 +5909,17 @@ class OverseerImpl implements AgentHooks {
                              messageId: number): Promise<void> {
     if (!this.ownerId) throw new Error("Thread has been deleted.");
     let parentId = this.ctx.id.toString();
-    let messageKey = `${parentId}:${messageId}`;
-    let target = this.ctx.exports.ThreadGraphLoopback({props: {
-      parentThreadId: parentId,
-      childThreadId,
-      messageKey,
-    }});
-
     let ns = this.ctx.exports.OverseerDurableObject;
     let child = ns.get(ns.idFromString(childThreadId));
+    // No response-target stub crosses this call: the child stores plain ThreadGraphTarget props
+    // built from the ids below (RPC stubs cannot be persisted in DO storage).
     let result = await child.receiveExternalMessage({
       callerEmail: "",
       callerUserId: this.ownerId,
       parentThreadId: parentId,
       externalChatKey: `thread-graph:${parentId}`,
-      idempotencyKey: `thread-graph:${messageKey}`,
+      idempotencyKey: `thread-graph:${parentId}:${messageId}`,
       prompt,
-      // The child's delivery machinery dups and later disposes this stub; loopback stubs
-      // resolve statelessly from props, so persistence across DO restarts is safe.
-      chatGatewayRpcTarget: target,
       title,
     });
     if (!result.accepted) {
@@ -5894,7 +5927,7 @@ class OverseerImpl implements AgentHooks {
     }
   }
 
-  /** Called by ThreadGraphLoopback when a child thread's agent turn completes. */
+  /** Called (via deliverChildThreadResponse RPC) when a child thread's agent turn completes. */
   deliverChildThreadResponse(childThreadId: string, messageKey: string, text: string): void {
     let record = this.storage.childThreads.get(childThreadId);
     if (!record) return;  // Child was forgotten; drop.
@@ -6955,9 +6988,17 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
     externalChat = this.#getExternalChat(input.externalChatKey);
 
     // Submit the prompt to the existing external chat, or start a new external chat.
+    // Thread-graph messages carry no stub: only plain props are stored, and the parent DO is
+    // resolved at delivery time (RPC stubs constructed from ctx.exports are not storable).
+    if (input.parentThreadId === undefined && !input.chatGatewayRpcTarget) {
+      throw new Error("External message is missing its response target.");
+    }
     let responseTargetRegistration: ExternalMessageResponseTargetRegistration = {
       idempotencyKey: input.idempotencyKey,
       chatGatewayRpcTarget: input.chatGatewayRpcTarget,
+      threadGraph: input.parentThreadId !== undefined
+          ? { parentThreadId: input.parentThreadId, messageKey: input.idempotencyKey }
+          : undefined,
     };
     let chatId: number;
     if (externalChat) {
@@ -7038,7 +7079,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Delivery point for a child thread's completed agent response (see ThreadGraphLoopback).
+   * Delivery point for a child thread's completed agent response (see ThreadGraphTarget).
    * Idempotent per messageKey; the child redelivers until this returns successfully.
    */
   async deliverChildThreadResponse(childThreadId: string, messageKey: string, text: string)
@@ -7358,33 +7399,6 @@ export class AgentSelfLoopback
    * and so the loopback binding won't be created.
    */
   dummyMethodToWorkAroundValidatorBug() {}
-}
-
-type ThreadGraphLoopbackProps = {
-  /** The PARENT thread's hex DO id — where the child's response should be delivered. */
-  parentThreadId: string;
-  /** The CHILD thread's hex DO id — identifies which child produced the response. */
-  childThreadId: string;
-  /** Per-message idempotency key; the parent dedupes at-least-once redelivery with it. */
-  messageKey: string;
-};
-
-/**
- * Response target handed to a child thread when a parent thread's agent messages it (the
- * spawnThread / sendToThread tools). The child's external-message delivery machinery calls
- * `onArtifactResponse` when the child's agent turn completes; we forward the text to the parent
- * thread DO, which queues it for the parent agent's waitForThread tool. Delivery is
- * at-least-once (the child retries until acknowledged), so the parent dedupes by key.
- */
-export class ThreadGraphLoopback
-    extends WorkerEntrypoint<Cloudflare.Env, ThreadGraphLoopbackProps> {
-  async onArtifactResponse(response: {text: string}): Promise<void> {
-    let ns = this.ctx.exports.OverseerDurableObject;
-    let stub: DurableObjectStub<OverseerDurableObject> =
-        ns.get(ns.idFromString(this.ctx.props.parentThreadId));
-    await stub.deliverChildThreadResponse(
-        this.ctx.props.childThreadId, this.ctx.props.messageKey, response.text);
-  }
 }
 
 type TransientStubLoopbackProps = {

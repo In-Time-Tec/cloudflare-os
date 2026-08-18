@@ -21,7 +21,7 @@ import { getManagedAiConfig } from "./ai-gateway.js";
 import { AdminSettings, AdminApiImpl } from "./admin-settings.js";
 import { TemplateKvRecord, buildTemplateArchiveStream, sanitizeTemplateOutput, listFeaturedTemplatesFromKv, parseTemplateArchive, randomTemplateId, readTemplateContent, readTemplateKvRecord } from "./template-archive.js";
 import { GatekeeperConnectCallbackImpl, normalizeUsername, UserDurableObject, CLOUDFLARE_VENDOR_ID } from "./user";
-import { OverseerDurableObject, GatekeeperLoopback, CodeModeTailLoopback, AgentSpawnerGatekeeper, GatekeeperHookLoopback, ArtifactTailLoopback, AgentSelfLoopback, TransientStubLoopback, ThreadGraphLoopback } from "./overseer";
+import { OverseerDurableObject, GatekeeperLoopback, CodeModeTailLoopback, AgentSpawnerGatekeeper, GatekeeperHookLoopback, ArtifactTailLoopback, AgentSelfLoopback, TransientStubLoopback } from "./overseer";
 import { ExternalMessageGateway } from "./external-message-gateway";
 import { RpcStub as NativeRpcStub } from "cloudflare:workers";
 import { recordAnalytics } from "./analytics";
@@ -58,7 +58,7 @@ export { UserDurableObject, GatekeeperConnectCallbackImpl };
 // Re-export entrypoint types from overseer.ts.
 export { OverseerDurableObject, GatekeeperLoopback, GatekeeperHookLoopback,
     CodeModeTailLoopback, AgentSpawnerGatekeeper, ArtifactTailLoopback,
-    AgentSelfLoopback, TransientStubLoopback, ThreadGraphLoopback };
+    AgentSelfLoopback, TransientStubLoopback };
 
 // Re-export service-binding entrypoint for external channel integrations.
 export { ExternalMessageGateway };
