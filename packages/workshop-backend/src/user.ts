@@ -1,5 +1,5 @@
 import { RpcStub } from "capnweb";
-import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, TemplateMetadata, TemplateLibrarySummary, TemplateSource, TemplateUserSummary, TEMPLATE_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, TemplateOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
+import { ThreadMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ThreadMetadata, TemplateMetadata, TemplateLibrarySummary, TemplateSource, TemplateUserSummary, TEMPLATE_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, TemplateOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
 import { AuthenticatedIdentity, ConversationsApi, Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
 import { shouldAutoProvisionAccount, ambientGatekeeperMode } from "./provisioning-policy.js";
 import { CloudflareGatekeeperUser } from "@gadgets/workshop-shared/cloudflare-gatekeeper";
@@ -97,7 +97,7 @@ export const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 type TemplateUserRecord = {
   id: string;
   metadata: TemplateMetadata;
-  gadgetId?: string;
+  threadId?: string;
   // Source of truth for whether the template is featured deployment-wide.
   featured?: boolean;
 };
@@ -109,21 +109,21 @@ type LibraryTemplateRecord = {
   uploaded: boolean;
 };
 
-type GadgetRecord = GadgetMetadata & {
+type ArtifactRecord = ThreadMetadata & {
   created: Date;
-  lastActive?: Date;  // if missing, gadget is provisional
-  // If we're not the gadget owner (it was shared with us), `owner` is set (inherited from
-  // GadgetMetadata).
+  lastActive?: Date;  // if missing, thread is provisional
+  // If we're not the thread owner (it was shared with us), `owner` is set (inherited from
+  // ThreadMetadata).
 };
 
-function isFullyCreated(g: GadgetRecord): g is GadgetMetadataWithTimestamps {
+function isFullyCreated(g: ArtifactRecord): g is ThreadMetadataWithTimestamps {
   return g.lastActive !== undefined;
 }
 
 /**
  * One output of a thread, as pushed into a user's output index by the Overseer that owns it
  * (see `syncThreadOutputs()`). Carries only what the thread itself knows: its title,
- * activity time and ownership are joined in from the `gadgets` collection on read, so they can't
+ * activity time and ownership are joined in from the `threads` collection on read, so they can't
  * go stale here.
  */
 export type ThreadOutputEntry = {
@@ -131,7 +131,7 @@ export type ThreadOutputEntry = {
   title: string;
   created: Date;
 
-  /** The format the gadget was built as, if it was instantiated from a template declaring one. */
+  /** The format the thread was built as, if it was instantiated from a template declaring one. */
   output?: TemplateOutput;
 };
 
@@ -171,7 +171,7 @@ function makeUserStorage(storage: DurableObjectStorage) {
       aiModels: collection<UserAiModelRecord>()({
         primaryKey: record => record.profile.id,
       }),
-      gadgets: collection<GadgetRecord>()({
+      gadgets: collection<ArtifactRecord>()({
         primaryKey: "id"
       }),
       connectedAccounts: collection<ConnectedAccountRecord>()({
@@ -186,9 +186,9 @@ function makeUserStorage(storage: DurableObjectStorage) {
       libraryTemplates: collection<LibraryTemplateRecord>()({
         primaryKey: "id",
       }),
-      // Outputs of every thread in `gadgets`, mirrored here by each thread's Overseer so the
+      // Outputs of every thread in `threads`, mirrored here by each thread's Overseer so the
       // Outputs page is one cheap read of the user's own DO. Entries are meaningful only while the
-      // corresponding `gadgets` record exists; `syncThreadOutputs()` and the `gadgets` deletion
+      // corresponding `threads` record exists; `syncThreadOutputs()` and the `threads` deletion
       // paths keep the two in step.
       outputs: collection<OutputRecord>()({
         primaryKey: record => `${record.threadId}:${record.workpieceId}`,
@@ -301,10 +301,10 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
 
-    // Migrate data created prior to the minions -> gadgets rename.
+    // Migrate data created prior to the minions -> threads rename.
     // TODO(cleanup): Eventually remove this, very few people ever used it as "minions".
     for (let [key, value] of Array.from(ctx.storage.kv.list({prefix: "minions:"}))) {
-      let newKey = "gadgets:" + key.slice("minions:".length);
+      let newKey = "threads:" + key.slice("minions:".length);
       ctx.storage.kv.put(newKey, value);
       ctx.storage.kv.delete(key);
     }
@@ -502,17 +502,17 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Called by the overseer every time a collaborator opens a shared gadget.
+   * Called by the overseer every time a collaborator opens a shared thread.
    * Creates the record on first open; updates lastActive on subsequent opens.
    *
    * `role` is cached so listings built from this DO can offer the actions it permits without
    * reopening the thread to ask. Presentation only: every operation is still authorized by the
    * Overseer when attempted.
    */
-  async recordSharedGadgetOpen(
-      gadgetId: string, title: string, ownerProfile: AiChatAuthorInfo, role?: CollaboratorRole
+  async recordSharedThreadOpen(
+      threadId: string, title: string, ownerProfile: AiChatAuthorInfo, role?: CollaboratorRole
   ): Promise<void> {
-    let record = this.storage.gadgets.get(gadgetId);
+    let record = this.storage.gadgets.get(threadId);
     if (record && !record.owner) {
       throw new Error("User owns this thread; it's not shared with them.");
     }
@@ -525,9 +525,9 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       record.role = role;
       this.storage.gadgets.put(record);
     } else {
-      // First time opening this shared gadget.
+      // First time opening this shared thread.
       this.storage.gadgets.put({
-        id: gadgetId,
+        id: threadId,
         title,
         owner: ownerProfile,
         role,
@@ -542,23 +542,23 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
    * comes from the Overseer's live sharing graph; this only keeps the listing's available actions
    * accurate after a collaborator is downgraded.
    */
-  async updateSharedGadgetRole(gadgetId: string, role: CollaboratorRole): Promise<void> {
-    let record = this.storage.gadgets.get(gadgetId);
+  async updateSharedThreadRole(threadId: string, role: CollaboratorRole): Promise<void> {
+    let record = this.storage.gadgets.get(threadId);
     if (!record?.owner) return;
     record.role = role;
     this.storage.gadgets.put(record);
   }
 
   /**
-   * Forgets a gadget shared with this user: drops it from their thread listing and its outputs
+   * Forgets a thread shared with this user: drops it from their thread listing and its outputs
    * from their Outputs index. Called both when the user dismisses it and when their access is
    * revoked (Overseer.refreshAffectedCollaboratorListings()); it grants and revokes nothing.
    */
-  async forgetSharedGadget(gadgetId: string): Promise<void> {
-    let record = this.storage.gadgets.get(gadgetId);
+  async forgetSharedThread(threadId: string): Promise<void> {
+    let record = this.storage.gadgets.get(threadId);
     if (record && record.owner) {
-      this.storage.gadgets.delete(gadgetId);
-      this.storage.outputs.byThread.delete(gadgetId);
+      this.storage.gadgets.delete(threadId);
+      this.storage.outputs.byThread.delete(threadId);
     }
   }
 
@@ -781,18 +781,18 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return this.getChatContext(selectedModel?.id ?? null);
   }
 
-  async listGadgets(): Promise<GadgetMetadataWithTimestamps[]> {
-    let result: GadgetMetadataWithTimestamps[] = [];
-    for (let gadget of this.storage.gadgets.list()) {
-      if (isFullyCreated(gadget)) {
-        result.push(gadget);
+  async listThreads(): Promise<ThreadMetadataWithTimestamps[]> {
+    let result: ThreadMetadataWithTimestamps[] = [];
+    for (let thread of this.storage.gadgets.list()) {
+      if (isFullyCreated(thread)) {
+        result.push(thread);
       }
     }
     return result;
   }
 
-  async updateTitle(gadgetId: string, title: string) {
-    let record = this.storage.gadgets.get(gadgetId);
+  async updateTitle(threadId: string, title: string) {
+    let record = this.storage.gadgets.get(threadId);
     if (!record) {
       throw new Error("No such thread belonging to user.");
     }
@@ -800,8 +800,8 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     this.storage.gadgets.put(record);
   }
 
-  async updatePinned(gadgetId: string, pinned: boolean) {
-    let record = this.storage.gadgets.get(gadgetId);
+  async updatePinned(threadId: string, pinned: boolean) {
+    let record = this.storage.gadgets.get(threadId);
     if (!record) {
       throw new Error("No such thread belonging to user.");
     }
@@ -809,39 +809,39 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     this.storage.gadgets.put(record);
   }
 
-  async getGadget(id: string): Promise<GadgetMetadata | null> {
+  async getThread(id: string): Promise<ThreadMetadata | null> {
     return this.storage.gadgets.get(id) || null;
   }
 
-  async newGadget(id: string, title: string): Promise<void> {
+  async newThread(id: string, title: string): Promise<void> {
     let created = new Date();
     this.storage.gadgets.put({id, title, created});
   }
 
-  async ensureGadgetRegistered(id: string, title: string): Promise<void> {
+  async ensureThreadRegistered(id: string, title: string): Promise<void> {
     if (this.storage.gadgets.get(id)) return;
-    await this.newGadget(id, title);
+    await this.newThread(id, title);
   }
 
-  async setGadgetLastActive(id: string, time: Date, totalCost: number | undefined): Promise<void> {
-    let gadget = this.storage.gadgets.get(id);
-    if (gadget) {
-      gadget.lastActive = time;
+  async setThreadLastActive(id: string, time: Date, totalCost: number | undefined): Promise<void> {
+    let thread = this.storage.gadgets.get(id);
+    if (thread) {
+      thread.lastActive = time;
       if (totalCost) {
-        gadget.totalCost = totalCost;
+        thread.totalCost = totalCost;
       }
-      this.storage.gadgets.put(gadget);
+      this.storage.gadgets.put(thread);
     }
   }
 
-  async deleteGadget(id: string): Promise<void> {
+  async deleteThread(id: string): Promise<void> {
     this.storage.gadgets.delete(id);
     this.storage.outputs.byThread.delete(id);
   }
 
   /**
    * Replace the set of outputs recorded for one thread. Called by that thread's Overseer
-   * whenever its gadget registry changes and whenever it is opened.
+   * whenever its thread registry changes and whenever it is opened.
    *
    * A thread the user no longer tracks (deleted, or a shared one they dismissed) has its
    * entries dropped.
@@ -872,11 +872,11 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let cursor = startAfter ?? "";
     let targets: string[] = [];
     let examined = 0;
-    for (let gadget of this.storage.gadgets.list({startAfter, limit: OUTPUTS_BACKFILL_PAGE})) {
+    for (let thread of this.storage.gadgets.list({startAfter, limit: OUTPUTS_BACKFILL_PAGE})) {
       ++examined;
-      cursor = gadget.id;
+      cursor = thread.id;
       // A shared thread is mirrored on open, not swept; a half-created one has nothing yet.
-      if (!gadget.owner && isFullyCreated(gadget)) targets.push(gadget.id);
+      if (!thread.owner && isFullyCreated(thread)) targets.push(thread.id);
     }
     let done = examined < OUTPUTS_BACKFILL_PAGE;
 
@@ -942,11 +942,11 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
   // --- Template methods (called by Overseer during propagation) ---
 
-  async updateTemplate(id: string, metadata: TemplateMetadata, gadgetId: string): Promise<boolean> {
+  async updateTemplate(id: string, metadata: TemplateMetadata, threadId: string): Promise<boolean> {
     let existing = this.storage.templates.get(id);
     // Preserve the featured bit across metadata-only/code updates.
     let featured = existing?.featured === true;
-    this.storage.templates.put({id, metadata, gadgetId, featured});
+    this.storage.templates.put({id, metadata, threadId, featured});
     return featured;
   }
 
@@ -1111,14 +1111,14 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     };
   }
 
-  // A template with no `gadgetId` was added to the library rather than published from one of this
+  // A template with no `threadId` was added to the library rather than published from one of this
   // user's threads; one whose thread is no longer registered here was published from a
   // thread that has since been deleted.
   private templateSource(record: TemplateUserRecord): TemplateSource {
-    if (!record.gadgetId) return { type: "imported" };
-    let thread = this.storage.gadgets.get(record.gadgetId);
+    if (!record.threadId) return { type: "imported" };
+    let thread = this.storage.gadgets.get(record.threadId);
     if (!thread) return { type: "deletedThread" };
-    return { type: "thread", threadId: record.gadgetId, threadTitle: thread.title };
+    return { type: "thread", threadId: record.threadId, threadTitle: thread.title };
   }
 
   async listLibraryTemplates(): Promise<TemplateLibrarySummary[]> {
@@ -1329,7 +1329,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
   // Dedup concurrent #ensureAutoProvisionedAccounts() calls. The provisioning loop awaits cross-worker
   // RPCs (describe/createAccount), which releases the DO input gate; without this, two overlapping
-  // calls (e.g. the nav listing apps while a gadget opens) could both see "not provisioned" and
+  // calls (e.g. the nav listing apps while a thread opens) could both see "not provisioned" and
   // create duplicate accounts. Cleared on completion so a later call re-checks (e.g. for a gatekeeper
   // bound after this DO started).
   #ensureAccountsPromise?: Promise<void>;
@@ -1370,7 +1370,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   /**
    * Ensure the user's auto-provisioned accounts exist (idempotent; see #ensureAutoProvisionedAccounts),
    * then list those that declare an agent singleton and/or a management UI. Folding the ensure in lets
-   * callers (gadget open, app nav) provision and read the accounts back in a single round trip to this
+   * callers (thread open, app nav) provision and read the accounts back in a single round trip to this
    * DO. Callers filter on `description.singleton` (ambient capsules / catalog) or
    * `description.providesUi` (management-UI listing).
    */
@@ -1390,8 +1390,8 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
   /**
    * Get the gatekeeper class implementing a singleton account's agent session. The overseer installs
-   * this gatekeeper into the owner's gadgets (as a Facet) like any other gatekeeper, so the session
-   * and catalog run gadget-side in the gatekeeper's own worker — no further round-trips through this
+   * this gatekeeper into the owner's threads (as a Facet) like any other gatekeeper, so the session
+   * and catalog run thread-side in the gatekeeper's own worker — no further round-trips through this
    * DO. The account capability stays encapsulated here; only the class reference crosses out.
    */
   async getSingletonGatekeeperClass(accountId: number)
@@ -1741,7 +1741,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
     // Block whole gatekeepers + disabled resources at this single core-side chokepoint where a
     // resourceUrl becomes a capability (reached only via the user/UI-facing Overseer.newGatekeeper
-    // and template instantiation — never from gadget or agent code).
+    // and template instantiation — never from thread or agent code).
     let config = await readAdminConfig(this.env);
     let vendorId = account.vendorId.toLowerCase();
     if (config.disabledGatekeepers.includes(vendorId)) {

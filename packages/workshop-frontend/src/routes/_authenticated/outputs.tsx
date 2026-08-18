@@ -61,7 +61,7 @@ function outputKey(output: OutputSummary): string {
 
 // Whether the user may rename or remove this output. Follows the thread roles, not ownership: a
 // "build" collaborator holds the same capability over a workpiece as the owner (see
-// GadgetClientImpl). The user's own threads carry no role; a shared one must say so, since a
+// ArtifactClientImpl). The user's own threads carry no role; a shared one must say so, since a
 // role missing there predates role caching and may well be "use".
 function canModify(output: OutputSummary): boolean {
   return output.owner === undefined || output.role === 'build'
@@ -472,8 +472,8 @@ function OutputsPage() {
     let overseer
     let gadget
     try {
-      overseer = await authenticatedApi.openGadget(current.threadId)
-      gadget = overseer.getGadget(current.workpieceId)
+      overseer = await authenticatedApi.openThread(current.threadId)
+      gadget = overseer.getArtifact(current.workpieceId)
       const title = renameValue.trim()
       await gadget.setTitle(title)
       queryClient.setQueryData(outputsKey(), (list: OutputSummary[] | undefined) => (list ?? []).map((output) =>
@@ -496,8 +496,8 @@ function OutputsPage() {
     let overseer
     let gadget
     try {
-      overseer = await authenticatedApi.openGadget(current.threadId)
-      gadget = overseer.getGadget(current.workpieceId)
+      overseer = await authenticatedApi.openThread(current.threadId)
+      gadget = overseer.getArtifact(current.workpieceId)
       await gadget.remove()
       queryClient.setQueryData(outputsKey(), (list: OutputSummary[] | undefined) => (list ?? []).filter((output) => outputKey(output) !== outputKey(current)))
       setRemoveOutput(null)

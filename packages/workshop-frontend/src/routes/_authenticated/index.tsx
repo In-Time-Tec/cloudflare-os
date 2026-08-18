@@ -78,7 +78,7 @@ export function HomePageContent({ prompt }: HomeSearch) {
 
   const ensureProvisionalGadget = useCallback(() => {
     if (!provisionalOverseerRef.current) {
-      const overseer = authenticatedApi.newGadget();
+      const overseer = authenticatedApi.newThread();
       provisionalOverseerRef.current = { stub: overseer };
     }
   }, [authenticatedApi]);

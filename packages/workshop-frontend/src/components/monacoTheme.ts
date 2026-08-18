@@ -22,7 +22,7 @@ export const monoFont =
 
 let themesDefined = false
 
-export function getGadgetsCodeTheme(theme: ResolvedThemeMode): string {
+export function getArtifactsCodeTheme(theme: ResolvedThemeMode): string {
   return theme === 'dark' ? GADGETS_CODE_THEME_DARK : GADGETS_CODE_THEME_LIGHT
 }
 

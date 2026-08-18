@@ -1,12 +1,12 @@
-// This file defines the API spoken between the Gadgets Workshop service and the front-end UI.
+// This file defines the API spoken between the Artifacts Workshop service and the front-end UI.
 //
 // The UI is a good old "fat client" SPA. Why not use SSR? Because:
 // - Users of this UI are likely to have it open often, maybe even all the time. Startup time is
 //   less of a concern than with sites you visit only briefly, and assets are likely to be in cache
 //   in any case.
-// - The Gadgets themselves are sandboxed on the client side in addition to the server side. This
+// - The Artifacts themselves are sandboxed on the client side in addition to the server side. This
 //   sandboxing requires running code in the browser. It is not plausible to server-side render
-//   a Gadget itself.
+//   a Artifact itself.
 // - By providing a really clean API boundary between client and server, we make it easier to build
 //   alternative clients.
 // - SPA is just easier to think about.
@@ -18,10 +18,10 @@
 // The RPC interface operates over a WebSocket, which the client starts immediately at startup and
 // keeps open for the entire lifetime of the session, reconnecting if needed.
 //
-// Gadgets run inside a sandboxed iframe which has no ability to talk to the outside world at all,
-// except postMessage() to the parent frame. Through postMessage() exchanges, the Gadget can speak
+// Artifacts run inside a sandboxed iframe which has no ability to talk to the outside world at all,
+// except postMessage() to the parent frame. Through postMessage() exchanges, the Artifact can speak
 // RPC to the Workshop. Among other things, through this interface, the Workshop provides the
-// Gadget a stub pointing to the Gadget's server-side Durable Object interface.
+// Artifact a stub pointing to the Artifact's server-side Durable Object interface.
 
 import { RpcCompatible, RpcStub, RpcTarget } from "capnweb";
 import { AccountDescription, ActionKind, ActionDescription, AvatarImage, GatekeeperUiFrame, ObservationDescription, ResourceDescription, ResourceConfiguratorFrame, SupportedResource, VendorDescription, HookDescription } from "./gatekeeper.js";
@@ -159,7 +159,7 @@ export type ConnectedAccountsFilter = GatekeeperVendorFilter & {
 
 /**
  * Identifies a workpiece within a thread. A workpiece is a numbered thing the user (or agent)
- * is working on inside the thread -- currently a gadget or a gatekeeper (connection), with
+ * is working on inside the thread -- currently a artifact or a gatekeeper (connection), with
  * more types expected later. All workpiece types share one sequential per-thread ID namespace,
  * so a bare number unambiguously identifies a workpiece of any type, and derived names (Yjs file
  * roots, facet names) can never collide across types.
@@ -187,7 +187,7 @@ const RESERVED_WORDS = new Set([
 
 /**
  * Validates a binding name, throwing a descriptive Error if it is unacceptable. This is the one
- * shared validator applied at every chokepoint that writes a binding name (gadget binding edges,
+ * shared validator applied at every chokepoint that writes a binding name (artifact binding edges,
  * the thread default binding list, chat binding maps, spawner env configs, and the agent
  * tools), wherever the map is keyed.
  *
@@ -274,9 +274,9 @@ export type ObserverAccountChoice = {
 };
 
 /**
- * Provided by the client when opening a gadget. Invoked by the overseer ONLY if the opening user
+ * Provided by the client when opening a artifact. Invoked by the overseer ONLY if the opening user
  * must choose connected accounts for one or more gatekeeper bindings before they can observe the
- * gadget. In the common case (owner, or an already-configured observer) this is never called and
+ * artifact. In the common case (owner, or an already-configured observer) this is never called and
  * open() resolves without an extra round trip. The overseer does not resolve open() until this
  * returns. If the user cannot or will not provide the needed accounts, the callback should reject,
  * and the overseer denies the open.
@@ -307,26 +307,26 @@ function codedErrorFamily<Code extends string>(messages: Record<Code, string>) {
   };
 }
 
-/** Stable error codes attached to expected failures from `AuthenticatedApi.openGadget()`. */
-export const OPEN_GADGET_ERROR_CODES = {
+/** Stable error codes attached to expected failures from `AuthenticatedApi.openThread()`. */
+export const OPEN_THREAD_ERROR_CODES = {
   threadNotFound: "THREAD_NOT_FOUND",
   threadAccessDenied: "THREAD_ACCESS_DENIED",
 } as const;
 
-/** An expected failure code from `AuthenticatedApi.openGadget()`. */
-export type OpenGadgetErrorCode =
-    typeof OPEN_GADGET_ERROR_CODES[keyof typeof OPEN_GADGET_ERROR_CODES];
+/** An expected failure code from `AuthenticatedApi.openThread()`. */
+export type OpenThreadErrorCode =
+    typeof OPEN_THREAD_ERROR_CODES[keyof typeof OPEN_THREAD_ERROR_CODES];
 
-const openGadgetErrors = codedErrorFamily<OpenGadgetErrorCode>({
-  [OPEN_GADGET_ERROR_CODES.threadNotFound]: "Thread not found.",
-  [OPEN_GADGET_ERROR_CODES.threadAccessDenied]: "You don't have access to this thread.",
+const openThreadErrors = codedErrorFamily<OpenThreadErrorCode>({
+  [OPEN_THREAD_ERROR_CODES.threadNotFound]: "Thread not found.",
+  [OPEN_THREAD_ERROR_CODES.threadAccessDenied]: "You don't have access to this thread.",
 });
 
-/** Creates an expected `openGadget()` error with a machine-readable code. */
-export const createOpenGadgetError = openGadgetErrors.create;
+/** Creates an expected `openThread()` error with a machine-readable code. */
+export const createOpenThreadError = openThreadErrors.create;
 
-/** Reads the machine-readable code from an expected `openGadget()` error. */
-export const getOpenGadgetErrorCode = openGadgetErrors.getCode;
+/** Reads the machine-readable code from an expected `openThread()` error. */
+export const getOpenThreadErrorCode = openThreadErrors.getCode;
 
 /** Stable error codes attached to authentication failures. */
 export const AUTH_ERROR_CODES = {
@@ -390,8 +390,8 @@ export interface AuthenticatedApi extends RpcTarget {
   /**
    * List the user's configured AI models.
    *
-   * Note that the list returned here could be different from a particular gadget's Overseer,
-   * especially if the gadget is owned by someone else.
+   * Note that the list returned here could be different from a particular artifact's Overseer,
+   * especially if the artifact is owned by someone else.
    */
   listModels(): Promise<AiChatAuthorInfo[]>;
 
@@ -475,48 +475,48 @@ export interface AuthenticatedApi extends RpcTarget {
   getConversationsApi(): Promise<RpcStub<import("./gatekeeper.js").ConversationsApi> | null>;
 
   /**
-   * Open an existing gadget.
+   * Open an existing artifact.
    *
    * If `shareKey` is provided, the server redeems it before opening, adding the caller as a
    * collaborator. If the key is invalid or expired, the call throws an exception. This design
-   * allows share-key redemption and gadget opening in a single round trip, and further calls
+   * allows share-key redemption and artifact opening in a single round trip, and further calls
    * can be pipelined on the returned Overseer.
    *
-   * To allow for pipelining, this throws an exception if the gadget doesn't exist. Expected
-   * missing and authorization failures carry a code from `OPEN_GADGET_ERROR_CODES`.
+   * To allow for pipelining, this throws an exception if the artifact doesn't exist. Expected
+   * missing and authorization failures carry a code from `OPEN_THREAD_ERROR_CODES`.
    *
    * `configureObservers` is invoked only when the opening user is a non-owner who must choose
-   * connected accounts for one or more gatekeeper bindings before they can observe the gadget (see
+   * connected accounts for one or more gatekeeper bindings before they can observe the artifact (see
    * ObserverConfigCallback). It is never called for the owner or an already-configured observer,
    * so the common-case open is still a single pipelined round trip.
    *
-   * TODO(multi-gadget): This should be renamed to openThread().
+   * TODO(multi-artifact): This should be renamed to openThread().
    */
-  openGadget(id: string, shareKey?: string,
+  openThread(id: string, shareKey?: string,
              configureObservers?: RpcStub<ObserverConfigCallback>): Promise<RpcStub<Overseer>>;
 
   /**
    * Create a new thread. It will start out titled "Untitled Thread".
    *
-   * Note: A gadget is considered "provisional" until it has some sort of activity, such as a
-   *   chat message or code edit. Provisional gadgets do not appear on the home page and will be
+   * Note: A artifact is considered "provisional" until it has some sort of activity, such as a
+   *   chat message or code edit. Provisional artifacts do not appear on the home page and will be
    *   automatically deleted after some time. Note in particular that calling
    *   new*Gatekeeper() will not clear the provisional bit (as long as the gatekeeper isn't bound
-   *   into a gadget), so provisional gadgets are useful to allow the user to write an initial
-   *   chat message without explicitly creating a new gadget.
+   *   into a artifact), so provisional artifacts are useful to allow the user to write an initial
+   *   chat message without explicitly creating a new artifact.
    *
-   * TODO(multi-gadget): This should be renamed to newThread().
+   * TODO(multi-artifact): This should be renamed to newThread().
    */
-  newGadget(): Promise<RpcStub<Overseer>>;
+  newThread(): Promise<RpcStub<Overseer>>;
 
   /**
-   * List metadata about all the user's Gadgets. Used to display the front-page listing.
+   * List metadata about all the user's Artifacts. Used to display the front-page listing.
    *
-   * Provisional gadgets are hidden.
+   * Provisional artifacts are hidden.
    *
    * TODO: Pagination, sort options.
    */
-  listGadgets(): Promise<GadgetMetadataWithTimestamps[]>;
+  listThreads(): Promise<ThreadMetadataWithTimestamps[]>;
 
   /**
    * List the outputs of all the user's threads. Used to display the Outputs page, which lets
@@ -524,8 +524,8 @@ export interface AuthenticatedApi extends RpcTarget {
    *
    * Served from an index in the user's own account which each thread pushes to; a thread
    * shared with the user contributes its outputs from the first time the user opens it (matching
-   * when it appears in listGadgets()), and stops updating them if their access is revoked.
-   * Provisional gadgets (still awaiting acceptance of a chat's changes) are never included.
+   * when it appears in listThreads()), and stops updating them if their access is revoked.
+   * Provisional artifacts (still awaiting acceptance of a chat's changes) are never included.
    *
    * TODO: Pagination, sort options.
    */
@@ -606,10 +606,10 @@ export interface AuthenticatedApi extends RpcTarget {
   ): Promise<ResourceConfiguratorFrame>;
 
   /**
-   * Remove a shared gadget from the user's home page listing. Does NOT revoke the user's
-   * access -- if they open the gadget again (e.g., via link), it reappears on their home page.
+   * Remove a shared artifact from the user's home page listing. Does NOT revoke the user's
+   * access -- if they open the artifact again (e.g., via link), it reappears on their home page.
    */
-  dismissSharedGadget(gadgetId: string): Promise<void>;
+  dismissSharedThread(threadId: string): Promise<void>;
 
   /**
    * List all templates created by the current user (from User DO). Useful for an audit
@@ -660,7 +660,7 @@ export interface AuthenticatedApi extends RpcTarget {
   isTemplateInLibrary(templateId: string): Promise<{ uploaded: boolean } | null>;
 
   /**
-   * Create a new gadget from a template. Reads the template from KV, downloads code from
+   * Create a new artifact from a template. Reads the template from KV, downloads code from
    * R2, creates a new Overseer DO, initializes it with the template's code, and creates
    * gatekeepers from the provided binding assignments.
    *
@@ -669,13 +669,13 @@ export interface AuthenticatedApi extends RpcTarget {
    *
    * The returned Overseer can be used immediately (pipelining-friendly).
    */
-  newGadgetFromTemplate(
+  newThreadFromTemplate(
     templateId: string,
     bindings: Record<string, TemplateBindingAssignment>
   ): Promise<RpcStub<Overseer>>;
 
   /**
-   * Delete a template that the user owns. Works even if the source gadget has been deleted
+   * Delete a template that the user owns. Works even if the source artifact has been deleted
    * (operates on User DO + KV directly).
    */
   deleteOrphanedTemplate(templateId: string): Promise<void>;
@@ -970,7 +970,7 @@ export interface AdminApi {
   /**
    * Enable or disable a single gatekeeper resource type, keyed by vendor id + resource urlPattern.
    * Soft enforcement: disabling hides the resource from the connect UI, the resource picker, and the
-   * agent; it doesn't revoke a capability a gadget already holds.
+   * agent; it doesn't revoke a capability a artifact already holds.
    */
   setResourceEnabled(vendorId: string, urlPattern: string, enabled: boolean): Promise<void>;
 
@@ -978,7 +978,7 @@ export interface AdminApi {
    * Set a gatekeeper's availability. For an auto-provisioning ("ambient") gatekeeper, `mode` is the
    * full three-state (disabled / optional / enabled); for an ordinary gatekeeper only 'disabled' /
    * 'enabled' are valid ('optional' is rejected). Soft enforcement: it doesn't revoke a capability a
-   * gadget already holds, and 'disabled' leaves an ambient account's data dormant rather than deleting
+   * artifact already holds, and 'disabled' leaves an ambient account's data dormant rather than deleting
    * it.
    */
   setGatekeeperMode(vendorId: string, mode: AmbientGatekeeperMode): Promise<void>;
@@ -1252,7 +1252,7 @@ export const SUGGESTED_MODELS: Record<
   },
   "anthropic": {
     // TODO: Include Fable -- but we need an admin option to disable it, since many orgs don't
-    //   allow it for ZDR reasons. It's sort of overkill for building gadgets anyway.
+    //   allow it for ZDR reasons. It's sort of overkill for building artifacts anyway.
     "claude-opus-5": {name: "Claude Opus 5", contextWindow: 1000000},
     "claude-sonnet-5": {name: "Claude Sonnet 5", contextWindow: 1000000},
     "claude-haiku-4-5": {name: "Claude Haiku 4.5", contextWindow: 200000},
@@ -1273,17 +1273,17 @@ export const SUGGESTED_MODELS: Record<
  * Metadata about a thread (one Overseer DO and everything in it). Includes everything needed
  * to render the thread list on the front page.
  *
- * TODO(multi-gadget): Rename `ThreadMetadata`.
+ * TODO(multi-artifact): Rename `ThreadMetadata`.
  */
-export type GadgetMetadata = {
+export type ThreadMetadata = {
   /**
-   * Unique ID for this thread, used with `openGadget()`. This is a url-safe base64 value
+   * Unique ID for this thread, used with `openThread()`. This is a url-safe base64 value
    * chosen randomly when the thread is created.
    */
   id: string;
 
   /**
-   * Human-readable thread title. Can be modified. (Per-gadget titles live on the gadget
+   * Human-readable thread title. Can be modified. (Per-artifact titles live on the artifact
    * workpieces themselves; see WorkpieceSummary.)
    */
   title: string;
@@ -1291,37 +1291,37 @@ export type GadgetMetadata = {
   /** Total cost of AI inference in dollars, if known. */
   totalCost?: number;
 
-  /** Whether the user has pinned this gadget to the top of their list. */
+  /** Whether the user has pinned this artifact to the top of their list. */
   pinned?: boolean;
 
   /**
-   * Set when the gadget is not owned by the current user. Presence of this field indicates the
+   * Set when the artifact is not owned by the current user. Presence of this field indicates the
    * user is a collaborator, not the owner.
    */
   owner?: AiChatAuthorInfo;
 
   /**
-   * The viewing user's effective role for this gadget. The owner is always "build". Used by the
+   * The viewing user's effective role for this artifact. The owner is always "build". Used by the
    * frontend to decide whether to render the full editor ("build") or the UI-only shell ("use").
    * Absent implies "build" for backwards compatibility.
    */
   role?: CollaboratorRole;
 
   /**
-   * True when the gadget has observed data marked as share-prohibited. Such gadgets can no longer
+   * True when the artifact has observed data marked as share-prohibited. Such artifacts can no longer
    * be shared with additional users or links.
    */
   sharingProhibited?: boolean;
 
   /**
-   * Various objects in the API specify a gadgetId, but make the property optional. When omitted,
-   * the default gadget ID should be assumed. This is largely for backwards compatibility with
-   * records that were stored before threads could have multiple gadgets.
+   * Various objects in the API specify a artifactId, but make the property optional. When omitted,
+   * the default artifact ID should be assumed. This is largely for backwards compatibility with
+   * records that were stored before threads could have multiple artifacts.
    *
-   * TODO(multi-gadget): Do a migration to backfill all gadget IDs, then eliminate the concept of
-   * a default gadget from the API.
+   * TODO(multi-artifact): Do a migration to backfill all artifact IDs, then eliminate the concept of
+   * a default artifact from the API.
    */
-  defaultGadgetId?: WorkpieceId;
+  defaultArtifactId?: WorkpieceId;
 
   // TODO:
   // - created / modified / activity times
@@ -1329,10 +1329,10 @@ export type GadgetMetadata = {
 }
 
 /**
- * GadgetMetadata extended with timestamps. These are available when listing gadgets from the
+ * ThreadMetadata extended with timestamps. These are available when listing artifacts from the
  * user's collection, but not from the Overseer (which doesn't track them).
  */
-export type GadgetMetadataWithTimestamps = GadgetMetadata & {
+export type ThreadMetadataWithTimestamps = ThreadMetadata & {
   created: Date;
   lastActive: Date;
 }
@@ -1357,8 +1357,8 @@ export function isOutputIcon(value: unknown): value is OutputIcon {
 
 /**
  * What instantiating a template produces: a Document, a Spreadsheet, a Workflow, etc. Declared
- * by the template's author (see `TemplateMetadata.output`), inherited by every gadget instantiated
- * from it, and used wherever that gadget is shown in place of generic gadget.
+ * by the template's author (see `TemplateMetadata.output`), inherited by every artifact instantiated
+ * from it, and used wherever that artifact is shown in place of generic artifact.
  *
  * Declaring this is presentation only. Any user can publish a template calling itself a
  * Document; that must be harmless. Being offered as one of the deployment's standard formats (in
@@ -1379,14 +1379,14 @@ export type TemplateOutput = {
 
 /**
  * One entry of the "New ..." menu, as returned by `listOutputFormats()`. This names a template the
- * deployment has promoted, instantiated with `newGadgetFromTemplate(templateId, ...)` like any other.
+ * deployment has promoted, instantiated with `newThreadFromTemplate(templateId, ...)` like any other.
  */
 export type OutputFormatOffer = {
   templateId: string;
 
   /**
    * How to name and draw it: the template's own declaration with any deployment override
-   * applied. Also what the created gadget inherits.
+   * applied. Also what the created artifact inherits.
    */
   output: TemplateOutput;
 
@@ -1420,7 +1420,7 @@ export type ListOutputsResult = {
  * directly.
  */
 export type OutputSummary = {
-  /** The thread that contains this output (an `openGadget()` id). */
+  /** The thread that contains this output (an `openThread()` id). */
   threadId: string;
 
   /**
@@ -1431,7 +1431,7 @@ export type OutputSummary = {
 
   /**
    * The format this output was built as, if it came from a template declaring one. Absent for a
-   * gadget built from scratch, which displays as a generic app.
+   * artifact built from scratch, which displays as a generic app.
    */
   output?: TemplateOutput;
 
@@ -1461,22 +1461,22 @@ export type OutputSummary = {
 }
 
 /**
- * Describes the client-side UI code for a Gadget. Such code is intended to run inside an iframe
+ * Describes the client-side UI code for a Artifact. Such code is intended to run inside an iframe
  * sandbox with no access to the outside world except through an RPC interface to the Workshop
- * and to the Gadget's server.
+ * and to the Artifact's server.
  */
 export type UiBundle = {
   // URL from which the main bundle of UI code can be downloaded. This download contains all the
-  // Gadget's client-side assets. The URL is content-addressed to make it highly cacheable, even
-  // across multiple Gadgets sharing the same implementation (template).
+  // Artifact's client-side assets. The URL is content-addressed to make it highly cacheable, even
+  // across multiple Artifacts sharing the same implementation (template).
   //
   // TODO: Specify the format of what this URL returns. A raw HTML page doesn't quite work because
   //   the client needs to initialize the sandbox with some platform libraries before loading the
-  //   Gadget itself.
+  //   Artifact itself.
 //  url: string;
 
   /**
-   * Returns the raw JS code to execute in the Gadget iframe.
+   * Returns the raw JS code to execute in the Artifact iframe.
    * TODO: For now we just return the code but we should switch to serving over HTTP as described
    *   above, for caching. Or... maybe we should actually serve over RPC, but also employ the
    *   Cache API in the browser? Or some other local storage?
@@ -1589,8 +1589,8 @@ export type BoundHookInfo = {
   /** The gatekeeper that delivers this hook. */
   gatekeeperId: WorkpieceId;
 
-  /** The gadget whose code this hook wakes. */
-  gadgetId: WorkpieceId;
+  /** The artifact whose code this hook wakes. */
+  artifactId: WorkpieceId;
 
   resourceTitle?: string;
   resourceUrl?: string;
@@ -1599,14 +1599,14 @@ export type BoundHookInfo = {
 };
 
 /**
- * Configuration for an AI spawner binding. This binding allows the gadget to programmatically
- * create new agents, that is, start new agent chat threads, which appear in the gadget's agent
- * chat UI as new conversations. Agents created this way don't typically edit the gadget code, but
- * rather use the `executeCode` tool to directly invoke the gadget's bindings to perform tasks.
+ * Configuration for an AI spawner binding. This binding allows the artifact to programmatically
+ * create new agents, that is, start new agent chat threads, which appear in the artifact's agent
+ * chat UI as new conversations. Agents created this way don't typically edit the artifact code, but
+ * rather use the `executeCode` tool to directly invoke the artifact's bindings to perform tasks.
  * Each agent can additionally be provide "props" which may include additional RPC stubs
  * representing specific resources or callbacks relevant to that agent session.
  *
- * For example, a gadget that responds to emails might invoke an agent for each email message that
+ * For example, a artifact that responds to emails might invoke an agent for each email message that
  * arrives, with an RPC stub that allows it to reply to that email -- but prohibits the agent from
  * seeing or replying to any other email, to guard against prompt injection or information leakage
  * between email threads.
@@ -1616,7 +1616,7 @@ export type AgentSpawnerConfig = {
   displayName: string,
 
   /**
-   * Model ID to run, of the gadget owner's available models. Can be `null` to just create a chat
+   * Model ID to run, of the artifact owner's available models. Can be `null` to just create a chat
    * that doesn't actually run an agent -- the chat will be notified that the chat needs attention,
    * same as for an agent chat where the agent fails to mark the task complete.
    */
@@ -1629,21 +1629,21 @@ export type AgentSpawnerConfig = {
    * targets no longer exist are dropped); the spawned agent sees only these bindings, never the
    * thread's default binding list.
    *
-   * The entries are deliberately not limited to bindings held by the gadget that owns the
+   * The entries are deliberately not limited to bindings held by the artifact that owns the
    * spawner: a spawner may define bindings of its own, with its own names and targets.
    */
   env: Record<string, WorkpieceId>,
 };
 
 /**
- * Interface to a thread's Overseer, used to display the Gadget Workshop shell UI around that
- * thread. Thread-level concerns live here: the gadget registry, code sync (one Yjs doc for
- * the whole thread), chats, actions/hooks, sharing, and template listing. Per-gadget
- * operations live on the GadgetClient sub-capability (see createGadget()/getGadget()).
+ * Interface to a thread's Overseer, used to display the Artifact Workshop shell UI around that
+ * thread. Thread-level concerns live here: the artifact registry, code sync (one Yjs doc for
+ * the whole thread), chats, actions/hooks, sharing, and template listing. Per-artifact
+ * operations live on the ArtifactClient sub-capability (see createArtifact()/getArtifact()).
  */
 export interface Overseer extends RpcTarget {
   /** Get metadata describing this thread. */
-  getMetadata(): Promise<GadgetMetadata>;
+  getMetadata(): Promise<ThreadMetadata>;
 
   /**
    * Get metadata describing this thread and subscribe to changes.
@@ -1654,12 +1654,12 @@ export interface Overseer extends RpcTarget {
    * Disposing the returned `RpcStub` will cancel the subscription.
    */
   subscribeToMetadata(
-      callback: RpcStub<(metadata: GadgetMetadata) => void>)
+      callback: RpcStub<(metadata: ThreadMetadata) => void>)
       : Promise<RpcStub<{}>>;
 
   /**
    * Receive the current viewer roster, then incremental updates as viewers come and go.
-   * A viewer is present for the lifetime of the openGadget() session.
+   * A viewer is present for the lifetime of the openThread() session.
    */
   subscribeToPresence(subscriber: RpcStub<PresenceSubscriber>): Promise<RpcStub<{}>>;
 
@@ -1682,37 +1682,37 @@ export interface Overseer extends RpcTarget {
    *
    * The subscriber receives one entry() per existing workpiece, followed by ready(), then
    * incremental entry()/removed() calls as workpieces are created, renamed, or deleted. In v1
-   * only gadget-type workpieces are delivered (see WorkpieceSummary).
+   * only artifact-type workpieces are delivered (see WorkpieceSummary).
    *
    * Disposing the returned `RpcStub` will cancel the subscription.
    */
   subscribeToWorkpieces(subscriber: RpcStub<WorkpiecesSubscriber>): Promise<RpcStub<{}>>;
 
   /**
-   * Create a new gadget workpiece in this thread. `title` is required -- gadgets have no
-   * default title. The new gadget starts with no files and no bindings.
+   * Create a new artifact workpiece in this thread. `title` is required -- artifacts have no
+   * default title. The new artifact starts with no files and no bindings.
    *
    * If `chatId` is provided, the creation is provisional to that chat, exactly like code edits
    * made with a chat open: a `changes` message records it in the chat log (see
-   * `createdGadgets`), and the gadget remains pending (see WorkpieceSummary.chatId) until
+   * `createdArtifacts`), and the artifact remains pending (see WorkpieceSummary.chatId) until
    * the user accepts the chat's changes through that message (merging deletes the pending marker;
-   * reverting deletes the gadget). Without `chatId` the gadget is created permanently.
+   * reverting deletes the artifact). Without `chatId` the artifact is created permanently.
    *
-   * `bindingName` is the name under which the gadget appears in chat envs and the thread
+   * `bindingName` is the name under which the artifact appears in chat envs and the thread
    * default binding list (see validateBindingName()). When absent, the server chooses one from
-   * the title (via the quick model when configured, else a generic fallback). Gadget binding
+   * the title (via the quick model when configured, else a generic fallback). Artifact binding
    * names are unique within the thread: throws if the name is already taken by another
-   * gadget -- including one still pending in another chat (retry after that chat's changes are
+   * artifact -- including one still pending in another chat (retry after that chat's changes are
    * accepted or reverted).
    */
-  createGadget(title: string, chatId?: number, bindingName?: string)
-      : Promise<RpcStub<GadgetClient>>;
+  createArtifact(title: string, chatId?: number, bindingName?: string)
+      : Promise<RpcStub<ArtifactClient>>;
 
   /**
-   * Get the gadget with the given workpiece ID. To allow for pipelining, this throws an
-   * exception if there is no such gadget.
+   * Get the artifact with the given workpiece ID. To allow for pipelining, this throws an
+   * exception if there is no such artifact.
    */
-  getGadget(id: WorkpieceId): Promise<RpcStub<GadgetClient>>;
+  getArtifact(id: WorkpieceId): Promise<RpcStub<ArtifactClient>>;
 
   /**
    * Subscribe to code updates.
@@ -1747,8 +1747,8 @@ export interface Overseer extends RpcTarget {
    * appropriate account, use `subscribeConnectedAccounts()` with a `filter` for this URL, then
    * let the user choose one.
    *
-   * The new gatekeeper is a thread-level workpiece; it is not bound into any gadget's `env` by
-   * default. Use GadgetClient.bind() / bindWithSuggestedName() to expose it to a gadget.
+   * The new gatekeeper is a thread-level workpiece; it is not bound into any artifact's `env` by
+   * default. Use ArtifactClient.bind() / bindWithSuggestedName() to expose it to a artifact.
    */
   newGatekeeper(accountId: number, resourceUrl: string): Promise<GatekeeperClient<any> | null>;
 
@@ -1759,7 +1759,7 @@ export interface Overseer extends RpcTarget {
   newAiModelGatekeeper(modelId: string): Promise<GatekeeperClient<any>>;
 
   /**
-   * Create a new gatekeeper for an agent spawner binding. This allows the gadget to
+   * Create a new gatekeeper for an agent spawner binding. This allows the artifact to
    * programmatically spawn AI agents to complete tasks.
    */
   newAgentSpawnerGatekeeper(config: AgentSpawnerConfig): Promise<GatekeeperClient<any>>;
@@ -1783,10 +1783,10 @@ export interface Overseer extends RpcTarget {
   rejectAction(id: number): Promise<void>;
 
   /**
-   * List information about bound hooks (which could wake up a gadget asynchronously).
+   * List information about bound hooks (which could wake up a artifact asynchronously).
    *
-   * The list spans the whole thread; each entry names the gadget it wakes (see
-   * BoundHookInfo.templateId), so a per-gadget view must filter on that.
+   * The list spans the whole thread; each entry names the artifact it wakes (see
+   * BoundHookInfo.templateId), so a per-artifact view must filter on that.
    */
   listHooks(): Promise<BoundHookInfo[]>;
 
@@ -1806,7 +1806,7 @@ export interface Overseer extends RpcTarget {
    * without manual approval, and any matching action(s) already pending are applied immediately.
    *
    * Auto-approval rules are thread-wide per gatekeeper: approving an action kind approves it
-   * no matter which gadget invokes it.
+   * no matter which artifact invokes it.
    */
   setAutoApprovedActionKind(gatekeeperId: WorkpieceId, actionKind: ActionKind): Promise<void>;
 
@@ -1879,7 +1879,7 @@ export interface Overseer extends RpcTarget {
    * will be sent upfront. This is intended to allow resubscribing after being disconnected. If
    * `startAt` is omitted, only new messages will be sent.
    *
-   * Generally, a client should subscribe to chats immediately on loading the gadget editor. If
+   * Generally, a client should subscribe to chats immediately on loading the artifact editor. If
    * the client needs to call any methods like `listChats()` to backfill content, it should make
    * these calls after `subscribeToChat()`, so that there's no chance of missing a message. (It is
    * not necessary to wait for `subscribeToChat()` to return -- only to initiate the call before
@@ -1888,7 +1888,7 @@ export interface Overseer extends RpcTarget {
   subscribeToChat(subscriber: RpcStub<AiChatSubscriber>, startAfter?: Date): Promise<RpcStub<{}>>;
 
   /**
-   * Lists slash commands available from Gatekeepers currently attached to this Gadget, including
+   * Lists slash commands available from Gatekeepers currently attached to this Artifact, including
    * ambient ones.
    */
   listSlashCommands(): Promise<SlashCommandChoice[]>;
@@ -1997,8 +1997,8 @@ export interface Overseer extends RpcTarget {
   retryAgent(chatId: number, modelId: string): Promise<void>;
 
   /**
-   * Subscribe to the gadget worker's console logs. This allows the user to observe console logs
-   * being produced by the gadget.
+   * Subscribe to the artifact worker's console logs. This allows the user to observe console logs
+   * being produced by the artifact.
    *
    * At present, logs are not stored, so the only way to see them is to be subscribed when they
    * happen.
@@ -2010,20 +2010,20 @@ export interface Overseer extends RpcTarget {
   // --- Template management ---
   //
   // Template listing and maintenance are thread-level (each template record remembers which
-  // gadget it exports). Creating a template is per-gadget: see GadgetClient.createTemplate().
+  // artifact it exports). Creating a template is per-artifact: see ArtifactClient.createTemplate().
 
-  /** List templates created from this thread's gadgets. */
-  listTemplates(): Promise<TemplateGadgetSummary[]>;
+  /** List templates created from this thread's artifacts. */
+  listTemplates(): Promise<TemplateArtifactSummary[]>;
 
   /**
    * Update an existing template. Any combination of metadata and code can be updated
    * atomically in a single call with one propagation pass.
    *
    * - `title` / `description`: if provided, update the respective field.
-   * - `updateCode`: if true, snapshot the source gadget's current committed code into the
+   * - `updateCode`: if true, snapshot the source artifact's current committed code into the
    *   template and increment the template version.
    * - `updateBindings`: if true, refresh the template's connection annotations from
-   *   the source gadget's current bindings without changing the code snapshot.
+   *   the source artifact's current bindings without changing the code snapshot.
    *
    * At least one option must be provided.
    */
@@ -2206,13 +2206,13 @@ export type AiChatHistoryPage = {
 
 export type AiChatAuthorInfo = {
   /**
-   * Is the author a human, AI, or Gadget?
+   * Is the author a human, AI, or Artifact?
    *
-   * "gadget" means this is a prompt sent to an agent spawner -- i.e. a gadget spawned an
-   * agent programmatically. In this case `id` is the gadget's owner's ID (for accounting purposes)
-   * and `name` is the gadget title.
+   * "artifact" means this is a prompt sent to an agent spawner -- i.e. a artifact spawned an
+   * agent programmatically. In this case `id` is the artifact's owner's ID (for accounting purposes)
+   * and `name` is the artifact title.
    */
-  type: "user" | "agent" | "gadget";
+  type: "user" | "agent" | "artifact";
 
   /**
    * Unique author identifier: for users, the opaque internal user id (a Durable Object id string);
@@ -2290,7 +2290,7 @@ export type AiChatMessageBody = {
 
   /**
    * The code changes themselves, as a Yjs-encoded (V2) update against the thread code Y.Doc.
-   * Absent when the batch records only gadget creations and/or binding additions with no
+   * Absent when the batch records only artifact creations and/or binding additions with no
    * accompanying code edits.
    */
   update?: Uint8Array;
@@ -2309,26 +2309,26 @@ export type AiChatMessageBody = {
   observedCodeVersion?: number;
 
   /**
-   * Gadgets created as part of this batch of changes (by the agent's `createGadget` tool, or by
-   * the user via Overseer.createGadget() with a chat open -- in the latter case `update` is
+   * Artifacts created as part of this batch of changes (by the agent's `createArtifact` tool, or by
+   * the user via Overseer.createArtifact() with a chat open -- in the latter case `update` is
    * omitted). Like the code changes themselves, the creations are provisional: a merge
    * through this message makes them permanent, and a revert covering it deletes them. Titles are
    * denormalized for display, since a reverted creation's registry record is gone. `bindingName`
-   * is the name under which the gadget appears in the creating chat's env (and, once merged, the
+   * is the name under which the artifact appears in the creating chat's env (and, once merged, the
    * thread default binding list); recording it here lets the creating chat pick the name back
    * up on replay.
    */
-  createdGadgets?: {gadgetId: WorkpieceId, title: string, bindingName: string}[];
+  createdArtifacts?: {artifactId: WorkpieceId, title: string, bindingName: string}[];
 
   /**
-   * Binding edges added to gadgets as part of this batch of changes (by the agent's
-   * setGadgetBinding tool, or by the user binding a connection with a chat open -- in the latter
-   * case `update` is omitted). Like `createdGadgets`, the additions are
+   * Binding edges added to artifacts as part of this batch of changes (by the agent's
+   * setArtifactBinding tool, or by the user binding a connection with a chat open -- in the latter
+   * case `update` is omitted). Like `createdArtifacts`, the additions are
    * provisional: the edge is visible only from this chat until a merge through this message
    * makes it permanent, and a revert covering it deletes the edge. `name` is the binding's name
-   * within the gadget identified by `gadgetId`; `target` is the bound workpiece.
+   * within the artifact identified by `artifactId`; `target` is the bound workpiece.
    */
-  addedBindings?: {gadgetId: WorkpieceId, name: string, target: WorkpieceId}[];
+  addedBindings?: {artifactId: WorkpieceId, name: string, target: WorkpieceId}[];
 } | {
   /**
    * Indicates that at this point in the chat, the user chose to merge all (non-reverted) changes
@@ -2338,7 +2338,7 @@ export type AiChatMessageBody = {
   mergeThrough: number;
 
   /**
-   * Code version at which the merge was applied. (A merge covering only gadget creations /
+   * Code version at which the merge was applied. (A merge covering only artifact creations /
    * binding additions writes no new code version; this then records the bumped version counter.)
    */
   version: number;
@@ -2366,10 +2366,10 @@ export type AiChatMessageBody = {
   actionLog?: ActionLogEntry;
 } | {
   /**
-   * Indicates that the AI agent accessed the gadget one or more times. This is logged in order
-   * to track whether information known to the gadget may have tainted the agent session.
+   * Indicates that the AI agent accessed the artifact one or more times. This is logged in order
+   * to track whether information known to the artifact may have tainted the agent session.
    */
-  type: "useGadget";
+  type: "useArtifact";
 } | {
   /**
    * Indicates that the agent run ended with an error (e.g. LLM API failure, abort, server
@@ -2454,8 +2454,8 @@ export type AiChatMessageBody = {
 
   /**
    * Once accepted, the id of the created gatekeeper. The resource is surfaced to the agent as a
-   * named binding in the chat's env; the agent can additionally bind it into a gadget via
-   * setGadgetBinding if its gadget code needs it.
+   * named binding in the chat's env; the agent can additionally bind it into a artifact via
+   * setArtifactBinding if its artifact code needs it.
    */
   gatekeeperId?: WorkpieceId;
 
@@ -2518,9 +2518,9 @@ export function isTextLikeAttachmentMimeType(mimeType: string): boolean {
 /**
  * Describes a tool call performed by an AI agent as part of a message.
  *
- * The agent addresses workpieces by their chat binding name (the `gadget`/`workpiece` parameters
- * on several variants), never by workpiece ID. Logs persisted before multi-gadget threads lack
- * these names; when a name is absent, the thread's `defaultGadgetId` (from `GadgetMetadata`)
+ * The agent addresses workpieces by their chat binding name (the `artifact`/`workpiece` parameters
+ * on several variants), never by workpiece ID. Logs persisted before multi-artifact threads lack
+ * these names; when a name is absent, the thread's `defaultArtifactId` (from `ThreadMetadata`)
  * is assumed, and it is an error for it to be omitted when there is no default.
  */
 export type AiToolCall = {
@@ -2540,7 +2540,7 @@ export type AiToolCall = {
   error?: string;
 } & ({
   /**
-   * Any workpiece can potentially export files. Gadgets, in particular, export their source code
+   * Any workpiece can potentially export files. Artifacts, in particular, export their source code
    * as files, but other workpieces may export other filesystems. Hence, a file is identified by
    * the pair of a workpiece reference (the `workpiece` chat binding name) and `filename`.
    */
@@ -2578,29 +2578,29 @@ export type AiToolCall = {
   };
 } | {
   /**
-   * Wire one of the chat's bindings into a gadget's own binding list. The addition is provisional
+   * Wire one of the chat's bindings into a artifact's own binding list. The addition is provisional
    * to the chat, recorded by a "changes" message (see `addedBindings`).
    */
-  toolName: "setGadgetBinding";
+  toolName: "setArtifactBinding";
   input: {
-    /** Chat binding name of the target gadget. */
-    gadget: string;
-    /** Chat binding name of the resource to wire into the gadget. */
+    /** Chat binding name of the target artifact. */
+    artifact: string;
+    /** Chat binding name of the resource to wire into the artifact. */
     source: string;
-    /** Name to bind the resource under within the gadget; defaults to `source`. */
+    /** Name to bind the resource under within the artifact; defaults to `source`. */
     name?: string;
   };
 
   /**
    * The added binding edge as resolved when the tool ran, recorded so crash recovery can re-adopt
    * an addition whose "changes" message never flushed (see `addedBindings`), mirroring
-   * createGadget's recorded output. `changeId` is the change number of the batch that records the
+   * createArtifact's recorded output. `changeId` is the change number of the batch that records the
    * addition. Absent only when the call failed (`error` is set).
    */
-  output?: {gadgetId: WorkpieceId, name: string, target: WorkpieceId, changeId: number};
+  output?: {artifactId: WorkpieceId, name: string, target: WorkpieceId, changeId: number};
 } | {
   /**
-   * Obsolete predecessor of `setGadgetBinding`, from before named chat bindings; appears only in
+   * Obsolete predecessor of `setArtifactBinding`, from before named chat bindings; appears only in
    * old chat logs. Its additions were immediate and permanent (nothing provisional to recover),
    * so replay is a recorded no-op.
    */
@@ -2610,39 +2610,39 @@ export type AiToolCall = {
     bindingName: string;
   };
 } | {
-  /** Create a new gadget workpiece in the thread, either empty or instantiated from a template. */
-  toolName: "createGadget";
+  /** Create a new artifact workpiece in the thread, either empty or instantiated from a template. */
+  toolName: "createArtifact";
   input: {
-    /** Human-readable title for the new gadget. Required: the agent always names its creations. */
+    /** Human-readable title for the new artifact. Required: the agent always names its creations. */
     title: string;
 
     /**
-     * Name under which the gadget appears in the chat's env and, once merged, the thread
+     * Name under which the artifact appears in the chat's env and, once merged, the thread
      * default binding list (see validateBindingName()).
      */
     bindingName: string;
 
     /**
-     * If present, the new gadget starts with the named template's files (copied into the chat's
+     * If present, the new artifact starts with the named template's files (copied into the chat's
      * proposed changes) instead of empty.
      */
     templateId?: string;
   };
 
   /**
-   * The created gadget's workpiece ID, recorded when the gadget was actually created. History
+   * The created artifact's workpiece ID, recorded when the artifact was actually created. History
    * replay reconstructs tool outputs by re-running persisted calls, but a creation tool can't be
    * re-run; replay returns this recorded result without creating anything.
    *
    * `changeId` is the change number of the "changes" batch that records the creation (see
-   * `createdGadgets` on the "changes" message body), reported like writeFile/editFile report
+   * `createdArtifacts` on the "changes" message body), reported like writeFile/editFile report
    * theirs so reverts can be referred to precisely.
    *
    * `templateNotes` is present for template instantiations: formatted text describing the files
    * copied in and the bindings the template expects the agent to wire up. Recorded so replay
    * doesn't have to re-fetch the template (whose content may have changed since).
    */
-  output?: {gadgetId: WorkpieceId, changeId?: number, templateNotes?: string};
+  output?: {artifactId: WorkpieceId, changeId?: number, templateNotes?: string};
 } | {
   toolName: "executeCode";
   input: {
@@ -2678,7 +2678,7 @@ export type AiToolCall = {
   /**
    * List the templates the thread owner could instantiate (their own templates, their
    * library, and the deployment's featured templates), so the agent can pass a templateId to
-   * createGadget. The formatted text output is recorded so replay doesn't re-list.
+   * createArtifact. The formatted text output is recorded so replay doesn't re-list.
    */
   toolName: "listTemplates";
   input: {};
@@ -2765,7 +2765,7 @@ export type CapsuleSpecifier = {
   /**
    * ID of the workpiece, which should have been created using newGatekeeper() or similar.
    *
-   * This can reference any workpiece, including gadgets. It should be called `workpieceId`, but
+   * This can reference any workpiece, including artifacts. It should be called `workpieceId`, but
    * when it was introduced it could only point to gatekeepers, and a name change would break
    * existing storage.
    */
@@ -2908,8 +2908,8 @@ export type AiChatStreamEvent = {
   file: { workpieceId: WorkpieceId, filename: string };
 } | {
   /**
-   * Streaming createGadget output format, used by the UI before the finalized tool call arrives.
-   * Has the deployment's overrides applied, so it matches what the gadget is stamped with.
+   * Streaming createArtifact output format, used by the UI before the finalized tool call arrives.
+   * Has the deployment's overrides applied, so it matches what the artifact is stamped with.
    */
   type: "toolCallOutputFormat";
   toolCallId: string;
@@ -2971,14 +2971,14 @@ export interface AiChatSubscriber {
 
 /**
  * Interface implemented by the client to receive callback notifications about console logs written
- * by the gadget.
+ * by the artifact.
  */
 export interface ConsoleLogSubscriber {
   /**
    * Deliver a batch of logs. Often just one log is delivered at a time, but for efficiency they
    * may be batched.
    *
-   * If `chatId` is non-null, then the logs were generated while running the version of the gadget
+   * If `chatId` is non-null, then the logs were generated while running the version of the artifact
    * code including the changes in the given chat. This can be used to associate the logs with
    * an ongoing agent session and report them to that session.
    */
@@ -2999,14 +2999,14 @@ export type ConsoleLogEvent = {
 
 /**
  * Summary of one workpiece, delivered via Overseer.subscribeToWorkpieces(). In v1 only
- * gadget-type workpieces are published (gatekeeper workpieces -- chat capsules, ambient
+ * artifact-type workpieces are published (gatekeeper workpieces -- chat capsules, ambient
  * singletons, connections -- are not listed); `type` discriminates for future workpiece types.
  */
 export type WorkpieceSummary = {
   id: WorkpieceId;
-  type: "gadget";
+  type: "artifact";
 
-  /** Display title. (For a gadget, its user-renamable title.) */
+  /** Display title. (For a artifact, its user-renamable title.) */
   title: string;
 
   /**
@@ -3017,8 +3017,8 @@ export type WorkpieceSummary = {
 
   /**
    * The name of the Y.Doc root map that holds this workpiece's files, if it owns files (see
-   * Overseer.subscribeToCode). For most gadgets this is the decimal workpiece ID; the gadget
-   * migrated from before multi-gadget support keeps the legacy unnamed root "".
+   * Overseer.subscribeToCode). For most artifacts this is the decimal workpiece ID; the artifact
+   * migrated from before multi-artifact support keeps the legacy unnamed root "".
    */
   filesRoot?: string;
 
@@ -3026,7 +3026,7 @@ export type WorkpieceSummary = {
    * If present, this workpiece exists only in the context of the given chat. The UI should display
    * it only while the given chat is open.
    *
-   * For gadgets, this means the gadget is still provisional: it becomes permanent when the user
+   * For artifacts, this means the artifact is still provisional: it becomes permanent when the user
    * accepts the chat's changes through its creation message, and is deleted if those changes are
    * reverted (or the chat is deleted).
    */
@@ -3049,11 +3049,11 @@ export interface WorkpiecesSubscriber {
 }
 
 /**
- * Information about one of a gadget's bindings, for display in the Connections tab. Returned by
- * GadgetClient.listBindings().
+ * Information about one of a artifact's bindings, for display in the Connections tab. Returned by
+ * ArtifactClient.listBindings().
  */
-export type GadgetBindingInfo = {
-  /** The binding name, as it appears in the gadget worker's `env`. */
+export type ArtifactBindingInfo = {
+  /** The binding name, as it appears in the artifact worker's `env`. */
   name: string;
 
   /** The workpiece that the binding points at. */
@@ -3117,7 +3117,7 @@ export type GatekeeperCreationSpec = {
   modelName?: string;
 } | {
   /**
-   * A singleton gatekeeper account (e.g. the Context Library) auto-provided to every gadget as an
+   * A singleton gatekeeper account (e.g. the Context Library) auto-provided to every artifact as an
    * unnamed capsule so the agent can read/search it in code. Not user-configured, so excluded from
    * templates; re-added automatically if missing.
    */
@@ -3128,8 +3128,8 @@ export type GatekeeperCreationSpec = {
 
 /**
  * User-provided metadata controlling how a gatekeeper binding should appear in templates.
- * Stored on the binding edge (a gadget's binding-name -> gatekeeper mapping), not on the
- * gatekeeper itself: two gadgets binding the same gatekeeper can annotate it differently for
+ * Stored on the binding edge (a artifact's binding-name -> gatekeeper mapping), not on the
+ * gatekeeper itself: two artifacts binding the same gatekeeper can annotate it differently for
  * their respective templates. Optional: when absent, the binding is included in the template
  * with a generated title, empty description, and no resource suggestion.
  *
@@ -3147,23 +3147,23 @@ export type TemplateBindingAnnotation = {
  * thread-local, so a spawner's `env` (see AgentSpawnerConfig.env) can't transfer into a
  * template as-is; instead each entry references either one of the template's own bindings by
  * name -- the user fills it at instantiation time like any other binding, and the spawner env
- * entry resolves to the gatekeeper created for it -- or the template's gadget itself, resolving
- * to the newly instantiated gadget.
+ * entry resolves to the gatekeeper created for it -- or the template's artifact itself, resolving
+ * to the newly instantiated artifact.
  */
 export type SpawnerEnvTarget = {
   type: "binding";
 
   /**
    * Key into TemplateMetadata.bindings. May reference a binding that is also bound into the
-   * gadget, or one synthesized purely to feed this spawner (see TemplateBinding.spawnerOnly).
+   * artifact, or one synthesized purely to feed this spawner (see TemplateBinding.spawnerOnly).
    */
   name: string;
 } | {
   /**
-   * This spawner binding refers back to the gadget itself (the one instantiated from the
+   * This spawner binding refers back to the artifact itself (the one instantiated from the
    * template).
    */
-  type: "gadget";
+  type: "artifact";
 };
 
 /**
@@ -3179,7 +3179,7 @@ export type TemplateBinding = {
    * If true, this binding exists only to satisfy an agent spawner's env (it is referenced by
    * some spawner's `env` entry as a SpawnerEnvTarget). The user fills it at instantiation time
    * like any other binding, but the created gatekeeper is fed only to the spawner(s) referencing
-   * it -- it is not bound into the gadget itself.
+   * it -- it is not bound into the artifact itself.
    */
   spawnerOnly?: true;
 } & ({
@@ -3195,7 +3195,7 @@ export type TemplateBinding = {
   /** URL pattern describing the type of resource this binding accepts. */
   typeUrlPattern: string;
 
-  /** The specific resource URL from the source gadget (suggestion only). */
+  /** The specific resource URL from the source artifact (suggestion only). */
   resourceUrl?: string;
 } | {
   /**
@@ -3242,7 +3242,7 @@ export function templateScreenshotUrl(id: string, metadata: { screenshot?: true,
 
 /**
  * General metadata about a template. Stored (in slightly different wrapper records) in
- * three locations: Gadget DO, User DO, and KV.
+ * three locations: Artifact DO, User DO, and KV.
  */
 export type TemplateMetadata = {
   title: string;
@@ -3260,8 +3260,8 @@ export type TemplateMetadata = {
   screenshot?: true;
 
   /**
-   * What instantiating this template produces. Absent means a generic app. Inherited by gadgets
-   * created from this template, and preserved when such a gadget is republished as a template.
+   * What instantiating this template produces. Absent means a generic app. Inherited by artifacts
+   * created from this template, and preserved when such a artifact is republished as a template.
    */
   output?: TemplateOutput;
 
@@ -3278,8 +3278,8 @@ export type TemplatePublicInfo = {
   screenshotUrl?: string;
 };
 
-/** Gadget-side summary (returned by Overseer.listTemplates). */
-export type TemplateGadgetSummary = {
+/** Artifact-side summary (returned by Overseer.listTemplates). */
+export type TemplateArtifactSummary = {
   id: string;
   title: string;
   description: string;
@@ -3325,7 +3325,7 @@ export type TemplateLibrarySummary = {
 };
 
 /**
- * Binding assignment (input to newGadgetFromTemplate).
+ * Binding assignment (input to newThreadFromTemplate).
  * When instantiating a template, the user provides a Record mapping binding name ->
  * assignment. Every required binding in the template must have a corresponding entry.
  */
@@ -3343,7 +3343,7 @@ export type TemplateBindingAssignment = {
 
 /**
  * Common base interface for per-workpiece capabilities. Each workpiece type has its own
- * subinterface (GadgetClient, GatekeeperClient<T>) for type-specific operations; this base holds
+ * subinterface (ArtifactClient, GatekeeperClient<T>) for type-specific operations; this base holds
  * the shared identity/lifecycle surface.
  */
 export interface WorkpieceClient extends RpcTarget {
@@ -3351,7 +3351,7 @@ export interface WorkpieceClient extends RpcTarget {
   getId(): Promise<WorkpieceId>;
 
   /**
-   * Human-readable title, for display. For a gadget this is its user-renamable title; for a
+   * Human-readable title, for display. For a artifact this is its user-renamable title; for a
    * gatekeeper it is the connected resource's title.
    */
   getTitle(): Promise<string>;
@@ -3368,64 +3368,64 @@ export interface WorkpieceClient extends RpcTarget {
   /**
    * Permanently remove this workpiece from the thread.
    *
-   * For a gadget, this deletes its registry entry (including its binding map) and hooks and
-   * clears its files; gatekeepers it bound survive, possibly no longer bound by any gadget. For
+   * For a artifact, this deletes its registry entry (including its binding map) and hooks and
+   * clears its files; gatekeepers it bound survive, possibly no longer bound by any artifact. For
    * a gatekeeper, this destroys the connection itself -- distinct from merely unbinding it from
-   * one gadget (GadgetClient.unbind()).
+   * one artifact (ArtifactClient.unbind()).
    */
   remove(): Promise<void>;
 }
 
 /**
- * Capability representing one gadget workpiece within a thread. Obtained from
- * Overseer.createGadget() or Overseer.getGadget(). Thread-level concerns (code sync, chats,
- * sharing, actions, template listing) stay on Overseer; this covers the per-gadget surface.
+ * Capability representing one artifact workpiece within a thread. Obtained from
+ * Overseer.createArtifact() or Overseer.getArtifact(). Thread-level concerns (code sync, chats,
+ * sharing, actions, template listing) stay on Overseer; this covers the per-artifact surface.
  */
-export interface GadgetClient extends WorkpieceClient {
+export interface ArtifactClient extends WorkpieceClient {
   /**
-   * Get the gadget's deployed UI code, to be run inside an iframe sandbox.
+   * Get the artifact's deployed UI code, to be run inside an iframe sandbox.
    *
-   * Returns null if the gadget has no deployed UI code (e.g. if it's new, or if it's just an AI
+   * Returns null if the artifact has no deployed UI code (e.g. if it's new, or if it's just an AI
    * agent with no code).
    */
   getUiBundle(chatId?: number): Promise<UiBundle | null>;
 
-  // Open an RPC interface to the gadget's server-side Durable Object facet. The frontend may pass
-  // this stub into the gadget's iframe sandbox, so that the gadget UI can communicate with its
+  // Open an RPC interface to the artifact's server-side Durable Object facet. The frontend may pass
+  // this stub into the artifact's iframe sandbox, so that the artifact UI can communicate with its
   // server side. It can also permit the coding agent to make direct calls.
   //
-  // If `chatId` is specified, then the gadget will include changes currently proposed in the given
+  // If `chatId` is specified, then the artifact will include changes currently proposed in the given
   // chat.
   //
   // @ts-ignore - TODO: Fix type instantiation issue
-  connectToGadget(chatId?: number): Promise<RpcStub<any>>;
+  connectToArtifact(chatId?: number): Promise<RpcStub<any>>;
 
   /**
-   * Renders the Gadget's UI as a PDF. If `chatId` is specified, the PDF includes changes currently
+   * Renders the Artifact's UI as a PDF. If `chatId` is specified, the PDF includes changes currently
    * proposed in that chat.
    */
   exportPdf(chatId?: number): Promise<ReadableStream<Uint8Array>>;
 
   // --- Binding management ---
   //
-  // A gadget's bindings are edges mapping a name (as it appears in the gadget worker's `env`) to
+  // A artifact's bindings are edges mapping a name (as it appears in the artifact worker's `env`) to
   // a target workpiece -- today always a gatekeeper. The same gatekeeper may be bound multiple
-  // times in one gadget or by several gadgets, under independent names.
+  // times in one artifact or by several artifacts, under independent names.
 
   /**
-   * List this gadget's bindings.
+   * List this artifact's bindings.
    *
    * If `chatId` is specified, bindings which have been proposed but not yet accepted in the given
    * chat thread will be included.
    */
-  listBindings(chatId?: number): Promise<GadgetBindingInfo[]>;
+  listBindings(chatId?: number): Promise<ArtifactBindingInfo[]>;
 
   /** Get the gatekeeper bound under the given name, or null if there is no such binding. */
   getBinding(name: string): Promise<GatekeeperClient<any> | null>;
 
   /**
-   * Bind the given workpiece (a gatekeeper) into this gadget's `env` under `name`. Throws if the
-   * name is invalid (see validateBindingName()), reserved, or already bound in this gadget
+   * Bind the given workpiece (a gatekeeper) into this artifact's `env` under `name`. Throws if the
+   * name is invalid (see validateBindingName()), reserved, or already bound in this artifact
    * (including bound provisionally by another chat).
    *
    * If `chatId` is provided, the binding is treated like an edit made in the given chat -- it is
@@ -3435,22 +3435,22 @@ export interface GadgetClient extends WorkpieceClient {
   bind(name: string, target: WorkpieceId, chatId?: number): Promise<void>;
 
   /**
-   * Like bind(), but if the target isn't already bound in this gadget, choose a name based on the
-   * resource's own suggestion (deduplicated against this gadget's existing binding names). If the
+   * Like bind(), but if the target isn't already bound in this artifact, choose a name based on the
+   * resource's own suggestion (deduplicated against this artifact's existing binding names). If the
    * target is already bound, does nothing. Either way, returns the target's binding name.
    */
   bindWithSuggestedName(target: WorkpieceId, chatId?: number): Promise<string>;
 
   /**
-   * Remove the binding with the given name. This only removes the edge from this gadget -- the
-   * target gatekeeper itself survives (possibly no longer bound by any gadget); use
+   * Remove the binding with the given name. This only removes the edge from this artifact -- the
+   * target gatekeeper itself survives (possibly no longer bound by any artifact); use
    * GatekeeperClient.remove() to destroy the connection itself.
    */
   unbind(name: string): Promise<void>;
 
   /**
    * Rename a binding while preserving its target and template annotation. Throws if `oldName`
-   * does not exist or `newName` is reserved or already bound in this gadget.
+   * does not exist or `newName` is reserved or already bound in this artifact.
    */
   renameBinding(oldName: string, newName: string): Promise<void>;
 
@@ -3464,8 +3464,8 @@ export interface GadgetClient extends WorkpieceClient {
   setTemplateAnnotation(name: string, annotation: TemplateBindingAnnotation): Promise<void>;
 
   /**
-   * Create a new template from this gadget's current committed code.
-   * `title` defaults to the gadget's title if omitted.
+   * Create a new template from this artifact's current committed code.
+   * `title` defaults to the artifact's title if omitted.
    *
    * The template is always owned by the thread owner, regardless of who calls this method.
    *
@@ -3473,13 +3473,13 @@ export interface GadgetClient extends WorkpieceClient {
    * to User DO + KV + R2. Maintenance of existing templates stays on Overseer (see
    * Overseer.updateTemplate() etc.).
    */
-  createTemplate(title?: string, description?: string, screenshot?: TemplateScreenshotUpload): Promise<TemplateGadgetSummary>;
+  createTemplate(title?: string, description?: string, screenshot?: TemplateScreenshotUpload): Promise<TemplateArtifactSummary>;
 }
 
 /**
  * Capability representing one gatekeeper (connection) workpiece. Note that binding-edge
- * operations -- binding names and template annotations -- live on GadgetClient, since a
- * gatekeeper may be bound by several gadgets under different names.
+ * operations -- binding names and template annotations -- live on ArtifactClient, since a
+ * gatekeeper may be bound by several artifacts under different names.
  */
 export interface GatekeeperClient<Session extends RpcCompatible<Session>> extends WorkpieceClient {
   /** Get the resource description, including the schema of its RPC interface. */
@@ -3502,8 +3502,8 @@ export interface GatekeeperClient<Session extends RpcCompatible<Session>> extend
  *
  * - "build": full access -- edit code, use and participate in chats, manage bindings, etc. (the
  *   same access the owner has, modulo the owner-only exceptions documented in sharing.md).
- * - "use": may only render, interact with, and export the gadget's deployed UI (getUiBundle(),
- *   connectToGadget(), and exportPdf()), plus read basic metadata.
+ * - "use": may only render, interact with, and export the artifact's deployed UI (getUiBundle(),
+ *   connectToArtifact(), and exportPdf()), plus read basic metadata.
  *
  * Roles are ordered build > use. A collaborator's effective role is the maximum role reachable
  * from the owner through their valid permission edges, where each edge grants
@@ -3511,7 +3511,7 @@ export interface GatekeeperClient<Session extends RpcCompatible<Session>> extend
  */
 export type CollaboratorRole = "build" | "use";
 
-/** One person currently connected to a gadget. */
+/** One person currently connected to a artifact. */
 export type PresenceParticipant = {
   /** Opaque key matching this participant across add/remove events. */
   key: string;

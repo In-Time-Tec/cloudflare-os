@@ -3,29 +3,29 @@ import { RpcStub } from 'capnweb'
 import {
   AuthenticatedApi,
   Overseer,
-  GadgetClient,
-  GadgetMetadata,
+  ArtifactClient,
+  ThreadMetadata,
   WorkpieceId,
   WorkpieceSummary,
 } from '@gadgets/workshop-shared/api'
-import GadgetUI from './GadgetUI'
+import ArtifactUI from './ArtifactUI'
 import { GadgetPresence } from './components/GadgetPresence'
-import GadgetExportMenu from './GadgetExportMenu'
+import ArtifactExportMenu from './ArtifactExportMenu'
 
 type Props = {
   overseer: RpcStub<Overseer>
-  gadget: RpcStub<GadgetClient> | null
+  gadget: RpcStub<ArtifactClient> | null
   selectedGadgetId: WorkpieceId | null
   gadgets: WorkpieceSummary[]
   onSelectGadget: (id: WorkpieceId) => void
-  metadata: GadgetMetadata
+  metadata: ThreadMetadata
   authenticatedApi: RpcStub<AuthenticatedApi>
   currentUserId: string | null
 }
 
 const TOPBAR_H = 56
 
-export default function GadgetUseView({
+export default function ArtifactUseView({
   overseer,
   gadget,
   selectedGadgetId,
@@ -77,7 +77,7 @@ export default function GadgetUseView({
         )}
 
         <div className="flex flex-shrink-0 items-center gap-2">
-          <GadgetExportMenu
+          <ArtifactExportMenu
             gadget={gadget}
             gadgetTitle={gadgets.find(g => g.id === selectedGadgetId)?.title ?? 'Gadget'}
           />
@@ -91,7 +91,7 @@ export default function GadgetUseView({
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {gadget ? (
-          <GadgetUI
+          <ArtifactUI
             key={selectedGadgetId}
             gadget={gadget}
             height="100%"

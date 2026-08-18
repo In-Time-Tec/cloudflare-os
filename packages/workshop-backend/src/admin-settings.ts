@@ -214,7 +214,7 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
       // A deployment-installed template (see format-templates.ts) has no owning User DO to hold
       // the authoritative featured bit, so the owner-anchored toggle doesn't apply -- the same
       // answer as an uploaded template. It reaches users through the deployment's curation.
-      featureable: !!kvRecord.gadgetId && !!kvRecord.ownerId,
+      featureable: !!kvRecord.artifactId && !!kvRecord.ownerId,
     };
   }
 

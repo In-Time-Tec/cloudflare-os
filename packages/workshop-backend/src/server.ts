@@ -1,7 +1,7 @@
 import { RpcStub, RpcTarget, newHttpBatchRpcResponse, newWebSocketRpcSession, RpcSessionOptions } from "capnweb";
 import { validateRpc } from "capnweb-validate";
 import type { JWTPayload } from "jose";
-import { PublicApi, AuthenticatedApi, Overseer, GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, AiGatewayInfo, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ObserverConfigCallback, TemplateLibrarySummary, TemplatePublicInfo, TemplateUserSummary, TemplateBindingAssignment, AgentSpawnerConfig, WorkpieceId, TEMPLATE_SCREENSHOT_PATH_PREFIX, TEMPLATE_SCREENSHOT_R2_PREFIX, templateScreenshotUrl, ServerConfig, CloudflareUsageInfo, CloudflareAccountOption, LoginAttempt, GatekeeperAppInfo, AdminApi, GatekeeperVendorInfo, OutputFormatOffer, ListOutputsResult, createOpenGadgetError, getOpenGadgetErrorCode, OPEN_GADGET_ERROR_CODES, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
+import { PublicApi, AuthenticatedApi, Overseer, ThreadMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, AiGatewayInfo, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ObserverConfigCallback, TemplateLibrarySummary, TemplatePublicInfo, TemplateUserSummary, TemplateBindingAssignment, AgentSpawnerConfig, WorkpieceId, TEMPLATE_SCREENSHOT_PATH_PREFIX, TEMPLATE_SCREENSHOT_R2_PREFIX, templateScreenshotUrl, ServerConfig, CloudflareUsageInfo, CloudflareAccountOption, LoginAttempt, GatekeeperAppInfo, AdminApi, GatekeeperVendorInfo, OutputFormatOffer, ListOutputsResult, createOpenThreadError, getOpenThreadErrorCode, OPEN_THREAD_ERROR_CODES, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
 import type { UiFeatureFlags } from "@gadgets/workshop-shared/feature-flags";
 import { getServerConfig } from "./deployment-config.js";
 import { isPasswordAuthEnabled, getAuthGatekeeperAllowlist } from "./auth/config.js";
@@ -21,7 +21,7 @@ import { getManagedAiConfig } from "./ai-gateway.js";
 import { AdminSettings, AdminApiImpl } from "./admin-settings.js";
 import { TemplateKvRecord, buildTemplateArchiveStream, sanitizeTemplateOutput, listFeaturedTemplatesFromKv, parseTemplateArchive, randomTemplateId, readTemplateContent, readTemplateKvRecord } from "./template-archive.js";
 import { GatekeeperConnectCallbackImpl, normalizeUsername, UserDurableObject, CLOUDFLARE_VENDOR_ID } from "./user";
-import { OverseerDurableObject, GatekeeperLoopback, CodeModeTailLoopback, AgentSpawnerGatekeeper, GatekeeperHookLoopback, GadgetTailLoopback, AgentSelfLoopback, TransientStubLoopback } from "./overseer";
+import { OverseerDurableObject, GatekeeperLoopback, CodeModeTailLoopback, AgentSpawnerGatekeeper, GatekeeperHookLoopback, ArtifactTailLoopback, AgentSelfLoopback, TransientStubLoopback } from "./overseer";
 import { ExternalMessageGateway } from "./external-message-gateway";
 import { RpcStub as NativeRpcStub } from "cloudflare:workers";
 import { recordAnalytics } from "./analytics";
@@ -57,7 +57,7 @@ export { UserDurableObject, GatekeeperConnectCallbackImpl };
 
 // Re-export entrypoint types from overseer.ts.
 export { OverseerDurableObject, GatekeeperLoopback, GatekeeperHookLoopback,
-    CodeModeTailLoopback, AgentSpawnerGatekeeper, GadgetTailLoopback,
+    CodeModeTailLoopback, AgentSpawnerGatekeeper, ArtifactTailLoopback,
     AgentSelfLoopback, TransientStubLoopback };
 
 // Re-export service-binding entrypoint for external channel integrations.
@@ -238,7 +238,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     return resolveUiFeatureFlags(this.env, this.#userId.toString());
   }
 
-  async #openGadgetInternal(id: string, shareKey?: string,
+  async #openThreadInternal(id: string, shareKey?: string,
                             configureObservers?: RpcStub<ObserverConfigCallback>)
       : Promise<NativeRpcStub<Overseer>> {
     let userId = this.#userId.toString();
@@ -247,7 +247,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     try {
       overseerId = this.overseers.idFromString(id);
     } catch {
-      throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.threadNotFound);
+      throw createOpenThreadError(OPEN_THREAD_ERROR_CODES.threadNotFound);
     }
     let overseer = this.overseers.get(overseerId);
 
@@ -261,7 +261,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     //   instead.
     // TODO: Consider how to reconnect to one DO without resetting the whole WebSocket. Probably
     //   needs new code on the client side. However, typically a client only ever opens one
-    //   gadget at a time (since each tab is a separate client), so it's probably fine for now.
+    //   artifact at a time (since each tab is a separate client), so it's probably fine for now.
     let closed = false;
     let started = false;
     let notifyClosed = () => {
@@ -271,7 +271,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
       if (started && !closed) {
         // this.ctx.abort() would be nicer here, but it is still marked experimental in the
         // workers runtime.
-        this.abortSession(new Error(`lost connection to thread DO (gadget ${id})`));
+        this.abortSession(new Error(`lost connection to thread DO (artifact ${id})`));
       }
     }
 
@@ -282,47 +282,47 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
       // A denial proves this user's listing for the thread is stale: revocation tries to drop it
       // (refreshAffectedCollaboratorListings), but that push is best-effort. Only catches entries
       // they click; others stay frozen at revocation, as a disconnected collaborator gets no pushes.
-      if (getOpenGadgetErrorCode(err) === OPEN_GADGET_ERROR_CODES.threadAccessDenied) {
-        await this.#user.forgetSharedGadget(id);
+      if (getOpenThreadErrorCode(err) === OPEN_THREAD_ERROR_CODES.threadAccessDenied) {
+        await this.#user.forgetSharedThread(id);
       }
       throw err;
     }
     started = true;
     recordAnalytics(this.ctx, this.env, {
-      event_name: "gadget_opened",
+      event_name: "artifact_opened",
       user_id: userId,
-      gadget_id: id,
+      artifact_id: id,
       source: shareKey ? "share_key" : "direct",
     });
     return result;
   }
 
-  async openGadget(id: string, shareKey?: string,
+  async openThread(id: string, shareKey?: string,
                    configureObservers?: RpcStub<ObserverConfigCallback>)
       : Promise<RpcStub<Overseer>> {
     // @ts-expect-error Cap'n Web RPC stubs and native RPC stubs are compatible but the type
     //     system doesn't know this.
-    return this.#openGadgetInternal(id, shareKey, configureObservers);
+    return this.#openThreadInternal(id, shareKey, configureObservers);
   }
 
-  async newGadget(): Promise<RpcStub<Overseer>> {
+  async newThread(): Promise<RpcStub<Overseer>> {
     let id = this.overseers.newUniqueId().toString();
-    await this.#user.newGadget(id, "Untitled Thread");
+    await this.#user.newThread(id, "Untitled Thread");
     recordAnalytics(this.ctx, this.env, {
-      event_name: "gadget_created",
+      event_name: "artifact_created",
       user_id: this.#userId.toString(),
-      gadget_id: id,
+      artifact_id: id,
       source: "blank",
     });
-    let result = await this.openGadget(id);
+    let result = await this.openThread(id);
     if (!result) {
       throw new Error("Open failed despite newly-created thread?");
     }
     return result;
   }
 
-  async listGadgets(): Promise<GadgetMetadataWithTimestamps[]> {
-    return this.#user.listGadgets();
+  async listThreads(): Promise<ThreadMetadataWithTimestamps[]> {
+    return this.#user.listThreads();
   }
 
   listOutputs(): Promise<ListOutputsResult> {
@@ -375,8 +375,8 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     return this.#user.startResourceConfigurator(accountId, resourceUrlPattern);
   }
 
-  async dismissSharedGadget(gadgetId: string): Promise<void> {
-    return this.#user.forgetSharedGadget(gadgetId);
+  async dismissSharedThread(artifactId: string): Promise<void> {
+    return this.#user.forgetSharedThread(artifactId);
   }
 
   async listOwnTemplates(): Promise<TemplateUserSummary[]> {
@@ -455,7 +455,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     }
   }
 
-  async newGadgetFromTemplate(
+  async newThreadFromTemplate(
     templateId: string,
     bindings: Record<string, TemplateBindingAssignment>
   ): Promise<RpcStub<Overseer>> {
@@ -467,10 +467,10 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     let codeBytes = await readTemplateContent(this.env, templateId, kvRecord.metadata.version);
     if (!codeBytes) throw new Error("Template content not found in R2.");
 
-    // 3. Create new Overseer DO (same as newGadget()).
+    // 3. Create new Overseer DO (same as newThread()).
     let id = this.overseers.newUniqueId().toString();
-    await this.#user.newGadget(id, kvRecord.metadata.title);
-    let overseerResult = await this.#openGadgetInternal(id);
+    await this.#user.newThread(id, kvRecord.metadata.title);
+    let overseerResult = await this.#openThreadInternal(id);
 
     // 4. Initialize from template code.
     let overseerDo = this.overseers.get(this.overseers.idFromString(id));
@@ -478,17 +478,17 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
         deploymentOutputForTemplate(await readAdminConfig(this.env), templateId,
             sanitizeTemplateOutput(kvRecord.metadata.output)));
 
-    // 5. Create gatekeepers from assignments and bind them into the thread's (only) gadget.
+    // 5. Create gatekeepers from assignments and bind them into the thread's (only) artifact.
     let metadata = await overseerResult.getMetadata();
-    using gadget = await overseerResult.getGadget(metadata.defaultGadgetId!);
+    using artifact = await overseerResult.getArtifact(metadata.defaultArtifactId!);
 
     // Defensively put template bindings into a map (not a raw object) until we've had a chance to
     // validate the names.
     let templateBindings = new Map(Object.entries(kvRecord.metadata.bindings));
-    let gadgetId = metadata.defaultGadgetId!;
+    let artifactId = metadata.defaultArtifactId!;
 
     // Create gatekeepers in two phases: first every non-spawner binding (binding the
-    // non-spawnerOnly ones into the gadget, and recording each created gatekeeper's id by
+    // non-spawnerOnly ones into the artifact, and recording each created gatekeeper's id by
     // binding name), then the agent spawners, whose configs reference the phase-one results
     // symbolically (see SpawnerEnvTarget).
     let createdIds = new Map<string, WorkpieceId>();
@@ -516,9 +516,9 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
           let id = await gk.getId();
           createdIds.set(bindingName, id);
           // A spawnerOnly binding exists purely to feed some spawner's env; it is not bound
-          // into the gadget itself.
+          // into the artifact itself.
           if (!templateBinding.spawnerOnly) {
-            await gadget.bind(bindingName, id);
+            await artifact.bind(bindingName, id);
           }
         } finally {
           gk[Symbol.dispose]();
@@ -530,7 +530,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
 
     // Phase two: agent spawners, with the full AgentSpawnerConfig reconstructed -- displayName
     // from the binding's title, modelId from the assignment, and env resolved against the
-    // phase-one gatekeepers and the new gadget.
+    // phase-one gatekeepers and the new artifact.
     for (let [bindingName, assignment] of Object.entries(bindings)) {
       if (assignment.type !== "agentSpawner") continue;
       let templateBinding = templateBindings.get(bindingName);
@@ -540,8 +540,8 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
 
       let env: Record<string, WorkpieceId> = {};
       for (let [envName, target] of Object.entries(templateBinding.env)) {
-        if (target.type === "gadget") {
-          env[envName] = gadgetId;
+        if (target.type === "artifact") {
+          env[envName] = artifactId;
         } else {
           let id = createdIds.get(target.name);
           if (id === undefined) {
@@ -558,13 +558,13 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
         env,
       };
       using gk = await overseerResult.newAgentSpawnerGatekeeper(config);
-      await gadget.bind(bindingName, await gk.getId());
+      await artifact.bind(bindingName, await gk.getId());
     }
 
     recordAnalytics(this.ctx, this.env, {
-      event_name: "gadget_created",
+      event_name: "artifact_created",
       user_id: this.#userId.toString(),
-      gadget_id: id,
+      artifact_id: id,
       template_id: templateId,
       source: "template",
     });
@@ -586,7 +586,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   // accounts are auto-provisioned singletons (one per vendor), so the vendor id identifies them.
   async listGatekeeperApps(): Promise<GatekeeperAppInfo[]> {
     // listProvidedAccounts provisions auto-provisioned accounts first (idempotent), so their apps
-    // appear in the nav even before the user opens a gadget — in a single round trip.
+    // appear in the nav even before the user opens a artifact — in a single round trip.
     let accounts = await this.#user.listProvidedAccounts();
     return accounts
         .filter((account: (typeof accounts)[number]) => account.description.providesUi)

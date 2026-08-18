@@ -71,14 +71,14 @@ export function isCompactionTurn(messages: AiChatMessage[]): boolean {
 }
 
 /**
- * A message that begins an agent turn: the user or a gadget prompted, a callback or nudge arrived,
+ * A message that begins an agent turn: the user or a artifact prompted, a callback or nudge arrived,
  * or an accepted connection resumed the agent. Each produces a `user` model message, so cutting
  * here keeps the retained messages from opening mid-turn. protectRetainedReverts may still lower
  * the cut past one of these; the summary then stands in for the turn's opening.
  */
 export function startsAgentTurn(message: AiChatMessage): boolean {
   switch (message.type) {
-    case "message": return message.author.type === "user" || message.author.type === "gadget";
+    case "message": return message.author.type === "user" || message.author.type === "artifact";
     case "agentCallback": case "agentNudge": return true;
     case "connectionRequest": return message.state === "accepted";
     default: return false;
@@ -87,7 +87,7 @@ export function startsAgentTurn(message: AiChatMessage): boolean {
 
 /**
  * One batch of code changes, addressed by the chat sequence that recorded it. `update` is absent for
- * a batch that records only gadget creations or binding additions.
+ * a batch that records only artifact creations or binding additions.
  */
 export type ChangeBatch = {sequence: number, update?: Uint8Array};
 
@@ -124,7 +124,7 @@ export function foldProposedChanges(
 /**
  * Earliest turn a checkpoint cannot absorb, or undefined if none. A pending connection request
  * carries live accept/deny state that only its own message can answer, so the boundary stays behind
- * it. Provisional gadget creations and binding additions need no such protection: the checkpoint
+ * it. Provisional artifact creations and binding additions need no such protection: the checkpoint
  * records them, and the registry rows they name are untouched by compaction.
  */
 export function findProtectedFromSequence(messages: AiChatMessage[]): number | undefined {
@@ -314,8 +314,8 @@ export function buildCompactionState(
       for (let call of message.toolCalls ?? []) {
         observedCodeVersion ??= call.observedCodeVersion;
         if (call.error) continue;
-        if (call.toolName === "createGadget" && call.output !== undefined) {
-          chatBindings.set(call.input.bindingName, {type: "workpiece", id: call.output.gadgetId});
+        if (call.toolName === "createArtifact" && call.output !== undefined) {
+          chatBindings.set(call.input.bindingName, {type: "workpiece", id: call.output.artifactId});
         }
       }
     } else if (message.type === "agentCallback") {
@@ -330,9 +330,9 @@ export function buildCompactionState(
         chatBindings.set(message.bindingName, {type: "workpiece", id: message.gatekeeperId});
       }
     } else if (message.type === "changes") {
-      for (let {gadgetId, bindingName} of message.createdGadgets ?? []) {
+      for (let {artifactId, bindingName} of message.createdArtifacts ?? []) {
         if (!chatBindings.has(bindingName)) {
-          chatBindings.set(bindingName, {type: "workpiece", id: gadgetId});
+          chatBindings.set(bindingName, {type: "workpiece", id: artifactId});
         }
       }
       observedCodeVersion ??= message.observedCodeVersion;

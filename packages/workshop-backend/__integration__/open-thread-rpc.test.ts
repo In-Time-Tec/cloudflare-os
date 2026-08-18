@@ -2,11 +2,11 @@ import { abortAllDurableObjects, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { newWebSocketRpcSession, type RpcStub } from "capnweb";
 import {
-  createOpenGadgetError,
-  getOpenGadgetErrorCode,
-  OPEN_GADGET_ERROR_CODES,
+  createOpenThreadError,
+  getOpenThreadErrorCode,
+  OPEN_THREAD_ERROR_CODES,
   type AuthenticatedApi,
-  type OpenGadgetErrorCode,
+  type OpenThreadErrorCode,
   type PublicApi,
 } from "@gadgets/workshop-shared/api";
 import { describe, expect, it } from "vitest";
@@ -17,9 +17,9 @@ const PASSWORD_HASH = new Uint8Array([1, 2, 3]);
 // Also whitelisted in vitest.integration.config.ts onUnhandledError: capabilities held across
 // the injected abort reject on their own schedule.
 const USER_DO_ABORT_REASON = "user-DO reset injected by test";
-const EXPECTED_MESSAGES: Record<OpenGadgetErrorCode, string> = {
-  [OPEN_GADGET_ERROR_CODES.workspaceNotFound]: "Workspace not found.",
-  [OPEN_GADGET_ERROR_CODES.workspaceAccessDenied]: "You don't have access to this workspace.",
+const EXPECTED_MESSAGES: Record<OpenThreadErrorCode, string> = {
+  [OPEN_THREAD_ERROR_CODES.workspaceNotFound]: "Workspace not found.",
+  [OPEN_THREAD_ERROR_CODES.workspaceAccessDenied]: "You don't have access to this workspace.",
 };
 
 function username(prefix: string): string {
@@ -38,11 +38,11 @@ async function rejection(value: PromiseLike<unknown>): Promise<CodedError> {
   throw new Error("Expected RPC to reject.");
 }
 
-function expectRpcCode(error: CodedError, code: OpenGadgetErrorCode): void {
+function expectRpcCode(error: CodedError, code: OpenThreadErrorCode): void {
   expect(error.message).toBe(EXPECTED_MESSAGES[code]);
   expect(error.code).toBe(code);
   expect(Object.prototype.propertyIsEnumerable.call(error, "code")).toBe(true);
-  expect(getOpenGadgetErrorCode(error)).toBe(code);
+  expect(getOpenThreadErrorCode(error)).toBe(code);
 }
 
 async function connect(): Promise<RpcStub<PublicApi>> {
@@ -69,15 +69,15 @@ async function createAccount(
 async function openRejection(
     authenticated: RpcStub<AuthenticatedApi>,
     id: string): Promise<CodedError> {
-  using workspace = authenticated.openGadget(id);
+  using workspace = authenticated.openThread(id);
   return await rejection(workspace.getMetadata());
 }
 
 // TODO: This test suite keeps timing out in CI, skipping for now.
-describe.skip("openGadget errors across native RPC and Cap'n Web", () => {
+describe.skip("openThread errors across native RPC and Cap'n Web", () => {
   it("retains enumerable Error.code at the native Durable Object boundary", async () => {
-    const code = OPEN_GADGET_ERROR_CODES.workspaceNotFound;
-    const local = createOpenGadgetError(code);
+    const code = OPEN_THREAD_ERROR_CODES.workspaceNotFound;
+    const local = createOpenThreadError(code);
 
     expect(local.message).toBe(EXPECTED_MESSAGES[code]);
     expect(local.code).toBe(code);
@@ -99,7 +99,7 @@ describe.skip("openGadget errors across native RPC and Cap'n Web", () => {
     using authenticated = await publicApi.authenticate(account.token);
 
     const error = await openRejection(authenticated, "not-a-durable-object-id");
-    expectRpcCode(error, OPEN_GADGET_ERROR_CODES.workspaceNotFound);
+    expectRpcCode(error, OPEN_THREAD_ERROR_CODES.workspaceNotFound);
   });
 
   it("maps valid-but-missing IDs through AuthenticatedApi", async () => {
@@ -109,7 +109,7 @@ describe.skip("openGadget errors across native RPC and Cap'n Web", () => {
 
     const id = exports.OverseerDurableObject.newUniqueId().toString();
     const error = await openRejection(authenticated, id);
-    expectRpcCode(error, OPEN_GADGET_ERROR_CODES.workspaceNotFound);
+    expectRpcCode(error, OPEN_THREAD_ERROR_CODES.workspaceNotFound);
   });
 
   it("maps an unauthorized existing workspace to access denied", async () => {
@@ -119,7 +119,7 @@ describe.skip("openGadget errors across native RPC and Cap'n Web", () => {
     using owner = await publicApi.authenticate(ownerAccount.token);
     using intruder = await publicApi.authenticate(intruderAccount.token);
 
-    using workspace = await owner.newGadget();
+    using workspace = await owner.newThread();
     const metadata = await workspace.getMetadata();
 
     const nativeError = await rejection(
@@ -131,10 +131,10 @@ describe.skip("openGadget errors across native RPC and Cap'n Web", () => {
           () => {},
         ),
     );
-    expectRpcCode(nativeError, OPEN_GADGET_ERROR_CODES.workspaceAccessDenied);
+    expectRpcCode(nativeError, OPEN_THREAD_ERROR_CODES.workspaceAccessDenied);
 
     const browserError = await openRejection(intruder, metadata.id);
-    expectRpcCode(browserError, OPEN_GADGET_ERROR_CODES.workspaceAccessDenied);
+    expectRpcCode(browserError, OPEN_THREAD_ERROR_CODES.workspaceAccessDenied);
   });
 });
 
@@ -187,18 +187,18 @@ describe("user-DO reset flags", () => {
 // The asymmetric reset a retained-stub design can't absorb: the USER DO resets while the
 // workspace (Overseer) DO keeps running. The Overseer used to mint its owner/clientUser stubs
 // once at open(); after the user DO's incarnation died, every user-DO-carrying call on the
-// still-open session — newChat, listModels, createGadget, setPinned — failed against the
+// still-open session — newChat, listModels, createArtifact, setPinned — failed against the
 // poisoned stub until the WebSocket reconnected. The session capabilities now mint a fresh stub
 // per call, so the first post-reset call simply restarts the object — no reset flags needed,
 // which is also why this is testable despite local aborts rejecting flagless (see above).
 // abortAllDurableObjects() can't produce the asymmetry (it kills the Overseer too), so the
 // reset is injected into the one object via runInDurableObject + state.abort().
 describe("workspace session across a user-DO-only reset", () => {
-  it("chat, models, and gadget capabilities survive the user DO resetting", async () => {
+  it("chat, models, and artifact capabilities survive the user DO resetting", async () => {
     using publicApi = await connect();
     const account = await createAccount(publicApi, "chatreset");
     using authenticated = await publicApi.authenticate(account.token);
-    using workspace = await authenticated.newGadget();
+    using workspace = await authenticated.newThread();
 
     // Model id null: commits the message without starting an agent — the pure chat-start path.
     expect(await workspace.newChat("before the reset", null)).toEqual(expect.any(Number));
@@ -214,9 +214,9 @@ describe("workspace session across a user-DO-only reset", () => {
     // capability. Each minting a fresh stub is what restarts the object and recovers.
     expect(await workspace.newChat("after the reset", null)).toEqual(expect.any(Number));
     expect(await workspace.listModels()).toBeInstanceOf(Array);
-    // createGadget resolves the binding name via getChatContext, and hands back a nested
-    // GadgetClient capability that must also be born with the fresh-stub design.
-    using gadget = await workspace.createGadget("post-reset gadget");
-    expect(await gadget.getTitle()).toBe("post-reset gadget");
+    // createArtifact resolves the binding name via getChatContext, and hands back a nested
+    // ArtifactClient capability that must also be born with the fresh-stub design.
+    using artifact = await workspace.createArtifact("post-reset artifact");
+    expect(await artifact.getTitle()).toBe("post-reset artifact");
   });
 });

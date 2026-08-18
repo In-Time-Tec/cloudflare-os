@@ -17,7 +17,7 @@ export {
 /** Maximum retained scalar attributes in a Worker-side event. */
 export const MAX_ATTRIBUTE_KEYS = 32;
 /** Message discriminator used by trusted, opaque-origin UI frames. */
-export const FRONTEND_ERROR_MESSAGE_TYPE = "gadgets.frontend-error.v1";
+export const FRONTEND_ERROR_MESSAGE_TYPE = "artifacts.frontend-error.v1";
 
 /** A bounded, vendor-neutral error occurrence sent to an internal Reporter. */
 export type ErrorEventV1 = Readonly<{
@@ -82,7 +82,7 @@ export type FrontendErrorReportV1 = Readonly<{
   surface: FrontendErrorSurface;
   sessionId?: string;
   exception?: ErrorExceptionV1;
-  gadgetId?: string;
+  artifactId?: string;
   gatekeeperVendorId?: string;
   browser?: FrontendBrowserFacts;
   truncated?: true;
@@ -207,7 +207,7 @@ export function normalizeFrontendErrorReport(input: unknown): FrontendErrorRepor
     if (!frame) return null;
     const surfaceValue = ownValue(input, "surface");
     const sessionId = boundedString(ownValue(input, "sessionId"), MAX_STRING_CHARS, mark);
-    const gadgetId = boundedString(ownValue(input, "gadgetId"), MAX_STRING_CHARS, mark);
+    const artifactId = boundedString(ownValue(input, "artifactId"), MAX_STRING_CHARS, mark);
     const gatekeeperVendorId = boundedString(
       ownValue(input, "gatekeeperVendorId"), MAX_STRING_CHARS, mark,
     );
@@ -217,7 +217,7 @@ export function normalizeFrontendErrorReport(input: unknown): FrontendErrorRepor
       ...frame,
       surface: allowlistedString(surfaceValue, surfaces) ?? "workshop",
       ...(sessionId && { sessionId }),
-      ...(gadgetId !== undefined && { gadgetId }),
+      ...(artifactId !== undefined && { artifactId }),
       ...(gatekeeperVendorId !== undefined && { gatekeeperVendorId }),
       ...(browser && { browser }),
       ...(truncated && { truncated: true }),

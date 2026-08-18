@@ -3,7 +3,7 @@ import { Editor } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import * as Y from 'yjs'
 import { MonacoBinding } from 'y-monaco'
-import { defineGadgetsCodeTheme, getGadgetsCodeTheme, monoFont } from './components/monacoTheme'
+import { defineGadgetsCodeTheme, getArtifactsCodeTheme, monoFont } from './components/monacoTheme'
 import { getLanguage } from './getLanguage'
 import { useTheme } from './ThemeContext'
 
@@ -16,7 +16,7 @@ interface CodeEditorProps {
 
 export default function CodeEditor({ filename, ytext, isReady, height = '100%' }: CodeEditorProps) {
   const { resolvedThemeMode } = useTheme()
-  const codeTheme = getGadgetsCodeTheme(resolvedThemeMode)
+  const codeTheme = getArtifactsCodeTheme(resolvedThemeMode)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
   const bindingRef = useRef<MonacoBinding | null>(null)

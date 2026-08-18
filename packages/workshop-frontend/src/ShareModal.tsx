@@ -9,7 +9,7 @@ import {
   CollaboratorInfo,
   AffectedCollaborator,
   ShareLinkInfo,
-  GadgetMetadata,
+  ThreadMetadata,
   AiChatAuthorInfo,
   CollaboratorRole,
   ObserverBindingNeed,
@@ -30,7 +30,7 @@ type Props = {
   open: boolean
   onClose: () => void
   overseer: RpcStub<Overseer>
-  metadata: GadgetMetadata
+  metadata: ThreadMetadata
   currentUser: AiChatAuthorInfo | null
   authenticatedApi: RpcStub<AuthenticatedApi>
 }

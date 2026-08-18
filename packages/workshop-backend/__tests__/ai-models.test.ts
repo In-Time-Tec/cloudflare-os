@@ -16,9 +16,9 @@ const INITIATOR: AiChatAuthorInfo = {
 };
 
 const GADGET_INITIATOR: AiChatAuthorInfo = {
-  type: "gadget",
+  type: "artifact",
   id: "owner-456",
-  name: "Report Gadget",
+  name: "Report Artifact",
 };
 
 const ANTHROPIC_CONFIG: AiModelConfig = {
@@ -145,7 +145,7 @@ describe("getModel AI Gateway routing", () => {
 
   it("routes non-Workers providers through the platform gateway", async () => {
     const handle = getModel(env(), ANTHROPIC_CONFIG, INITIATOR, {
-      metadata: { source: "chat", gadgetId: "gadget-123", chatId: 7 },
+      metadata: { source: "chat", artifactId: "artifact-123", chatId: 7 },
     });
 
     expect(handle.model.api).toBe("anthropic-messages");
@@ -170,7 +170,7 @@ describe("getModel AI Gateway routing", () => {
     expect(JSON.parse(request.headers.get("cf-aig-metadata")!)).toEqual({
       user: "user-123",
       source: "chat",
-      gadgetId: "gadget-123",
+      artifactId: "artifact-123",
       chatId: 7,
     });
   }, 15000);
@@ -197,16 +197,16 @@ describe("getModel AI Gateway routing", () => {
     });
   });
 
-  it("preserves gadget automation metadata", async () => {
+  it("preserves artifact automation metadata", async () => {
     const handle = getModel(env(), ANTHROPIC_CONFIG, GADGET_INITIATOR, {
-      metadata: { source: "thread-title", gadgetId: "gadget-456", chatId: 8 },
+      metadata: { source: "thread-title", artifactId: "artifact-456", chatId: 8 },
     });
 
     const request = await captureRequest(handle);
     expect(JSON.parse(request.headers.get("cf-aig-metadata")!)).toEqual({
       user: "owner-456",
       source: "thread-title",
-      gadgetId: "gadget-456",
+      artifactId: "artifact-456",
       chatId: 8,
       automated: true,
     });
@@ -232,7 +232,7 @@ describe("getModel AI Gateway routing", () => {
   it("prioritizes a connected user's Gateway over platform routing", async () => {
     const handle = getModel(env(), WORKERS_AI_CONFIG, INITIATOR, {
       userGateway: { accountId: "user-account-id", apiKey: "user-token" },
-      metadata: { source: "chat", gadgetId: "gadget-789", chatId: 9 },
+      metadata: { source: "chat", artifactId: "artifact-789", chatId: 9 },
     });
 
     // BYOK rides the user's default gateway's provider-native routes (unified *billing* has no
@@ -256,7 +256,7 @@ describe("getModel AI Gateway routing", () => {
     expect(JSON.parse(request.headers.get("cf-aig-metadata")!)).toEqual({
       user: "user-123",
       source: "chat",
-      gadgetId: "gadget-789",
+      artifactId: "artifact-789",
       chatId: 9,
     });
   }, 15000);

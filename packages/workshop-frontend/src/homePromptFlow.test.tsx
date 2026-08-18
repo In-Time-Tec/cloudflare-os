@@ -10,14 +10,14 @@ const testClient = new QueryClient({ defaultOptions: { queries: { retry: false }
 
 const testState = vi.hoisted(() => {
   const listModels = vi.fn<() => Promise<never[]>>(async () => []);
-  const newGadget = vi.fn<() => never>();
+  const newThread = vi.fn<() => never>();
   return {
     addToast: vi.fn<(toast: unknown) => void>(),
-    authenticatedApi: { listModels, newGadget },
+    authenticatedApi: { listModels, newThread },
     currentUser: { id: "user-a", name: "User A" },
     listModels,
     navigate: vi.fn<(options: unknown) => void>(),
-    newGadget,
+    newThread,
     seeds: [] as Array<{ text?: string; nonce?: number }>,
     draftStorageKeys: [] as Array<string | undefined>,
   };
@@ -89,7 +89,7 @@ describe("Home prompt route flow", () => {
     );
     expect(Math.max(...testState.seeds.map(({ nonce }) => nonce ?? 0))).toBe(1);
     expect(testState.navigate).toHaveBeenCalledWith({ to: "/", search: {}, replace: true });
-    expect(testState.newGadget).not.toHaveBeenCalled();
+    expect(testState.newThread).not.toHaveBeenCalled();
     expect(testState.draftStorageKeys).toContain("gadgets:composer-draft:v1:user-a:home");
     expect(container.textContent).toContain("What are we working on?");
   });

@@ -96,13 +96,13 @@ describe("OverseerDurableObject.startHook", () => {
   });
 });
 
-async function makeTargetOverseer(gadgetId?: number) {
+async function makeTargetOverseer(artifactId?: number) {
   let controllerEnable = vi.fn(async (_initiator: object, _target: object) => {});
   let record = {
     id: 4,
     actionId: 12,
     gatekeeperId: 1,
-    gadgetId,
+    artifactId,
     controller: {enable: controllerEnable},
     callback: {},
     description: {title: "Incoming email", description: "Receives email"},
@@ -140,16 +140,16 @@ async function makeTargetOverseer(gadgetId?: number) {
 
 describe("hook target", () => {
 
-  it("passes the thread and gadget IDs to enable()", async () => {
+  it("passes the thread and artifact IDs to enable()", async () => {
     let {client, controllerEnable} = await makeTargetOverseer(17);
 
     await client.enableHook(4);
 
     expect(controllerEnable).toHaveBeenCalledTimes(1);
-    expect(controllerEnable.mock.calls[0][1]).toEqual({threadId: "thread-id", gadgetId: 17});
+    expect(controllerEnable.mock.calls[0][1]).toEqual({threadId: "thread-id", artifactId: 17});
   });
 
-  it("omits the gadget ID for a hook that is not pinned to one", async () => {
+  it("omits the artifact ID for a hook that is not pinned to one", async () => {
     let {client, controllerEnable} = await makeTargetOverseer();
 
     await client.enableHook(4);

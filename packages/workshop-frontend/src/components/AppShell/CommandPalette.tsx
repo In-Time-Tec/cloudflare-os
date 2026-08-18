@@ -11,7 +11,7 @@ import { useAuthenticatedApi } from '../../AuthContext'
 import type { OutputFormatOffer } from '@gadgets/workshop-shared/api'
 import { FormatGlyph } from '../format/FormatVisuals'
 import { createFromFormat } from '../format/useOutputFormats'
-import { useGadgets, useLibraryTemplates, useOutputFormatsQuery, useOwnTemplates } from '../../query/hooks'
+import { useThreads, useLibraryTemplates, useOutputFormatsQuery, useOwnTemplates } from '../../query/hooks'
 import { asTime } from '../../query/time'
 
 // A ⌘K command palette: jump to a thread or a primary destination. Because it's keyboard-driven
@@ -134,7 +134,7 @@ export default function CommandPalette({
   const { authenticatedApi } = useAuthenticatedApi()
   const navigate = useNavigate()
   const toasts = useKumoToastManager()
-  const { data: gadgets = [] } = useGadgets()
+  const { data: gadgets = [] } = useThreads()
   const { data: ownTemplates = [] } = useOwnTemplates()
   const { data: libraryTemplates = [] } = useLibraryTemplates()
   const { data: formats = [] } = useOutputFormatsQuery()

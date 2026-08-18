@@ -24,9 +24,9 @@ const MAX_PENDING_RPC_SENDS = 1024;
 const MAX_PENDING_RPC_SEND_CHARS = 32 * 1024 * 1024;
 /** CSP ignores `sandbox` in a meta tag, so serve the document through interception with a header. */
 const EXPORT_DOCUMENT_URL = "https://gadget-export.invalid/";
-// TODO: CSP and request interception do not cover WebRTC/STUN. The same gap exists for Gadgets
+// TODO: CSP and request interception do not cover WebRTC/STUN. The same gap exists for Artifacts
 // running inside an iframe in the user's browser. We should close the gap in both places. For now,
-// extending the same gap to remotely-rendered gadgets is acceptable.
+// extending the same gap to remotely-rendered artifacts is acceptable.
 const EXPORT_DOCUMENT_CSP = "default-src 'none'; frame-src 'none'; script-src data:; " +
   "style-src data: 'unsafe-inline'; img-src data: blob:; media-src data: blob:; " +
   "font-src data:; object-src 'none'; base-uri 'none'; form-action 'none'; " +
@@ -61,8 +61,8 @@ async function closeBrowser(browser: Awaited<ReturnType<typeof launch>>): Promis
       }),
     ]);
   } catch (error) {
-    logger.warn("failed to close browser after gadget export", {
-      event: "gadget.export.browser.close.failed",
+    logger.warn("failed to close browser after artifact export", {
+      event: "artifact.export.browser.close.failed",
       error,
     });
   } finally {
@@ -82,7 +82,7 @@ export class BrowserRpcTransport implements RpcTransport {
   send(message: string): Promise<void> {
     if (this.#pendingSendCount >= MAX_PENDING_RPC_SENDS ||
         message.length > MAX_PENDING_RPC_SEND_CHARS - this.#pendingSendChars) {
-      let error = new Error("The Gadget export RPC send queue overflowed.");
+      let error = new Error("The Artifact export RPC send queue overflowed.");
       this.abort(error);
       return Promise.reject(error);
     }
@@ -107,7 +107,7 @@ export class BrowserRpcTransport implements RpcTransport {
       this.page.evaluate(() => globalThis.__workshopExportReceiveFromBrowser()),
     );
     if (typeof message !== "string") {
-      throw new Error("The Gadget export RPC message from the browser was not a string.");
+      throw new Error("The Artifact export RPC message from the browser was not a string.");
     }
     return message;
   }
@@ -134,7 +134,7 @@ function scriptUrl(source: string): string {
 
 function makeExportHtml(clientCode: string): string {
   let clientPrefix = String.raw`//# sourceURL=client.js
-const { gadget, RpcStub, RpcTarget } = globalThis.__workshopExportRuntime;
+const { artifact, RpcStub, RpcTarget } = globalThis.__workshopExportRuntime;
 delete globalThis.__workshopExportRuntime;
 `;
   let clientUrl = scriptUrl(clientPrefix + clientCode);
@@ -163,7 +163,7 @@ export function limitStream(
     transform(chunk, controller) {
       total += chunk.byteLength;
       if (total > maxBytes) {
-        controller.error(new Error(`Gadget exports may not exceed ${maxBytes} bytes.`));
+        controller.error(new Error(`Artifact exports may not exceed ${maxBytes} bytes.`));
         return;
       }
       controller.enqueue(chunk);
@@ -236,17 +236,17 @@ async function waitForDomSettled(page: Page): Promise<void> {
 }
 
 /**
- * Renders a Gadget's UI as PDF in a remote browser and streams the bytes back.
+ * Renders a Artifact's UI as PDF in a remote browser and streams the bytes back.
  *
- * Takes ownership of `gadget` and disposes it once the export settles. The
+ * Takes ownership of `artifact` and disposes it once the export settles. The
  * returned stream must be consumed or cancelled: the browser session stays open
  * until it settles or times out.
  */
-export async function renderGadgetPdf(
+export async function renderArtifactPdf(
   browserBinding: BrowserRun,
   clientCode: string,
   documentTitle: string,
-  gadget: RpcStub<any>,
+  artifact: RpcStub<any>,
 ): Promise<ReadableStream<Uint8Array>> {
   let deadline = createDeadline(MAX_EXPORT_DURATION_MS, "Browser export timed out.");
 
@@ -256,11 +256,11 @@ export async function renderGadgetPdf(
     browser = await deadline.race(launchPromise);
   } catch (error) {
     deadline.clear();
-    gadget[Symbol.dispose]();
+    artifact[Symbol.dispose]();
     // A timed-out launch cannot be cancelled. Close it if it eventually produces a browser.
     void launchPromise.then(closeBrowser, () => {});
-    logger.warn("failed to launch browser for gadget export", {
-      event: "gadget.export.browser.launch.failed",
+    logger.warn("failed to launch browser for artifact export", {
+      event: "artifact.export.browser.launch.failed",
       error,
     });
     throw error;
@@ -277,7 +277,7 @@ export async function renderGadgetPdf(
         } else {
           // RpcSession takes ownership of its local main object. Before it exists, ownership remains
           // here and setup failures must release the stub directly.
-          gadget[Symbol.dispose]();
+          artifact[Symbol.dispose]();
         }
         await closeBrowser(browser);
       })();
@@ -309,7 +309,7 @@ export async function renderGadgetPdf(
       await page.goto(EXPORT_DOCUMENT_URL, { waitUntil: "load" });
       let transport = new BrowserRpcTransport(page);
       page.on("close", () => transport.abort(new Error("Browser page closed.")));
-      let rpcSession = new RpcSession(transport, gadget);
+      let rpcSession = new RpcSession(transport, artifact);
       sessionCloser = rpcSession.getRemoteMain();
       await waitForDomSettled(page);
       await page.emulateMediaType("print");
@@ -325,9 +325,9 @@ export async function renderGadgetPdf(
     })());
     return releaseWhenSettled(limitStream(source, MAX_EXPORT_BYTES), release);
   } catch (error) {
-    // Deliberately omits the caught value: failures here can carry Gadget-authored exception text,
+    // Deliberately omits the caught value: failures here can carry Artifact-authored exception text,
     // which must not reach logs or the external issue Reporter.
-    logger.warn("failed to render gadget export", { event: "gadget.export.render.failed" });
+    logger.warn("failed to render artifact export", { event: "artifact.export.render.failed" });
     await release();
     throw error;
   }

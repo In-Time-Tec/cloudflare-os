@@ -4,7 +4,7 @@ import type {
   AiChatHistoryPage,
   AiChatMetadata,
   AuthenticatedApi,
-  GadgetMetadata,
+  ThreadMetadata,
   ObserverAccountChoice,
   ObserverBindingNeed,
   ObserverConfigCallback,
@@ -18,7 +18,7 @@ import { persistThreadWorkpieces } from './workpieces'
 export type ThreadBoot = {
   id: string
   overseer: RpcStub<Overseer>
-  metadata: GadgetMetadata
+  metadata: ThreadMetadata
   chats: AiChatMetadata[]
   models: AiChatAuthorInfo[]
   history: { chatId: number; page: AiChatHistoryPage } | null
@@ -99,10 +99,10 @@ export async function ensureThreadBoot(
   if (existing) return existing
 
   const configureObservers = new RpcStub(new DeferredObserverConfig())
-  const overseer = api.openGadget(id, undefined, configureObservers)
+  const overseer = api.openThread(id, undefined, configureObservers)
   try {
     let settled = false
-    const metadata = await new Promise<GadgetMetadata>((resolve, reject) => {
+    const metadata = await new Promise<ThreadMetadata>((resolve, reject) => {
       void overseer.subscribeToMetadata((next) => {
         if (settled) return
         settled = true

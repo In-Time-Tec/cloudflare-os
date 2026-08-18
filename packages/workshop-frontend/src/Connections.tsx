@@ -8,7 +8,7 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { RpcStub } from 'capnweb'
-import { Overseer, GadgetClient, GadgetBindingInfo, BoundHookInfo, AuthenticatedApi, WorkpieceId } from '@gadgets/workshop-shared/api'
+import { Overseer, ArtifactClient, ArtifactBindingInfo, BoundHookInfo, AuthenticatedApi, WorkpieceId } from '@gadgets/workshop-shared/api'
 import GatekeeperModal from './GatekeeperModal'
 import { GatekeeperIcon } from './components/GatekeeperIcon'
 import { HookToggle } from './components/HookToggle'
@@ -24,7 +24,7 @@ import { reportIssue } from './errorReporting'
 
 interface ConnectionsProps {
   overseer: RpcStub<Overseer>
-  gadget: RpcStub<GadgetClient>
+  gadget: RpcStub<ArtifactClient>
   // The chat currently open in the editor, if any. Connecting a resource with a chat open makes
   // the new binding provisional to that chat, exactly like a code edit: it works in the chat's
   // preview immediately, and becomes permanent only when the user accepts the chat's changes.
@@ -40,7 +40,7 @@ interface ConnectionsProps {
  * scoped to one gadget.
  */
 export default function Connections({ overseer, gadget, chatId, authenticatedApi, onConnectionsChange, isVisible, onHasGatekeepersChange }: ConnectionsProps) {
-  const [bindings, setBindings] = useState<GadgetBindingInfo[]>([])
+  const [bindings, setBindings] = useState<ArtifactBindingInfo[]>([])
   // Identity of the gadget this tab is showing, needed to offer it to agent spawners.
   const [gadgetInfo, setGadgetInfo] = useState<{ id: WorkpieceId; title: string } | null>(null)
   const [hooks, setHooks] = useState<BoundHookInfo[]>([])
@@ -52,7 +52,7 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
   const [deleteTarget, setDeleteTarget] = useState<{ name: string; resourceTitle: string } | null>(null)
   const [deleteHookTarget, setDeleteHookTarget] = useState<{ id: number; title: string } | null>(null)
   const [togglingHooks, setTogglingHooks] = useState<Set<number>>(new Set())
-  const [annotationTarget, setAnnotationTarget] = useState<GadgetBindingInfo | null>(null)
+  const [annotationTarget, setAnnotationTarget] = useState<ArtifactBindingInfo | null>(null)
   const toasts = useKumoToastManager()
 
   const loadGatekeepers = async () => {
@@ -237,7 +237,7 @@ export default function Connections({ overseer, gadget, chatId, authenticatedApi
               {bindings.map((gk, index) => {
                 const isEditing = editingBinding === gk.name
                 const isDeleting = deleteTarget?.name === gk.name
-                // Still provisional to the open chat (see GadgetBindingInfo.chatId). BlueprintIcon
+                // Still provisional to the open chat (see ArtifactBindingInfo.chatId). BlueprintIcon
                 // annotations are excluded, since a template only ever exports permanent edges.
                 const isPending = gk.chatId !== undefined
 
@@ -493,8 +493,8 @@ function TemplateAnnotationModal({
   onClose,
   onSaved,
 }: {
-  target: GadgetBindingInfo | null
-  gadget: RpcStub<GadgetClient>
+  target: ArtifactBindingInfo | null
+  gadget: RpcStub<ArtifactClient>
   onClose: () => void
   onSaved: () => void
 }) {

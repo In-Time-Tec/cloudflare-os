@@ -2,9 +2,9 @@ import { Link } from '@tanstack/react-router'
 import { PendingIcon, useLinkPending } from './PendingIcon'
 import { Clock, ArrowRight } from '@phosphor-icons/react'
 import { useMemo } from 'react'
-import { useGadgets } from '../query/hooks'
+import { useThreads } from '../query/hooks'
 import { asTime } from '../query/time'
-import { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
+import { ThreadMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
 
 // A simple deterministic gradient based on the gadget ID
 function getGradient(id: string): string {
@@ -34,7 +34,7 @@ function formatRelativeTime(date: Date | string | number): string {
   return `${days}d ago`
 }
 
-function AppRow({ gadget }: { gadget: GadgetMetadataWithTimestamps }) {
+function AppRow({ gadget }: { gadget: ThreadMetadataWithTimestamps }) {
   const gradient = getGradient(gadget.id)
   const pending = useLinkPending({ to: '/thread/$id', params: { id: gadget.id } })
 
@@ -78,7 +78,7 @@ function AppRow({ gadget }: { gadget: GadgetMetadataWithTimestamps }) {
 }
 
 export default function RecentApps() {
-  const { data: rawGadgets, isError: loadError } = useGadgets()
+  const { data: rawGadgets, isError: loadError } = useThreads()
   const gadgets = useMemo(
     () => [...(rawGadgets ?? [])].toSorted((a, b) => asTime(b.lastActive) - asTime(a.lastActive)).slice(0, 4),
     [rawGadgets])

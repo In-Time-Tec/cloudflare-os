@@ -6,10 +6,10 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RpcStub } from 'capnweb'
 import {
-  createOpenGadgetError,
-  OPEN_GADGET_ERROR_CODES,
+  createOpenThreadError,
+  OPEN_THREAD_ERROR_CODES,
   type AuthenticatedApi,
-  type GadgetMetadata,
+  type ThreadMetadata,
   type Overseer,
 } from '@gadgets/workshop-shared/api'
 import ThreadOpenErrorPage from './components/ThreadOpenErrorPage'
@@ -40,14 +40,14 @@ function disposableStub<T extends object>(value: T, dispose = vi.fn<() => void>(
 }
 
 function api(overseer: RpcStub<Overseer>): RpcStub<AuthenticatedApi> {
-  return { openGadget: () => overseer } as unknown as RpcStub<AuthenticatedApi>
+  return { openThread: () => overseer } as unknown as RpcStub<AuthenticatedApi>
 }
 
 const METADATA = {
   id: 'thread-1',
   title: 'Quarterly planning',
   provisional: false,
-} as GadgetMetadata
+} as ThreadMetadata
 
 function ThreadProbe({ authenticatedApi }: { authenticatedApi: RpcStub<AuthenticatedApi> }) {
   const state = useThreadOpen({
@@ -120,7 +120,7 @@ describe('useThreadOpen', () => {
     const firstSubscriptionDispose = vi.fn<() => void>()
     const firstOverseer = disposableStub({
       subscribeToMetadata: vi.fn<
-        (callback: (metadata: GadgetMetadata) => void) => Promise<RpcStub<{}>>
+        (callback: (metadata: ThreadMetadata) => void) => Promise<RpcStub<{}>>
       >(async callback => {
           callback(METADATA)
           return disposableStub({}, firstSubscriptionDispose) as RpcStub<{}>
@@ -129,7 +129,7 @@ describe('useThreadOpen', () => {
     const deniedOverseerDispose = vi.fn<() => void>()
     const deniedOverseer = disposableStub({
       subscribeToMetadata: vi.fn<() => Promise<RpcStub<{}>>>(async () => {
-        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.threadAccessDenied)
+        throw createOpenThreadError(OPEN_THREAD_ERROR_CODES.threadAccessDenied)
       }),
     }, deniedOverseerDispose) as unknown as RpcStub<Overseer>
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AiChatAuthorInfo, AiChatHistoryPage, AiChatMetadata, GadgetMetadata } from '@gadgets/workshop-shared/api'
+import type { AiChatAuthorInfo, AiChatHistoryPage, AiChatMetadata, ThreadMetadata } from '@gadgets/workshop-shared/api'
 import {
   clearThreadBoots,
   ensureThreadBoot,
@@ -19,9 +19,9 @@ describe('ensureThreadBoot', () => {
       lastActive: new Date(),
       hasProposedChanges: false,
     }]
-    const metadata = { id: 'w1', title: 'Daily Brief' } as GadgetMetadata
+    const metadata = { id: 'w1', title: 'Daily Brief' } as ThreadMetadata
     const overseer = {
-      subscribeToMetadata: vi.fn<(cb: (meta: GadgetMetadata) => void) => Promise<{ [Symbol.dispose](): void }>>(
+      subscribeToMetadata: vi.fn<(cb: (meta: ThreadMetadata) => void) => Promise<{ [Symbol.dispose](): void }>>(
         async (cb) => {
           cb(metadata)
           return { [Symbol.dispose]: () => {} }
@@ -39,7 +39,7 @@ describe('ensureThreadBoot', () => {
       [Symbol.dispose]: vi.fn<() => void>(),
     }
     const api = {
-      openGadget: vi.fn<() => typeof overseer>(() => overseer),
+      openThread: vi.fn<() => typeof overseer>(() => overseer),
     }
     const boot = await ensureThreadBoot('w1', api as never)
     expect(boot.metadata.title).toBe('Daily Brief')

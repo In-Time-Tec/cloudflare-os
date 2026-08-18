@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { Star, ShareNetwork, Trash, Pencil } from '@phosphor-icons/react'
 import { useState, useEffect, useRef } from 'react'
-import type { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
+import type { ThreadMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
 import { PendingIcon, useLinkPending } from '../PendingIcon'
 import { threadPreview } from '../../conversations/hoverPreviews'
 import { hoverRowClassName } from './sidebarHover'
@@ -22,12 +22,12 @@ export default function SidebarGadgetRow({
   onShare,
   onDelete,
 }: {
-  gadget: GadgetMetadataWithTimestamps
+  gadget: ThreadMetadataWithTimestamps
   collapsed?: boolean
-  onTogglePin: (g: GadgetMetadataWithTimestamps) => void
-  onRename: (g: GadgetMetadataWithTimestamps, newTitle: string) => void
-  onShare: (g: GadgetMetadataWithTimestamps) => void
-  onDelete: (g: GadgetMetadataWithTimestamps) => void
+  onTogglePin: (g: ThreadMetadataWithTimestamps) => void
+  onRename: (g: ThreadMetadataWithTimestamps, newTitle: string) => void
+  onShare: (g: ThreadMetadataWithTimestamps) => void
+  onDelete: (g: ThreadMetadataWithTimestamps) => void
 }) {
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(gadget.title || '')

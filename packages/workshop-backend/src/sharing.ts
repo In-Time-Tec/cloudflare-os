@@ -1,9 +1,9 @@
-// Collaborator authorization, sharing, and permission-graph logic for a Gadget's Overseer.
+// Collaborator authorization, sharing, and permission-graph logic for a Artifact's Overseer.
 //
 // This module owns all manipulation of the `collaborators` and `shareKeys` storage collections
 // and the permission graph that links them. It deliberately performs no RPC: anything that
 // requires talking to a User DO (resolving a profile from a username, fetching the owner's
-// profile, notifying a user that a gadget was opened, etc.) stays in the Overseer, which passes
+// profile, notifying a user that a artifact was opened, etc.) stays in the Overseer, which passes
 // resolved values (or, where laziness matters, a callback) into this module.
 //
 // LAZY REVOCATION MODEL: Access is determined by reachability from the owner in the permission
@@ -16,7 +16,7 @@
 // (Records and revoked keys accumulate in storage; a future GC could reclaim long-dead entries.)
 //
 // NOTE: The `prohibitAllSharing` policy flag intentionally does NOT live here. It is a broader
-// "is this gadget allowed to communicate with anyone other than the owner?" policy (it also
+// "is this artifact allowed to communicate with anyone other than the owner?" policy (it also
 // gates gatekeeper writes and web fetches) and is expected to grow into a separate policy engine.
 // The Overseer enforces that flag; this module only exposes `hasAnyShares()` so the policy can
 // ask about the current sharing state.
@@ -64,7 +64,7 @@ async function hashShareKey(rawKey: string): Promise<string> {
   return sig.toHex();
 }
 
-/** Each gadget stores its collaborator list. */
+/** Each artifact stores its collaborator list. */
 export type CollaboratorRecord = {
   /** Denormalized profile snapshot for display without hitting the user's DO. */
   profile: AiChatAuthorInfo;
@@ -143,7 +143,7 @@ export interface SharingCaller {
   /** The caller's profile.id (username/email). */
   profileId: string;
   /**
-   * True if the caller is the gadget owner. The owner can manage anyone's collaborator edges
+   * True if the caller is the artifact owner. The owner can manage anyone's collaborator edges
    * and share keys; non-owners are restricted to edges/keys they created themselves.
    */
   isOwner: boolean;
@@ -151,7 +151,7 @@ export interface SharingCaller {
 
 export class SharingManager {
   /**
-   * `ownerProfileId` is stable for the lifetime of a gadget, so it's supplied once at
+   * `ownerProfileId` is stable for the lifetime of a artifact, so it's supplied once at
    * construction rather than per call.
    */
   constructor(private storage: SharingStorage, private ownerProfileId: string) {}
@@ -160,7 +160,7 @@ export class SharingManager {
   // Sharing-state queries
 
   /**
-   * True if anyone other than the owner can currently access the gadget. Used by the Overseer's
+   * True if anyone other than the owner can currently access the artifact. Used by the Overseer's
    * `prohibitAllSharing` policy to decide whether a sensitive observation must be blocked.
    *
    * Because removed collaborators and revoked links linger in storage (the lazy revocation model;
@@ -206,7 +206,7 @@ export class SharingManager {
   }
 
   /**
-   * Redeem a raw share key on behalf of a user opening the gadget. If the key exists, ensures the
+   * Redeem a raw share key on behalf of a user opening the artifact. If the key exists, ensures the
    * user is a collaborator with a `shareKey` edge for its link (adding the edge if missing, or
    * creating the collaborator record if they're new). Does nothing if the key is unknown.
    *

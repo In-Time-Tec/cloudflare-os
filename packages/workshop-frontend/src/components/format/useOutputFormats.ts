@@ -29,7 +29,7 @@ export async function createFromFormat(
 
   let overseer: RpcStub<Overseer> | undefined
   try {
-    overseer = await api.newGadgetFromTemplate(format.templateId, {})
+    overseer = await api.newThreadFromTemplate(format.templateId, {})
     const { id } = await overseer.getMetadata()
     navigate({ to: '/thread/$id', params: { id } })
   } catch (err) {

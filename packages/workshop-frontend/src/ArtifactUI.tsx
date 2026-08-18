@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Text, Banner } from '@cloudflare/kumo'
 import { Sparkle } from '@phosphor-icons/react'
 import { RpcStub, RpcTarget, newMessagePortRpcSession } from 'capnweb'
-import { GadgetClient, ConsoleLogEvent } from '@gadgets/workshop-shared/api'
+import { ArtifactClient, ConsoleLogEvent } from '@gadgets/workshop-shared/api'
 
 // We want to inject Cap'n Web into the Gadget. Luckily it has no dependencies, so we can just take
 // the whole module and embed it. We can import the module using ?raw to get a string of the
@@ -114,8 +114,8 @@ const createSandboxedHtml = (jsCode: string): string => {
 </html>`.trim()
 }
 
-interface GadgetUIProps {
-  gadget: RpcStub<GadgetClient>
+interface ArtifactUIProps {
+  gadget: RpcStub<ArtifactClient>
   height: string
   reloadTrigger?: number
   isVisible?: boolean
@@ -131,11 +131,11 @@ interface GadgetUIProps {
 const UI_BUNDLE_LOAD_TIMEOUT_MS = 20_000
 const RECONNECT_TIMEOUT_MS = 5_000
 
-export default function GadgetUI(props: GadgetUIProps) {
-  return <GadgetUISession key={props.chatId} {...props} />
+export default function ArtifactUI(props: ArtifactUIProps) {
+  return <ArtifactUISession key={props.chatId} {...props} />
 }
 
-function GadgetUISession({ gadget, height, reloadTrigger, isVisible = true, chatId, onConsoleLog, onIframeEscape }: GadgetUIProps) {
+function ArtifactUISession({ gadget, height, reloadTrigger, isVisible = true, chatId, onConsoleLog, onIframeEscape }: ArtifactUIProps) {
   const [sandboxedHtml, setSandboxedHtml] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -214,7 +214,7 @@ function GadgetUISession({ gadget, height, reloadTrigger, isVisible = true, chat
     const generation = ++connectionGenerationRef.current
     const isCurrent = () => generation === connectionGenerationRef.current
     const pendingStub = suspendGadgetCalls()
-    const replacementPromise = Promise.resolve().then(() => gadget.connectToGadget(chatId))
+    const replacementPromise = Promise.resolve().then(() => gadget.connectToArtifact(chatId))
     void replacementPromise.then(stub => {
       if (!isCurrent()) stub[Symbol.dispose]?.()
     }, () => {})
@@ -347,7 +347,7 @@ function GadgetUISession({ gadget, height, reloadTrigger, isVisible = true, chat
           event.source === iframeRef.current?.contentWindow
         try {
           // Open the RPC connection to the gadget's server side
-          gadgetStub = await gadgetRef.current.connectToGadget(chatId)
+          gadgetStub = await gadgetRef.current.connectToArtifact(chatId)
           if (!isCurrent()) {
             gadgetStub[Symbol.dispose]?.()
             port.close()

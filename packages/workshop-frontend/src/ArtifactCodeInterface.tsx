@@ -48,7 +48,7 @@ class CodeSubscriberImpl extends RpcTarget implements CodeSubscriber {
   }
 }
 
-interface GadgetCodeInterfaceProps {
+interface ArtifactCodeInterfaceProps {
   overseer: RpcStub<Overseer>
   // Name of the Y.Doc root map holding the selected workpiece's files (see
   // WorkpieceSummary.filesRoot). The Yjs doc is shared by the whole thread; this selects which
@@ -133,7 +133,7 @@ type QueuedCodeUpdate = {
   update: Uint8Array
 }
 
-export default function GadgetCodeInterface({ overseer, filesRoot, height = '100%', onCodeChange, selectedChatId = null, proposedChanges, draftProposedChanges, streamingProposedChanges, streamingActiveFile, isAgentActive, isVisible = true, onHasCodeChange }: GadgetCodeInterfaceProps) {
+export default function ArtifactCodeInterface({ overseer, filesRoot, height = '100%', onCodeChange, selectedChatId = null, proposedChanges, draftProposedChanges, streamingProposedChanges, streamingActiveFile, isAgentActive, isVisible = true, onHasCodeChange }: ArtifactCodeInterfaceProps) {
   const toasts = useKumoToastManager()
   const branchMode = selectedChatId !== null
 

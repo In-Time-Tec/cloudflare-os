@@ -3,13 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const launch = vi.hoisted(() => vi.fn());
 vi.mock("@cloudflare/puppeteer", () => ({ launch }));
 
-const { BrowserRpcTransport, limitStream, renderGadgetPdf } =
+const { BrowserRpcTransport, limitStream, renderArtifactPdf } =
     await import("../src/browser-export.js");
 
 type Harness = {
   browserClosed: () => boolean;
   clientInitialized: () => boolean;
-  gadgetDisposed: () => boolean;
+  artifactDisposed: () => boolean;
   pdfRequested: () => boolean;
   renderSettled: () => boolean;
 };
@@ -18,7 +18,7 @@ function makeHarness(pdfChunks = ["%PDF-1.4"], closePdf = true) {
   let browserClosed = false;
   let clientInitialized = false;
   let documentTitle: string | undefined;
-  let gadgetDisposed = false;
+  let artifactDisposed = false;
   let pdfRequested = false;
   let renderSettled = false;
 
@@ -44,7 +44,7 @@ function makeHarness(pdfChunks = ["%PDF-1.4"], closePdf = true) {
     createPDFStream: async () => {
       expect(clientInitialized).toBe(true);
       expect(renderSettled).toBe(true);
-      expect(documentTitle).toBe("Test Gadget");
+      expect(documentTitle).toBe("Test Artifact");
       pdfRequested = true;
       return new ReadableStream<Uint8Array>({
         start(controller) {
@@ -62,29 +62,29 @@ function makeHarness(pdfChunks = ["%PDF-1.4"], closePdf = true) {
     },
   });
 
-  let gadget = {
+  let artifact = {
     [Symbol.dispose]: () => {
-      gadgetDisposed = true;
+      artifactDisposed = true;
     },
   };
 
   let harness: Harness = {
     browserClosed: () => browserClosed,
     clientInitialized: () => clientInitialized,
-    gadgetDisposed: () => gadgetDisposed,
+    artifactDisposed: () => artifactDisposed,
     pdfRequested: () => pdfRequested,
     renderSettled: () => renderSettled,
   };
-  return { gadget, harness };
+  return { artifact, harness };
 }
 
 function render(pdfChunks?: string[], closePdf = true) {
-  let { gadget, harness } = makeHarness(pdfChunks, closePdf);
-  let stream = renderGadgetPdf(
+  let { artifact, harness } = makeHarness(pdfChunks, closePdf);
+  let stream = renderArtifactPdf(
     {} as BrowserRun,
     "export default {}",
-    "Test Gadget",
-    gadget as never,
+    "Test Artifact",
+    artifact as never,
   );
   return { stream, harness };
 }
@@ -139,7 +139,7 @@ describe("limitStream", () => {
   });
 });
 
-describe("renderGadgetPdf", () => {
+describe("renderArtifactPdf", () => {
   it("settles the client render, streams a PDF, and releases the browser", async () => {
     let { stream, harness } = render();
 
@@ -176,24 +176,24 @@ describe("renderGadgetPdf", () => {
     }
   });
 
-  it("disposes the Gadget and closes a browser that launches after the deadline", async () => {
+  it("disposes the Artifact and closes a browser that launches after the deadline", async () => {
     vi.useFakeTimers();
     try {
       let pendingLaunch = Promise.withResolvers<{ close(): Promise<void> }>();
       let browserClosed = false;
-      let gadgetDisposed = false;
+      let artifactDisposed = false;
       launch.mockReturnValue(pendingLaunch.promise);
-      let result = renderGadgetPdf(
+      let result = renderArtifactPdf(
         {} as BrowserRun,
         "export default {}",
-        "Test Gadget",
-        { [Symbol.dispose]: () => { gadgetDisposed = true; } } as never,
+        "Test Artifact",
+        { [Symbol.dispose]: () => { artifactDisposed = true; } } as never,
       );
       let rejection = expect(result).rejects.toThrow("Browser export timed out.");
 
       await vi.advanceTimersByTimeAsync(30_000);
       await rejection;
-      expect(gadgetDisposed).toBe(true);
+      expect(artifactDisposed).toBe(true);
 
       pendingLaunch.resolve({
         close: async () => { browserClosed = true; },
@@ -205,16 +205,16 @@ describe("renderGadgetPdf", () => {
     }
   });
 
-  it("releases the browser and disposes the Gadget when launching fails", async () => {
-    let gadgetDisposed = false;
+  it("releases the browser and disposes the Artifact when launching fails", async () => {
+    let artifactDisposed = false;
     launch.mockRejectedValue(new Error("no browser available"));
 
-    await expect(renderGadgetPdf(
+    await expect(renderArtifactPdf(
       {} as BrowserRun,
       "export default {}",
-      "Test Gadget",
-      { [Symbol.dispose]: () => { gadgetDisposed = true; } } as never,
+      "Test Artifact",
+      { [Symbol.dispose]: () => { artifactDisposed = true; } } as never,
     )).rejects.toThrow("no browser available");
-    expect(gadgetDisposed).toBe(true);
+    expect(artifactDisposed).toBe(true);
   });
 });

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { RpcStub, RpcTarget } from 'capnweb'
 import type {
   AuthenticatedApi,
-  GadgetMetadata,
+  ThreadMetadata,
   ObserverAccountChoice,
   ObserverBindingNeed,
   ObserverConfigCallback,
@@ -32,7 +32,7 @@ type Options = {
   id: string | undefined
   authenticatedApi: RpcStub<AuthenticatedApi>
   existing?: ThreadBoot | null
-  onMetadata: (metadata: GadgetMetadata) => void
+  onMetadata: (metadata: ThreadMetadata) => void
   onShareKeyConsumed: () => void
   onInvalidShareKey: () => void
 }
@@ -48,7 +48,7 @@ export function useThreadOpen({
   const [overseer, setOverseer] = useState<{ stub: RpcStub<Overseer> } | null>(
     () => existing ? { stub: existing.overseer } : null,
   )
-  const [metadata, setMetadata] = useState<GadgetMetadata | null>(() => existing?.metadata ?? null)
+  const [metadata, setMetadata] = useState<ThreadMetadata | null>(() => existing?.metadata ?? null)
   const [error, setError] = useState<ThreadLoadError | null>(null)
   const [connectionLost, setConnectionLost] = useState(false)
   const [observerConfig, setObserverConfig] = useState<ObserverConfigState | null>(null)
@@ -130,7 +130,7 @@ export function useThreadOpen({
           setMetadata(boot.metadata)
           callbacksRef.current.onMetadata(boot.metadata)
         } else {
-          overseerStub = authenticatedApi.openGadget(id, shareKey, configureObservers)
+          overseerStub = authenticatedApi.openThread(id, shareKey, configureObservers)
         }
         setOverseer({ stub: overseerStub })
 

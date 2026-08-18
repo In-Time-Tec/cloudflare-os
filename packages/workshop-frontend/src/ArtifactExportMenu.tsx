@@ -2,18 +2,18 @@ import { useState } from 'react'
 import { Tooltip, useKumoToastManager } from '@cloudflare/kumo'
 import { DownloadSimple } from '@phosphor-icons/react'
 import type { RpcStub } from 'capnweb'
-import type { GadgetClient } from '@gadgets/workshop-shared/api'
+import type { ArtifactClient } from '@gadgets/workshop-shared/api'
 import { WorkshopIconButton } from './components/WorkshopControls'
 import { makeExportFilename, saveStreamToFile } from './fileTransfers'
 
 type Props = {
-  gadget: RpcStub<GadgetClient> | null
+  gadget: RpcStub<ArtifactClient> | null
   gadgetTitle: string
   chatId?: number
   disabled?: boolean
 }
 
-export default function GadgetExportMenu({ gadget, gadgetTitle, chatId, disabled }: Props) {
+export default function ArtifactExportMenu({ gadget, gadgetTitle, chatId, disabled }: Props) {
   const [exporting, setExporting] = useState(false)
   const toasts = useKumoToastManager()
 

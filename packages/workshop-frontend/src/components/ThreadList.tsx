@@ -6,10 +6,10 @@ import { DropdownMenu, Dialog, Button, useKumoToastManager } from '@cloudflare/k
 import { RpcStub } from 'capnweb'
 import { useAuthenticatedApi } from '../AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
-import { gadgetsKey, useFeaturedTemplates, useGadgets, useWhoami } from '../query/hooks'
+import { threadsKey, useFeaturedTemplates, useThreads, useWhoami } from '../query/hooks'
 import { asTime } from '../query/time'
-import { useGadgetMutations } from '../query/useGadgetMutations'
-import { GadgetMetadataWithTimestamps, TemplatePublicInfo, Overseer } from '@gadgets/workshop-shared/api'
+import { useThreadMutations } from '../query/useThreadMutations'
+import { ThreadMetadataWithTimestamps, TemplatePublicInfo, Overseer } from '@gadgets/workshop-shared/api'
 import ShareModal from '../ShareModal'
 import { BindingBadge, getGradient as getTemplateGradient, uniqueBindingBadges } from './TemplateCard'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from './menuStyles'
@@ -47,12 +47,12 @@ function AppRow({
   onTogglePin,
   onRename,
 }: {
-  gadget: GadgetMetadataWithTimestamps
-  onDelete: (gadget: GadgetMetadataWithTimestamps) => void
-  onShare: (gadget: GadgetMetadataWithTimestamps) => void
-  onInfo: (gadget: GadgetMetadataWithTimestamps) => void
-  onTogglePin: (gadget: GadgetMetadataWithTimestamps) => void
-  onRename: (gadget: GadgetMetadataWithTimestamps, newTitle: string) => void
+  gadget: ThreadMetadataWithTimestamps
+  onDelete: (gadget: ThreadMetadataWithTimestamps) => void
+  onShare: (gadget: ThreadMetadataWithTimestamps) => void
+  onInfo: (gadget: ThreadMetadataWithTimestamps) => void
+  onTogglePin: (gadget: ThreadMetadataWithTimestamps) => void
+  onRename: (gadget: ThreadMetadataWithTimestamps, newTitle: string) => void
 }) {
   const [isRenaming, setIsRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(gadget.title || '')
@@ -175,13 +175,13 @@ function AppRow({
   )
 }
 
-export default function GadgetList({ showHeader = true }: { showHeader?: boolean } = {}) {
+export default function ThreadList({ showHeader = true }: { showHeader?: boolean } = {}) {
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
   const queryClient = useQueryClient()
-  const { data: rawGadgets, isError: loadError } = useGadgets()
+  const { data: rawGadgets, isError: loadError } = useThreads()
   const { data: userInfo = null } = useWhoami()
-  const { togglePin, renameGadget, deleteGadget, remove } = useGadgetMutations()
+  const { togglePin, renameThread, deleteThread, remove } = useThreadMutations()
   const gadgets = useMemo(() => [...(rawGadgets ?? [])].toSorted((a, b) => {
     if (a.pinned && !b.pinned) return -1
     if (!a.pinned && b.pinned) return 1
@@ -189,15 +189,15 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
   }), [rawGadgets])
   const [search, setSearch] = useState('')
 
-  const [deleteTarget, setDeleteTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<ThreadMetadataWithTimestamps | null>(null)
 
-  const [infoTarget, setInfoTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
+  const [infoTarget, setInfoTarget] = useState<ThreadMetadataWithTimestamps | null>(null)
 
-  const [shareTarget, setShareTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
+  const [shareTarget, setShareTarget] = useState<ThreadMetadataWithTimestamps | null>(null)
   const [shareOverseer, setShareOverseer] = useState<{ stub: RpcStub<Overseer> } | null>(null)
 
   const loadGadgets = () => {
-    void queryClient.invalidateQueries({ queryKey: gadgetsKey() })
+    void queryClient.invalidateQueries({ queryKey: threadsKey() })
   }
 
   // Clean up share overseer when modal closes
@@ -215,23 +215,23 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
     return () => { shareOverseerRef.current?.stub[Symbol.dispose]() }
   }, [])
 
-  const handleDelete = (gadget: GadgetMetadataWithTimestamps) => {
+  const handleDelete = (gadget: ThreadMetadataWithTimestamps) => {
     setDeleteTarget(gadget)
   }
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return
     try {
-      await deleteGadget(deleteTarget)
+      await deleteThread(deleteTarget)
       setDeleteTarget(null)
     } catch {
     }
   }
 
-  const handleShare = async (gadget: GadgetMetadataWithTimestamps) => {
+  const handleShare = async (gadget: ThreadMetadataWithTimestamps) => {
     let overseer: RpcStub<Overseer> | null = null
     try {
-      overseer = authenticatedApi.openGadget(gadget.id)
+      overseer = authenticatedApi.openThread(gadget.id)
       const metadata = await overseer.getMetadata()
       setShareOverseer({ stub: overseer })
       setShareTarget({ ...gadget, ...metadata })
@@ -243,12 +243,12 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
     }
   }
 
-  const handleTogglePin = (gadget: GadgetMetadataWithTimestamps) => {
+  const handleTogglePin = (gadget: ThreadMetadataWithTimestamps) => {
     togglePin(gadget)
   }
 
-  const handleRename = (gadget: GadgetMetadataWithTimestamps, newTitle: string) => {
-    renameGadget(gadget, newTitle)
+  const handleRename = (gadget: ThreadMetadataWithTimestamps, newTitle: string) => {
+    renameThread(gadget, newTitle)
   }
 
   const handleShareClose = () => {

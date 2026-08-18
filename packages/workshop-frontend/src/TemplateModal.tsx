@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'reac
 import { Dialog, useKumoToastManager } from '@cloudflare/kumo'
 import { ArrowsClockwise, Check, Copy, ImageSquare, Pencil, Plus, Trash, Warning, X } from '@phosphor-icons/react'
 import { RpcStub } from 'capnweb'
-import { TemplateGadgetSummary, GadgetClient, GadgetMetadata, Overseer, TemplateBindingAnnotation, TemplateScreenshotUpload } from '@gadgets/workshop-shared/api'
+import { TemplateArtifactSummary, ArtifactClient, ThreadMetadata, Overseer, TemplateBindingAnnotation, TemplateScreenshotUpload } from '@gadgets/workshop-shared/api'
 import { WorkshopButton, WorkshopIconButton, WorkshopInput, WorkshopInputArea } from './components/WorkshopControls'
 import { copyToClipboard } from './clipboard'
 import {
@@ -66,14 +66,14 @@ type Props = {
   onClose: () => void
   overseer: RpcStub<Overseer>
   // The gadget this modal exports templates from (the gadget currently selected in the editor).
-  gadget: RpcStub<GadgetClient>
-  metadata: GadgetMetadata
+  gadget: RpcStub<ArtifactClient>
+  metadata: ThreadMetadata
 }
 
 export default function TemplateModal({ open, onClose, overseer, gadget, metadata }: Props) {
   const toasts = useKumoToastManager()
 
-  const [templates, setTemplates] = useState<TemplateGadgetSummary[]>([])
+  const [templates, setTemplates] = useState<TemplateArtifactSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [formMode, setFormMode] = useState<'list' | 'create' | 'edit'>('list')
   const [newTitle, setNewTitle] = useState('')
@@ -85,7 +85,7 @@ export default function TemplateModal({ open, onClose, overseer, gadget, metadat
   const screenshotInputRef = useRef<HTMLInputElement>(null)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
-  const [editingTemplate, setEditingTemplate] = useState<TemplateGadgetSummary | null>(null)
+  const [editingTemplate, setEditingTemplate] = useState<TemplateArtifactSummary | null>(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
@@ -560,7 +560,7 @@ function TemplateRow({
   onConfirmDelete,
   onCancelDelete,
 }: {
-  bp: TemplateGadgetSummary
+  bp: TemplateArtifactSummary
   isFirst: boolean
   onStartEdit: () => void
   onUpdateCode: () => void

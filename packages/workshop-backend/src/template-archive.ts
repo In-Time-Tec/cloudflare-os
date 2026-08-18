@@ -31,7 +31,7 @@ export type TemplateKvRecord = {
    * has no owning user.
    */
   ownerId?: string;
-  gadgetId?: string;  // undefined = uploaded, not published from a gadget on this instance
+  artifactId?: string;  // undefined = uploaded, not published from a artifact on this instance
 };
 
 export function isReservedTemplateKey(id: string): boolean {
@@ -209,7 +209,7 @@ function makeStreamPrefixReader(stream: ReadableStream<Uint8Array>) {
     while (pendingBytes < length) {
       let { done, value } = await reader.read();
       if (done) {
-        throw new Error("Unexpected end of gadget archive.");
+        throw new Error("Unexpected end of artifact archive.");
       }
       let chunk = value!;
       pending.push(chunk);
@@ -260,28 +260,28 @@ export async function parseTemplateArchive(archive: ReadableStream<Uint8Array>)
   let view = new DataView(prefix.buffer, prefix.byteOffset, prefix.byteLength);
 
   if (view.getBigUint64(0) !== TEMPLATE_ARCHIVE_MAGIC) {
-    throw new Error("Invalid gadget archive magic number.");
+    throw new Error("Invalid artifact archive magic number.");
   }
 
   let version = view.getUint32(8);
   if (version !== TEMPLATE_ARCHIVE_VERSION) {
-    throw new Error(`Unsupported gadget archive version: ${version}.`);
+    throw new Error(`Unsupported artifact archive version: ${version}.`);
   }
 
   let metadataSize = view.getUint32(12);
   if (metadataSize === 0) {
-    throw new Error("Gadget archive is missing template metadata.");
+    throw new Error("Artifact archive is missing template metadata.");
   }
   if (metadataSize > MAX_TEMPLATE_METADATA_BYTES) {
-    throw new Error("Gadget archive metadata size is out of range.");
+    throw new Error("Artifact archive metadata size is out of range.");
   }
 
   let contentLength = Number(view.getBigUint64(16));
   if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
-    throw new Error("Gadget archive has an invalid content length.");
+    throw new Error("Artifact archive has an invalid content length.");
   }
   if (contentLength > MAX_TEMPLATE_CONTENT_BYTES) {
-    throw new Error("Gadget archive content is too large.");
+    throw new Error("Artifact archive content is too large.");
   }
 
   let metadataBytes = await reader.readExact(metadataSize);
@@ -289,7 +289,7 @@ export async function parseTemplateArchive(archive: ReadableStream<Uint8Array>)
   try {
     rawMetadata = JSON.parse(textDecoder.decode(metadataBytes));
   } catch {
-    throw new Error("Gadget archive metadata is not valid JSON.");
+    throw new Error("Artifact archive metadata is not valid JSON.");
   }
 
   let metadata = reviveTemplateMetadata(rawMetadata);

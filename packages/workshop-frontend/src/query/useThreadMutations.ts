@@ -1,33 +1,33 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useKumoToastManager } from '@cloudflare/kumo'
-import type { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
+import type { ThreadMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
 import { workshopSession } from '../session'
-import { deleteGadgetOptions, pinGadgetOptions, renameGadgetOptions } from '../query/gadgets'
+import { deleteThreadOptions, pinThreadOptions, renameThreadOptions } from '../query/threads'
 
-export function useGadgetMutations() {
+export function useThreadMutations() {
   const queryClient = useQueryClient()
   const toasts = useKumoToastManager()
-  const pin = useMutation(pinGadgetOptions(workshopSession, queryClient))
-  const rename = useMutation(renameGadgetOptions(workshopSession, queryClient))
-  const remove = useMutation(deleteGadgetOptions(workshopSession, queryClient))
+  const pin = useMutation(pinThreadOptions(workshopSession, queryClient))
+  const rename = useMutation(renameThreadOptions(workshopSession, queryClient))
+  const remove = useMutation(deleteThreadOptions(workshopSession, queryClient))
 
   return {
     pin,
     rename,
     remove,
-    togglePin(gadget: GadgetMetadataWithTimestamps) {
+    togglePin(gadget: ThreadMetadataWithTimestamps) {
       pin.mutate(
         { id: gadget.id, pinned: !gadget.pinned },
         { onError: () => toasts.add({ title: 'Failed to update favorite status', variant: 'error' }) },
       )
     },
-    renameGadget(gadget: GadgetMetadataWithTimestamps, title: string) {
+    renameThread(gadget: ThreadMetadataWithTimestamps, title: string) {
       rename.mutate(
         { id: gadget.id, title },
         { onError: () => toasts.add({ title: 'Failed to rename thread', variant: 'error' }) },
       )
     },
-    deleteGadget(gadget: GadgetMetadataWithTimestamps) {
+    deleteThread(gadget: ThreadMetadataWithTimestamps) {
       return remove.mutateAsync(
         { id: gadget.id, shared: !!gadget.owner },
         {

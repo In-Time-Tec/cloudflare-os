@@ -2,7 +2,7 @@ import { Checkbox } from '@cloudflare/kumo'
 import type { RpcStub } from 'capnweb'
 import { GatekeeperIcon } from './GatekeeperIcon'
 import { WorkshopInput, WorkshopInputArea } from './WorkshopControls'
-import type { TemplateBindingAnnotation, GadgetClient, GatekeeperCreationSpec } from '@gadgets/workshop-shared/api'
+import type { TemplateBindingAnnotation, ArtifactClient, GatekeeperCreationSpec } from '@gadgets/workshop-shared/api'
 
 export type BindingCardData = {
   bindingName: string
@@ -106,7 +106,7 @@ export function defaultAnnotation(): TemplateBindingAnnotation {
 }
 
 export async function loadBindingCardData(
-  gadget: RpcStub<GadgetClient>,
+  gadget: RpcStub<ArtifactClient>,
   meta: { name: string; resourceTitle: string; vendorId?: string },
 ): Promise<BindingCardData | null> {
   const gk = await gadget.getBinding(meta.name)

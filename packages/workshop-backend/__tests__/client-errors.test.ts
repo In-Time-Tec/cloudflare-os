@@ -84,9 +84,9 @@ describe("handleClientErrorRequest", () => {
       severity: "critical",
       handled: "yes",
       captureMechanism: "unknown",
-      surface: "gadget",
+      surface: "artifact",
       sessionId: 42,
-      gadgetId: { invalid: true },
+      artifactId: { invalid: true },
       browser: { family: "Netscape", platform: "Linux" },
     }), env, ctx);
 
@@ -102,7 +102,7 @@ describe("handleClientErrorRequest", () => {
       }),
     }));
     expect(report.mock.calls[0][0].attributes).not.toHaveProperty("sessionId");
-    expect(report.mock.calls[0][0].attributes).not.toHaveProperty("gadgetId");
+    expect(report.mock.calls[0][0].attributes).not.toHaveProperty("artifactId");
   });
 
   it("assigns server occurrence metadata and dispatches a normalized event", async () => {

@@ -29,9 +29,9 @@
 
   // Stable names let stateless CI reconnect storage after retries and partial deployments.
   "resources": {
-    "blueprintsKvNamespace": "intimetec-cloudflare-os-backend-blueprints",
+    "templatesKvNamespace": "intimetec-cloudflare-os-backend-blueprints",
     "avatarsKvNamespace": "intimetec-cloudflare-os-backend-avatars",
-    "blueprintContentBucket": "intimetec-cloudflare-os-backend-blueprint-content",
+    "templateContentBucket": "intimetec-cloudflare-os-backend-blueprint-content",
     "contextKvNamespace": "intimetec-cloudflare-os-context-context-collections"
   }
 }

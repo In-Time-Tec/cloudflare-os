@@ -14,7 +14,7 @@ export type WorkshopObservabilityFields = {
   eventName: string;
   executionId: string;
   failureCount: number;
-  gadgetId: string;
+  artifactId: string;
   gatekeeperId: number | string;
   logBytes: number;
   modelId: string;

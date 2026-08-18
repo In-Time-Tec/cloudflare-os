@@ -9,7 +9,7 @@ import type {
   AiChatAuthorInfo,
   AuthenticatedApi,
   CollaboratorRole,
-  GadgetMetadata,
+  ThreadMetadata,
   ObserverBindingNeed,
   Overseer,
   ShareLinkInfo,
@@ -70,7 +70,7 @@ vi.mock('./clipboard', () => ({ copyToClipboard: (text: string) => copyToClipboa
 
 import ShareModal from './ShareModal'
 
-const METADATA = { id: 'trip-planner', title: 'Trip planner' } as GadgetMetadata
+const METADATA = { id: 'trip-planner', title: 'Trip planner' } as ThreadMetadata
 const THREAD_URL = `${window.location.origin}/thread/trip-planner`
 
 const CURRENT_USER: AiChatAuthorInfo = { type: 'user', id: 'dan@cloudflare.com', name: 'Dan' }

@@ -1,20 +1,20 @@
 import { RpcSession, RpcStub, RpcTarget, type RpcTransport } from "capnweb";
 
-// This code runs in the remote browser used for rendering the Gadget UI for export. It
-// runs before the Gadget client module is loaded and is mainly responsible for setting
-// up the RPC session to the Gadget server.
+// This code runs in the remote browser used for rendering the Artifact UI for export. It
+// runs before the Artifact client module is loaded and is mainly responsible for setting
+// up the RPC session to the Artifact server.
 
 declare global {
-  /** Data URL containing the Gadget client module. */
+  /** Data URL containing the Artifact client module. */
   var __workshopExportClientUrl: string;
   /** Sends a Cap'n Web RPC message from the Worker to the browser-side session. */
   var __workshopExportSendToBrowser: (message: string) => void;
   /** Receives the next Cap'n Web RPC message from the browser-side session. */
   var __workshopExportReceiveFromBrowser: () => Promise<string>;
-  /** Settles when the Gadget client module has finished loading. */
+  /** Settles when the Artifact client module has finished loading. */
   var __workshopExportModulePromise: Promise<Record<string, unknown>>;
   var __workshopExportRuntime: {
-    gadget: unknown;
+    artifact: unknown;
     RpcStub: typeof RpcStub;
     RpcTarget: typeof RpcTarget;
   };
@@ -23,7 +23,7 @@ declare global {
 /**
  * Queue for Cap'n Web messages sent between the browser and Worker. This runs on the
  * browser side of the CDP interface to prevent Worker resource exhaustion by a misbehaving
- * Gadget.
+ * Artifact.
  */
 class AsyncMessageQueue {
   #messages: string[] = [];
@@ -65,7 +65,7 @@ class WorkerRpcTransport implements RpcTransport {
 
 const workerSession = new RpcSession<any>(new WorkerRpcTransport());
 globalThis.__workshopExportRuntime = {
-  gadget: workerSession.getRemoteMain(),
+  artifact: workerSession.getRemoteMain(),
   RpcStub,
   RpcTarget,
 };

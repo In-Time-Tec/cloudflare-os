@@ -3,7 +3,7 @@ import type { WorkshopSession } from '../session'
 import {
   amIAdminOptions,
   featureFlagsOptions,
-  gadgetsOptions,
+  threadsOptions,
   gatekeeperAppsOptions,
   onboardingOptions,
   whoamiOptions,
@@ -21,7 +21,7 @@ export async function loadAuthenticatedShell(session: WorkshopSession, queryClie
     queryClient.ensureQueryData({ ...serverConfigOptions(session), revalidateIfStale: true }),
     queryClient.ensureQueryData({ ...whoamiOptions(session), revalidateIfStale: true }),
     queryClient.ensureQueryData({ ...amIAdminOptions(session), revalidateIfStale: true }),
-    queryClient.ensureQueryData({ ...gadgetsOptions(session), revalidateIfStale: true }),
+    queryClient.ensureQueryData({ ...threadsOptions(session), revalidateIfStale: true }),
     queryClient.ensureQueryData({ ...gatekeeperAppsOptions(session), revalidateIfStale: true }),
     queryClient.ensureQueryData({ ...onboardingOptions(session), revalidateIfStale: true }),
     queryClient.ensureQueryData({ ...featureFlagsOptions(session), revalidateIfStale: true }),

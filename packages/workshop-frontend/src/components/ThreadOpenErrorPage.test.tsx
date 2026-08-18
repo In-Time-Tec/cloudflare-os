@@ -4,7 +4,7 @@
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
-import { createOpenGadgetError, OPEN_GADGET_ERROR_CODES } from '@gadgets/workshop-shared/api'
+import { createOpenThreadError, OPEN_THREAD_ERROR_CODES } from '@gadgets/workshop-shared/api'
 import ThreadOpenErrorPage, { classifyThreadOpenFailure } from './ThreadOpenErrorPage'
 
 const testGlobal = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -83,13 +83,13 @@ describe('ThreadOpenErrorPage', () => {
 
   it('classifies stable open error codes without treating unexpected errors as expected', () => {
     expect(classifyThreadOpenFailure(
-      createOpenGadgetError(OPEN_GADGET_ERROR_CODES.threadAccessDenied),
+      createOpenThreadError(OPEN_THREAD_ERROR_CODES.threadAccessDenied),
     )).toBe('access-denied')
     expect(classifyThreadOpenFailure(
-      createOpenGadgetError(OPEN_GADGET_ERROR_CODES.threadNotFound),
+      createOpenThreadError(OPEN_THREAD_ERROR_CODES.threadNotFound),
     )).toBe('not-found')
     expect(classifyThreadOpenFailure(
-      new Error(OPEN_GADGET_ERROR_CODES.threadAccessDenied),
+      new Error(OPEN_THREAD_ERROR_CODES.threadAccessDenied),
     )).toBe('unexpected')
     expect(classifyThreadOpenFailure(new Error('storage unavailable'))).toBe('unexpected')
   })

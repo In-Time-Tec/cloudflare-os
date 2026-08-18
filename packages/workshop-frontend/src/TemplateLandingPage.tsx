@@ -553,7 +553,7 @@ export default function TemplateLandingPage({ rpcStub }: Props) {
 
     setCreating(true)
     setError(null)
-    const overseer = authenticatedApi.newGadgetFromTemplate(id, draftAssignments)
+    const overseer = authenticatedApi.newThreadFromTemplate(id, draftAssignments)
     try {
       let metadata = await overseer.getMetadata()
       window.location.href = `/thread/${metadata.id}`
@@ -688,12 +688,12 @@ export default function TemplateLandingPage({ rpcStub }: Props) {
     if (!id || !authenticatedApi) return
 
     setRemovingFromLibrary(true)
-    let overseer: ReturnType<typeof authenticatedApi.openGadget> | null = null
+    let overseer: ReturnType<typeof authenticatedApi.openThread> | null = null
     try {
       // The source thread owns its templates, so it must do the deleting. Once it is gone (or
       // the template was never published from one), the user record is all there is to clean up.
       if (ownTemplateSummary?.source.type === 'thread') {
-        overseer = authenticatedApi.openGadget(ownTemplateSummary.source.threadId)
+        overseer = authenticatedApi.openThread(ownTemplateSummary.source.threadId)
         await overseer.deleteTemplate(id)
       } else {
         await authenticatedApi.deleteOrphanedTemplate(id)

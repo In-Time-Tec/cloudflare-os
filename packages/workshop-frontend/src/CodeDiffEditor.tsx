@@ -4,7 +4,7 @@ import { Columns, Rows } from '@phosphor-icons/react'
 import type { editor } from 'monaco-editor'
 import type * as Y from 'yjs'
 import { MonacoBinding } from 'y-monaco'
-import { defineGadgetsCodeTheme, getGadgetsCodeTheme, monoFont } from './components/monacoTheme'
+import { defineGadgetsCodeTheme, getArtifactsCodeTheme, monoFont } from './components/monacoTheme'
 import { buildDiffModel, type DiffModel } from './diff/diffModel'
 import { renderDiffLayer, renderSplitDiffLayer } from './diff/diffRenderer'
 import { getLanguage } from './getLanguage'
@@ -81,7 +81,7 @@ export default function CodeDiffEditor({
   // Deletion-block keys the user has expanded past truncation.
   const [expandedDeletions, setExpandedDeletions] = useState<Set<string>>(new Set())
   const splitDiff = canSplitDiff && diffLayoutPreference === 'split'
-  const codeTheme = getGadgetsCodeTheme(resolvedThemeMode)
+  const codeTheme = getArtifactsCodeTheme(resolvedThemeMode)
 
   const originalValue = useMemo(
     () => originalYText?.toString() ?? '',

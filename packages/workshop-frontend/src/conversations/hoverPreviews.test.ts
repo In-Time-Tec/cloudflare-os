@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ConversationSummary, EmailSummary } from '@gadgets/workshop-shared/gatekeeper'
-import type { GadgetMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
+import type { ThreadMetadataWithTimestamps } from '@gadgets/workshop-shared/api'
 import { conversationPreview, emailPreview, threadPreview } from './hoverPreviews'
 
 describe('hoverPreviews', () => {
@@ -46,7 +46,7 @@ describe('hoverPreviews', () => {
       created: new Date(Date.now() - 3 * 24 * 60 * 60_000),
       lastActive: new Date(),
       owner: { id: 'u1', name: 'Riley' },
-    } as GadgetMetadataWithTimestamps
+    } as ThreadMetadataWithTimestamps
     expect(threadPreview(gadget)).toEqual({
       title: 'Fixed-Bid SOW Pricing',
       meta: 'Created 3d ago, updated just now',

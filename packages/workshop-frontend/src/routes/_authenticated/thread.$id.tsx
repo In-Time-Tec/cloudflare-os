@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
-import GadgetEditor from '../../GadgetEditor'
-import { aiConfigOptions, gadgetsOptions, modelsOptions } from '../../query/hooks'
+import ThreadEditor from '../../ThreadEditor'
+import { aiConfigOptions, threadsOptions, modelsOptions } from '../../query/hooks'
 import { ensureThreadBoot } from '../../query/thread-session'
 
 type GadgetSearch = {
@@ -20,7 +20,7 @@ function parseIntParam(value: unknown): number | undefined {
 }
 
 export const Route = createFileRoute('/_authenticated/thread/$id')({
-  component: GadgetEditor,
+  component: ThreadEditor,
   validateSearch: (search: Record<string, unknown>): GadgetSearch => ({
     chat: typeof search.chat === 'number' ? search.chat
       : typeof search.chat === 'string' ? Number(search.chat) || undefined
@@ -31,7 +31,7 @@ export const Route = createFileRoute('/_authenticated/thread/$id')({
   loader: async ({ context, params, cause }) => {
     await Promise.all([
       context.queryClient.ensureQueryData({
-        ...gadgetsOptions(context.session),
+        ...threadsOptions(context.session),
         revalidateIfStale: true,
       }),
       context.queryClient.ensureQueryData({

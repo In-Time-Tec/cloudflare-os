@@ -12,13 +12,13 @@ import { Link } from '@tanstack/react-router'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import type { RpcStub } from 'capnweb'
 import {
-  GadgetMetadataWithTimestamps,
+  ThreadMetadataWithTimestamps,
   Overseer,
 } from '@gadgets/workshop-shared/api'
 import { useAuthenticatedApi } from '../../AuthContext'
-import { useGadgets, useWhoami } from '../../query/hooks'
+import { useThreads, useWhoami } from '../../query/hooks'
 import { asTime } from '../../query/time'
-import { useGadgetMutations } from '../../query/useGadgetMutations'
+import { useThreadMutations } from '../../query/useThreadMutations'
 import ShareModal from '../../ShareModal'
 import DeleteConfirmationDialog from '../DeleteConfirmationDialog'
 import SidebarGadgetRow from './SidebarGadgetRow'
@@ -35,14 +35,14 @@ type ThreadsContextValue = {
   search: string
   setSearch: (v: string) => void
 
-  gadgets: GadgetMetadataWithTimestamps[]
-  favorites: GadgetMetadataWithTimestamps[]
-  recent: GadgetMetadataWithTimestamps[]
+  gadgets: ThreadMetadataWithTimestamps[]
+  favorites: ThreadMetadataWithTimestamps[]
+  recent: ThreadMetadataWithTimestamps[]
 
-  onTogglePin: (g: GadgetMetadataWithTimestamps) => void
-  onRename: (g: GadgetMetadataWithTimestamps, newTitle: string) => void
-  onShare: (g: GadgetMetadataWithTimestamps) => void
-  onDelete: (g: GadgetMetadataWithTimestamps) => void
+  onTogglePin: (g: ThreadMetadataWithTimestamps) => void
+  onRename: (g: ThreadMetadataWithTimestamps, newTitle: string) => void
+  onShare: (g: ThreadMetadataWithTimestamps) => void
+  onDelete: (g: ThreadMetadataWithTimestamps) => void
 }
 
 const ThreadsContext = createContext<ThreadsContextValue | null>(null)
@@ -63,15 +63,15 @@ function useThreadsContext(): ThreadsContextValue {
 export function SidebarThreadsProvider({ children }: { children: ReactNode }) {
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
-  const { data: gadgets = [] } = useGadgets()
+  const { data: gadgets = [] } = useThreads()
   const { data: currentUser = null } = useWhoami()
-  const { togglePin, renameGadget, deleteGadget, remove } = useGadgetMutations()
+  const { togglePin, renameThread, deleteThread, remove } = useThreadMutations()
 
   const [search, setSearch] = useState('')
 
   // Delete / share dialog state (threads).
-  const [deleteTarget, setDeleteTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
-  const [shareTarget, setShareTarget] = useState<GadgetMetadataWithTimestamps | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<ThreadMetadataWithTimestamps | null>(null)
+  const [shareTarget, setShareTarget] = useState<ThreadMetadataWithTimestamps | null>(null)
   const [shareOverseer, setShareOverseer] = useState<{ stub: RpcStub<Overseer> } | null>(null)
 
   // Dispose share overseer on close / unmount.
@@ -92,14 +92,14 @@ export function SidebarThreadsProvider({ children }: { children: ReactNode }) {
   )
 
   const { favorites, recent } = useMemo(() => {
-    const favs: GadgetMetadataWithTimestamps[] = []
-    const rest: GadgetMetadataWithTimestamps[] = []
+    const favs: ThreadMetadataWithTimestamps[] = []
+    const rest: ThreadMetadataWithTimestamps[] = []
     for (const g of gadgets) {
       if (!matchText(g.title)) continue
       if (g.pinned) favs.push(g)
       else rest.push(g)
     }
-    const byActive = (a: GadgetMetadataWithTimestamps, b: GadgetMetadataWithTimestamps) =>
+    const byActive = (a: ThreadMetadataWithTimestamps, b: ThreadMetadataWithTimestamps) =>
       asTime(b.lastActive) - asTime(a.lastActive)
     favs.sort(byActive)
     rest.sort(byActive)
@@ -108,18 +108,18 @@ export function SidebarThreadsProvider({ children }: { children: ReactNode }) {
 
   // --- Thread actions ---------------------------------------------------
 
-  const onTogglePin = useCallback((g: GadgetMetadataWithTimestamps) => {
+  const onTogglePin = useCallback((g: ThreadMetadataWithTimestamps) => {
     togglePin(g)
   }, [togglePin])
 
-  const onRename = useCallback((g: GadgetMetadataWithTimestamps, newTitle: string) => {
-    renameGadget(g, newTitle)
-  }, [renameGadget])
+  const onRename = useCallback((g: ThreadMetadataWithTimestamps, newTitle: string) => {
+    renameThread(g, newTitle)
+  }, [renameThread])
 
-  const onShare = useCallback(async (g: GadgetMetadataWithTimestamps) => {
+  const onShare = useCallback(async (g: ThreadMetadataWithTimestamps) => {
     let overseer: RpcStub<Overseer> | null = null
     try {
-      overseer = authenticatedApi.openGadget(g.id)
+      overseer = authenticatedApi.openThread(g.id)
       const metadata = await overseer.getMetadata()
       setShareOverseer({ stub: overseer })
       setShareTarget({ ...g, ...metadata })
@@ -134,11 +134,11 @@ export function SidebarThreadsProvider({ children }: { children: ReactNode }) {
   const handleDeleteConfirm = useCallback(async () => {
     if (!deleteTarget) return
     try {
-      await deleteGadget(deleteTarget)
+      await deleteThread(deleteTarget)
       setDeleteTarget(null)
     } catch {
     }
-  }, [deleteGadget, deleteTarget])
+  }, [deleteThread, deleteTarget])
 
   const value: ThreadsContextValue = {
     search,

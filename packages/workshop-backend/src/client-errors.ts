@@ -67,7 +67,7 @@ function toReporterEvent(report: FrontendErrorReportV1): ErrorEventV1 {
     captureMechanism: report.captureMechanism,
     surface: report.surface,
     ...(report.sessionId && { sessionId: report.sessionId }),
-    ...(report.gadgetId && { gadgetId: report.gadgetId }),
+    ...(report.artifactId && { artifactId: report.artifactId }),
     ...(report.gatekeeperVendorId && { gatekeeperVendorId: report.gatekeeperVendorId }),
     ...(report.browser?.family && { browserFamily: report.browser.family }),
     ...(report.browser?.platform && { browserPlatform: report.browser.platform }),

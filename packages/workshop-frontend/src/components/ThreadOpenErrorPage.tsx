@@ -1,8 +1,8 @@
 import { Lock, MagnifyingGlass, WarningCircle } from '@phosphor-icons/react'
 import { useEffect, useId, useRef } from 'react'
 import {
-  getOpenGadgetErrorCode,
-  OPEN_GADGET_ERROR_CODES,
+  getOpenThreadErrorCode,
+  OPEN_THREAD_ERROR_CODES,
 } from '@gadgets/workshop-shared/api'
 import { WorkshopButton } from './WorkshopControls'
 
@@ -30,10 +30,10 @@ const CONTENT = {
 } as const
 
 export function classifyThreadOpenFailure(error: unknown): ThreadOpenFailureKind {
-  switch (getOpenGadgetErrorCode(error)) {
-    case OPEN_GADGET_ERROR_CODES.threadAccessDenied:
+  switch (getOpenThreadErrorCode(error)) {
+    case OPEN_THREAD_ERROR_CODES.threadAccessDenied:
       return 'access-denied'
-    case OPEN_GADGET_ERROR_CODES.threadNotFound:
+    case OPEN_THREAD_ERROR_CODES.threadNotFound:
       return 'not-found'
     default:
       return 'unexpected'

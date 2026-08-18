@@ -639,7 +639,7 @@ function formatGadgetBindingTarget(
 }
 
 // Convert raw tool calls into user-facing transcript labels.
-// What a `createGadget` call produced. Read from the gadget's own stamped output rather than
+// What a `createArtifact` call produced. Read from the gadget's own stamped output rather than
 // re-derived from the template, so any template declaring a format counts, not just promoted
 // ones. Undefined for a plain gadget, a still-streaming call, or a log predating formats.
 type ToolOutputResolver = (tc: AiToolCall) => TemplateOutput | undefined;
@@ -648,7 +648,7 @@ export function resolveToolCallOutput(
   tc: AiToolCall,
   outputOfWorkpiece: (gadgetId: WorkpieceId) => TemplateOutput | undefined,
 ): TemplateOutput | undefined {
-  if (tc.toolName !== "createGadget") return undefined;
+  if (tc.toolName !== "createArtifact") return undefined;
   const gadgetId = (tc.output as { gadgetId?: unknown } | undefined)?.gadgetId;
   return typeof gadgetId === "number" ? outputOfWorkpiece(gadgetId) : undefined;
 }
@@ -673,15 +673,15 @@ function getToolCallSummary(
           ? `${tc.input.bindingName} → ${tc.input.entrypoint}`
           : tc.input.bindingName,
       };
-    case "setGadgetBinding":
+    case "setArtifactBinding":
       return {
         verb: "Wired up",
         target: formatGadgetBindingTarget(tc.input.gadget, tc.input.name ?? tc.input.source),
       };
-    // Obsolete predecessor of `setGadgetBinding`; appears only in old chat logs.
+    // Obsolete predecessor of `setArtifactBinding`; appears only in old chat logs.
     case "saveCapsuleAsBinding":
       return { verb: "Saved resource", target: tc.input.bindingName };
-    case "createGadget": {
+    case "createArtifact": {
 
       const output = outputOf?.(tc);
       return { verb: `Created ${output?.noun ?? "gadget"}`, target: tc.input.title };
@@ -734,7 +734,7 @@ type ChangeChatMessage = Extract<AiChatMessage, { type: "changes" }>;
 type PendingTurnChanges = {
   revertFrom: number;
   through: number;
-  // Titles of gadgets created by this turn's pending changes (see `createdGadgets` on the
+  // Titles of gadgets created by this turn's pending changes (see `createdArtifacts` on the
   // "changes" message body). Reverting the turn deletes them, so discard affordances name them.
   createdGadgetTitles: string[];
 };
@@ -784,11 +784,11 @@ function describeToolCallCount(toolName: AiToolCall["toolName"], count: number):
       return `Inspected ${pluralize(count, "binding")}`;
     case "setBindingHook":
       return `Connected ${pluralize(count, "binding")}`;
-    case "setGadgetBinding":
+    case "setArtifactBinding":
       return `Wired up ${pluralize(count, "binding")}`;
     case "saveCapsuleAsBinding":
       return `Saved ${pluralize(count, "resource")}`;
-    case "createGadget":
+    case "createArtifact":
       return `Created ${pluralize(count, "gadget")}`;
     case "observeUserChanges":
       return `Observed ${pluralize(count, "change set")}`;
@@ -824,10 +824,10 @@ function getToolIcon(
     case "describeBinding":
       return MagnifyingGlass;
     case "setBindingHook":
-    case "setGadgetBinding":
+    case "setArtifactBinding":
     case "saveCapsuleAsBinding":
       return LinkSimple;
-    case "createGadget":
+    case "createArtifact":
       return Plus;
     case "listTemplates":
       return BlueprintIcon;
@@ -852,11 +852,11 @@ function getProvisionalToolLabel(toolName: AiToolCall["toolName"] | null | undef
       return "Inspecting binding";
     case "setBindingHook":
       return "Connecting binding";
-    case "setGadgetBinding":
+    case "setArtifactBinding":
       return "Wiring up binding";
     case "saveCapsuleAsBinding":
       return "Saving resource";
-    case "createGadget":
+    case "createArtifact":
       return "Creating gadget";
     case "executeCode":
       return "Running code";
@@ -883,9 +883,9 @@ function getProvisionalToolVerb(toolName: AiToolCall["toolName"]): string {
     case "editFile": return "Editing";
     case "describeBinding": return "Inspecting";
     case "setBindingHook": return "Connecting";
-    case "setGadgetBinding": return "Wiring up";
+    case "setArtifactBinding": return "Wiring up";
     case "saveCapsuleAsBinding": return "Saving";
-    case "createGadget": return "Creating gadget";
+    case "createArtifact": return "Creating gadget";
     case "executeCode": return "Running code";
     case "webFetch": return "Fetching";
     case "observeUserChanges": return "Observing user changes";
@@ -909,9 +909,9 @@ function describeProvisionalToolCount(toolName: AiToolCall["toolName"], count: n
     case "executeCode": return count === 1 ? "Running code" : `Running code ${formatTimes(count)}`;
     case "describeBinding": return `Inspecting ${pluralize(count, "binding")}`;
     case "setBindingHook": return `Connecting ${pluralize(count, "binding")}`;
-    case "setGadgetBinding": return `Wiring up ${pluralize(count, "binding")}`;
+    case "setArtifactBinding": return `Wiring up ${pluralize(count, "binding")}`;
     case "saveCapsuleAsBinding": return `Saving ${pluralize(count, "resource")}`;
-    case "createGadget": return `Creating ${pluralize(count, "gadget")}`;
+    case "createArtifact": return `Creating ${pluralize(count, "gadget")}`;
     case "observeUserChanges": return `Observing ${pluralize(count, "change set")}`;
     case "giveUp": return "Stopping";
     case "listTemplates": return "Listing templates";
@@ -3803,7 +3803,7 @@ function appendWorkParts(target: WorkMessageParts, source: WorkMessageParts) {
 function describeCreatedGadgetDeletion(titles: string[] | undefined): string {
   if (!titles || titles.length === 0) return "";
   const names = titles.map((t) => `“${t}”`).join(", ");
-  return ` (deletes ${titles.length === 1 ? "gadget" : "gadgets"} ${names})`;
+  return ` (deletes ${titles.length === 1 ? "artifact" : "artifacts"} ${names})`;
 }
 
 // Label for the per-turn discard-changes button.
@@ -3900,7 +3900,7 @@ function DiscardPendingChangesPopover({
 function transcriptToolCalls(toolCalls: AiToolCall[]): AiToolCall[] {
   // Successful creations render as cards; failed calls retain their error summary.
   return toolCalls.filter((tc) =>
-    tc.toolName !== "createGadget" || tc.output === undefined || Boolean(tc.error));
+    tc.toolName !== "createArtifact" || tc.output === undefined || Boolean(tc.error));
 }
 
 export function buildChatDisplayEntries(
@@ -4141,7 +4141,7 @@ function isPureWorkRowEntry(entry: ChatDisplayEntry): boolean {
   const m = entry.message;
   return (
     m.type === "action" ||
-    m.type === "useGadget" ||
+    m.type === "useArtifact" ||
     m.type === "agentCallback" ||
     m.type === "merge" ||
     m.type === "revert"
@@ -4417,7 +4417,7 @@ type ProvisionalToolCallState = {
   toolName: AiToolCall["toolName"] | null;
   // Human-readable target (e.g. filename) once known from the streaming input.
   target?: string;
-  // For createGadget: what it is producing, once the server has resolved the template. Tool inputs
+  // For createArtifact: what it is producing, once the server has resolved the template. Tool inputs
   // aren't streamed, so this is the only way the row can name a Doc while it is still being made.
   outputFormat?: TemplateOutput;
   code: string;
@@ -4877,7 +4877,7 @@ function ChatInterface({
     ),
     [currentMessages],
   );
-  // A gadget's stamped format, looked up by the id a finished createGadget call reports, so the
+  // A gadget's stamped format, looked up by the id a finished createArtifact call reports, so the
   // transcript can say "Created Doc" with the Doc icon.
   const resolveToolOutput = useCallback(
     (tc: AiToolCall) => resolveToolCallOutput(tc, outputOfWorkpiece),
@@ -6230,7 +6230,7 @@ function ChatInterface({
         continue;
       }
 
-      if (isObservationActionMessage(m) || m.type === "useGadget") {
+      if (isObservationActionMessage(m) || m.type === "useArtifact") {
         lastVisibleWorkSeq = m.sequence;
         attachPendingTurnChanges();
         continue;
@@ -6246,7 +6246,7 @@ function ChatInterface({
         m.author.type !== "user" &&
         (messageStates.changeStatus.get(m.sequence) ?? "pending") === "pending"
       ) {
-        const createdTitles = (m.createdGadgets ?? []).map((g) => g.title);
+        const createdTitles = (m.createdArtifacts ?? []).map((g) => g.title);
         pendingTurnChanges = pendingTurnChanges === null
           ? { revertFrom: m.sequence, through: m.sequence, createdGadgetTitles: createdTitles }
           : {
@@ -6262,7 +6262,7 @@ function ChatInterface({
   }, [currentMessages, messageStates]);
 
   // Accepted creations remain in the transcript; reverted ones disappear.
-  const createdGadgetsByTurnItemSeq = useMemo(() => {
+  const createdArtifactsByTurnItemSeq = useMemo(() => {
     const out = new Map<number, CreatedGadgetCardInfo[]>();
     let lastAgentMessageSeq: number | null = null;
     let lastVisibleWorkSeq: number | null = null;
@@ -6306,7 +6306,7 @@ function ChatInterface({
         continue;
       }
 
-      if (isObservationActionMessage(m) || m.type === "useGadget") {
+      if (isObservationActionMessage(m) || m.type === "useArtifact") {
         lastVisibleWorkSeq = m.sequence;
         attachCreations();
         continue;
@@ -6319,10 +6319,10 @@ function ChatInterface({
       }
 
       const status = messageStates.changeStatus.get(m.sequence) ?? "pending";
-      if (status === "reverted" || !m.createdGadgets) continue;
+      if (status === "reverted" || !m.createdArtifacts) continue;
       creations = [
         ...creations,
-        ...m.createdGadgets.map(({ gadgetId, title }) => ({
+        ...m.createdArtifacts.map(({ gadgetId, title }) => ({
           gadgetId,
           title,
           isPending: status === "pending",
@@ -7203,16 +7203,16 @@ function ChatInterface({
                         const isOwnChange = entry.message.author.id === currentUser?.id;
                         const actor = isOwnChange ? "You" : entry.message.author.name;
                         // A user-authored creation is recorded as a "changes" message carrying
-                        // createdGadgets over a no-op update, so label it as a creation rather
+                        // createdArtifacts over a no-op update, so label it as a creation rather
                         // than as saved edits.
-                        const createdGadgets = entry.message.createdGadgets ?? [];
-                        const label = createdGadgets.length > 0
-                          ? `${actor} created ${createdGadgets.length === 1 ? "gadget" : "gadgets"} ${
-                              createdGadgets.map((g) => `“${g.title}”`).join(", ")}`
+                        const createdArtifacts = entry.message.createdArtifacts ?? [];
+                        const label = createdArtifacts.length > 0
+                          ? `${actor} created ${createdArtifacts.length === 1 ? "artifact" : "artifacts"} ${
+                              createdArtifacts.map((g) => `“${g.title}”`).join(", ")}`
                           : `${actor} saved edits`;
                         const discardLabel = getSavedEditsDiscardLabel(
                           entry.message.sequence === lastDurablePendingChange?.sequence,
-                          createdGadgets.map((g) => g.title),
+                          createdArtifacts.map((g) => g.title),
                         );
                         return (
                           <div key={entry.key} className={`${entryTopClass} group/savedChanges max-w-[860px] py-1 text-[14px] leading-5 tracking-[-0.25px] text-kumo-subtle`}>
@@ -7252,8 +7252,8 @@ function ChatInterface({
                       if (entry.type === "workRun") {
                         const pendingChange =
                           pendingChangeByTurnItemSeq.get(entry.lastMessageSequence) ?? null;
-                        const createdGadgets =
-                          createdGadgetsByTurnItemSeq.get(entry.lastMessageSequence) ?? [];
+                        const createdArtifacts =
+                          createdArtifactsByTurnItemSeq.get(entry.lastMessageSequence) ?? [];
                         const showFooterOnGroupIndex = pendingChange
                           ? entry.toolCallGroups.length - 1
                           : -1;
@@ -7289,7 +7289,7 @@ function ChatInterface({
                                 onFooterRevert={handleRevertChanges}
                               />
                             ))}
-                            {createdGadgets.map((created) => (
+                            {createdArtifacts.map((created) => (
                               <CreatedGadgetChatCard
                                 key={created.gadgetId}
                                 gadget={created}
@@ -7390,8 +7390,8 @@ function ChatInterface({
                             const pendingChange = pendingChangeByTurnItemSeq.get(
                               actionMessageSeq,
                             ) ?? null;
-                            const createdGadgets =
-                              createdGadgetsByTurnItemSeq.get(actionMessageSeq) ?? [];
+                            const createdArtifacts =
+                              createdArtifactsByTurnItemSeq.get(actionMessageSeq) ?? [];
                             const attachActionsToToolGroups =
                               !hasMessageText &&
                               !!pendingChange &&
@@ -7471,7 +7471,7 @@ function ChatInterface({
                               )}
                             </div>
 
-                            {createdGadgets.map((created) => (
+                            {createdArtifacts.map((created) => (
                               <CreatedGadgetChatCard
                                 key={created.gadgetId}
                                 gadget={created}
@@ -7556,7 +7556,7 @@ function ChatInterface({
 
                         {msg.type === "connectionRequest" && renderConnectionRequestCard(msg)}
 
-                        {msg.type === "useGadget" && (
+                        {msg.type === "useArtifact" && (
                           <div className="max-w-[860px] text-[14px] leading-5 tracking-[-0.25px] text-kumo-subtle">
                             <Tooltip content={`Used the gadget at ${formatFullTimestamp(msg.timestamp)}`} asChild>
                               <span className="inline-flex items-center gap-3 px-1.5 py-1">

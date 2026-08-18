@@ -14,10 +14,10 @@ import {
 } from '@phosphor-icons/react'
 import { RpcStub, RpcTarget } from 'capnweb'
 import { useAuthenticatedApi } from './AuthContext'
-import { useGadgets, useWhoami } from './query/hooks'
+import { useThreads, useWhoami } from './query/hooks'
 import { persistThreadWorkpieces, readCachedWorkpieces } from './query/workpieces'
 import {
-  GadgetClient,
+  ArtifactClient,
   ConsoleLogSubscriber,
   ConsoleLogEvent,
   ActionLogEntry,
@@ -27,9 +27,9 @@ import {
   WorkpiecesSubscriber,
 } from '@gadgets/workshop-shared/api'
 import ObserverConfigModal from './ObserverConfigModal'
-import GadgetCodeInterface from './GadgetCodeInterface'
-import GadgetUI from './GadgetUI'
-import GadgetUseView from './GadgetUseView'
+import ArtifactCodeInterface from './ArtifactCodeInterface'
+import ArtifactUI from './ArtifactUI'
+import ArtifactUseView from './ArtifactUseView'
 import Connections from './Connections'
 import Activity, { type ActivityView } from './Activity'
 import { CountBadge } from './components/CountBadge'
@@ -51,7 +51,7 @@ import ThreadOpenErrorPage from './components/ThreadOpenErrorPage'
 import { useThreadOpen } from './useThreadOpen'
 import { takeThreadBoot } from './query/thread-session'
 import { reportIssue } from './errorReporting'
-import GadgetExportMenu from './GadgetExportMenu'
+import ArtifactExportMenu from './ArtifactExportMenu'
 
 const NO_GADGETS: ReadonlySet<WorkpieceId> = new Set()
 
@@ -412,7 +412,7 @@ function NoGadgetPlaceholder({ height }: { height: string }) {
 
 // ─── component ────────────────────────────────────────────────────────────────
 
-export default function GadgetEditor() {
+export default function ThreadEditor() {
   const params = useParams({ strict: false }) as { id?: string }
   const id = params.id
   const navigate = useNavigate()
@@ -447,10 +447,10 @@ export default function GadgetEditor() {
     cachedWorkpieces ? new Map(cachedWorkpieces.map(item => [item.id, item])) : new Map())
   const [workpiecesReady, setWorkpiecesReady] = useState(() => cachedWorkpieces !== undefined)
   const knownWorkpieceIdsRef = useRef<Set<WorkpieceId> | null>(null)
-  // GadgetClient stub for the currently-selected gadget workpiece. Per-gadget operations (UI
+  // ArtifactClient stub for the currently-selected gadget workpiece. Per-gadget operations (UI
   // bundle, RPC connection, bindings, templates) go through this stub. Null while the thread
   // has no (visible) gadgets.
-  const [gadget, setGadget] = useState<{ id: WorkpieceId; stub: RpcStub<GadgetClient> } | null>(null)
+  const [gadget, setGadget] = useState<{ id: WorkpieceId; stub: RpcStub<ArtifactClient> } | null>(null)
 
   // ── title editing ────────────────────────────────────────────────────────────
   const [isEditingTitle, setIsEditingTitle] = useState(false)
@@ -481,7 +481,7 @@ export default function GadgetEditor() {
     },
   })
   const { data: userInfo = null } = useWhoami()
-  const { data: gadgetList } = useGadgets()
+  const { data: gadgetList } = useThreads()
   const cachedMetadata = gadgetList?.find(item => item.id === id) ?? null
   const displayMetadata = metadata ?? cachedMetadata
 
@@ -588,7 +588,7 @@ export default function GadgetEditor() {
 
   // Escape exits fullscreen. When focus is in the workshop chrome this listener catches it
   // directly; when focus is in the gadget iframe, the iframe forwards Escape via postMessage
-  // (see GadgetUI's `onIframeEscape`).
+  // (see ArtifactUI's `onIframeEscape`).
   useEffect(() => {
     if (!isGadgetFullscreen) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -675,12 +675,12 @@ export default function GadgetEditor() {
     if (storedId !== undefined && visibleGadgets.some(g => g.id === storedId)) {
       return storedId
     }
-    const defaultId = metadata?.defaultGadgetId
+    const defaultId = metadata?.defaultArtifactId
     if (defaultId !== undefined && visibleGadgets.some(g => g.id === defaultId)) {
       return defaultId
     }
     return visibleGadgets.length > 0 ? visibleGadgets[0].id : null
-  }, [urlWorkpieceId, threadView, visibleGadgets, metadata?.defaultGadgetId])
+  }, [urlWorkpieceId, threadView, visibleGadgets, metadata?.defaultArtifactId])
 
   const selectedGadgetSummary = selectedGadgetId !== null
     ? visibleGadgets.find(g => g.id === selectedGadgetId)
@@ -701,7 +701,7 @@ export default function GadgetEditor() {
     }
 
     const acceptedApps = allGadgets.filter(g => g.chatId === undefined)
-    const fallback = acceptedApps.find(g => g.id === metadata?.defaultGadgetId)
+    const fallback = acceptedApps.find(g => g.id === metadata?.defaultArtifactId)
       ?? acceptedApps[0]
     if (fallback) {
       const normalized = { mode: 'app', appId: fallback.id } as const
@@ -712,7 +712,7 @@ export default function GadgetEditor() {
       setThreadView(normalized)
       persistThreadView(id, normalized)
     }
-  }, [id, workpiecesReady, threadView, allGadgets, metadata?.defaultGadgetId])
+  }, [id, workpiecesReady, threadView, allGadgets, metadata?.defaultArtifactId])
 
   const selectedFilesRoot = selectedGadgetSummary?.filesRoot
   // The stub for the selected gadget arrives via an effect; during a switch it briefly lags the
@@ -1144,14 +1144,14 @@ export default function GadgetEditor() {
   }, [overseer, id])
 
   // ── selected gadget stub ────────────────────────────────────────────────────────
-  // Open a GadgetClient for the selected workpiece. getGadget() pipelines on the overseer stub,
+  // Open a ArtifactClient for the selected workpiece. getArtifact() pipelines on the overseer stub,
   // so the stub is usable immediately with no extra round trip.
   useEffect(() => {
     if (!overseer || selectedGadgetId === null) {
       setGadget(null)
       return
     }
-    const stub = overseer.stub.getGadget(selectedGadgetId)
+    const stub = overseer.stub.getArtifact(selectedGadgetId)
     setGadget({ id: selectedGadgetId, stub })
     return () => { stub[Symbol.dispose]() }
   }, [overseer, selectedGadgetId])
@@ -1199,7 +1199,7 @@ export default function GadgetEditor() {
   const handleRenameWorkpiece = useCallback(async (workpieceId: WorkpieceId, title: string) => {
     if (!overseer) return
     // The subscription delivers the updated summary, so no local state change is needed.
-    const target = overseer.stub.getGadget(workpieceId)
+    const target = overseer.stub.getArtifact(workpieceId)
     try {
       await target.setTitle(title)
     } catch {
@@ -1334,7 +1334,7 @@ export default function GadgetEditor() {
   // ── "use"-role collaborators get the minimal UI: top bar + gadget iframe only ──
   if (isUseOnly) {
     return (
-      <GadgetUseView
+      <ArtifactUseView
         overseer={overseer.stub}
         gadget={selectedGadgetStub}
         selectedGadgetId={selectedGadgetId}
@@ -1595,7 +1595,7 @@ export default function GadgetEditor() {
               </div>
 
               {!paneShowsActivity && (
-                <GadgetExportMenu
+                <ArtifactExportMenu
                   gadget={selectedGadgetStub}
                   gadgetTitle={selectedGadgetSummary?.title ?? 'Gadget'}
                   chatId={previewChatId}
@@ -1652,7 +1652,7 @@ export default function GadgetEditor() {
               }
             >
               {selectedGadgetStub && !previewMode ? (
-                <GadgetUI
+                <ArtifactUI
                   key={selectedGadgetId}
                   gadget={selectedGadgetStub}
                   height={isGadgetFullscreen ? '100%' : RIGHT_CONTENT_H}
@@ -1680,7 +1680,7 @@ export default function GadgetEditor() {
 
             <div className={activeTab === 'code' ? 'h-full' : 'hidden'}>
               {overseer && selectedFilesRoot !== undefined ? (
-                <GadgetCodeInterface
+                <ArtifactCodeInterface
                   overseer={overseer.stub}
                   filesRoot={selectedFilesRoot}
                   height={RIGHT_CONTENT_H}
@@ -1741,7 +1741,7 @@ export default function GadgetEditor() {
       {previewMode && (
         <div className="absolute inset-x-0 bottom-0 bg-kumo-base z-10" style={{ top: TOPBAR_H }}>
           {selectedGadgetStub && (
-            <GadgetUI
+            <ArtifactUI
               key={selectedGadgetId}
               gadget={selectedGadgetStub}
               height="100%"

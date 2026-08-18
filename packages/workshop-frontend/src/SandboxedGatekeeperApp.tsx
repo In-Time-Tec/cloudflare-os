@@ -302,7 +302,7 @@ export default function SandboxedGatekeeperApp({ frame, gatekeeperVendorId }: {
     if (!entry || Date.now() - entry.at >= THREAD_TITLES_TTL_MS) {
       entry = {
         at: Date.now(),
-        titles: authenticatedApi.listGadgets()
+        titles: authenticatedApi.listThreads()
           .then((gadgets) => new Map(gadgets.map((gadget) => [gadget.id, gadget.title]))),
       }
       titlesRef.current = entry
